@@ -1,0 +1,16 @@
+# Build output
+/src/restock-radar
+
+# Local data
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Other
+settings.local.json

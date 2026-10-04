@@ -1,0 +1,51 @@
+# Copy to /etc/restock-radar/config.yaml (or point CONFIG_PATH at it).
+# ${VAR} references are replaced with environment variables in the ntfy block.
+
+poll_interval: 20m   # time between full passes over every item
+poll_jitter: 1m      # each wait is poll_interval +/- this, so we don't poll on a metronome
+request_delay: 2s    # average pause between items within a pass
+http_port: 8080
+db_path: /data/restock-radar.db
+# failure_alert_after: 3   # consecutive failed checks of one item before an ntfy alert
+
+ntfy:
+  url: https://ntfy.example.com
+  topic: restock-radar
+  token: ${NTFY_TOKEN}     # optional
+
+# Optional; defaults to the US store. Add regions as {id, base_url, path}.
+regions:
+  - id: us
+    base_url: https://store.ui.com
+    path: us/en
+
+# Items are the product slug from the store URL (store.ui.com/us/en/.../products/<slug>).
+# Every variant of a product is watched. Old slugs that the store redirects also work.
+# Add `region: <id>` to an item to pick a non-default region.
+items:
+  - slug: uacc-pro-max-16-rm
+  - slug: uacc-rack-panel-ocd
+  - slug: uacc-hdd-e-16tb
+  - slug: uacc-hdd-e-24tb
+  - slug: uvc-ai-360
+  - slug: uvc-g6-180
+  - slug: ai-key
+  - slug: ufp-viewport
+  - slug: uvc-ai-ptz-precision
+  - slug: uacc-usl-ant-hg
+  - slug: usl-relay
+  - slug: udr-5g-max
+  - slug: uvc-g6-entry
+  - slug: uvc-g6-pro-entry
+  - slug: ups-2u-us
+  - slug: ups-tower-us
+  - slug: u5g-max
+  - slug: unas-2
+  - slug: unas-4
+  - slug: usw-pro-aggregation
+  - slug: eav-xg-24-poe
+  - slug: utr
+  - slug: usl-gateway
+  - slug: u5g-us
+  - slug: usl-environmental
+  - slug: uvc-g6-turret
