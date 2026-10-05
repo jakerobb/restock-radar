@@ -116,6 +116,16 @@ homelab puts Authelia in front.
 There is no auth yet; the service is intended to be reachable only inside the
 homelab. Auth arrives with the mobile apps.
 
+### Metrics
+
+`GET /metrics` renders counters kept by `internal/metrics` (updated by the
+poller) plus a few gauges read from SQLite at scrape time. The one that matters
+most is `restock_radar_last_success_timestamp_seconds`: it moves only on a
+successful product fetch and starts at process start, so "no successful fetch
+for an hour" covers a blocked store, an outage, and a hung poller alike
+(`/health` can't, since it only says the process is up). `fetches_total` by
+result tells those causes apart.
+
 ### Notifications
 
 `notify.Notifier` takes a delivery-agnostic `Message` (title, body, click URL,

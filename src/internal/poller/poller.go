@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/store"
 	"github.com/jakerobb/restock-radar/internal/unistore"
@@ -29,6 +30,7 @@ type Poller struct {
 	fetcher  Fetcher
 	store    *store.Store
 	notifier notify.Notifier
+	metrics  *metrics.Metrics
 
 	// failures counts consecutive failed fetches per item; alerted records
 	// which items have already raised a "failing" alert.
@@ -41,10 +43,14 @@ type Poller struct {
 func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poller {
 	return &Poller{
 		cfg: cfg, fetcher: f, store: s, notifier: n,
+		metrics:  metrics.New(time.Now()),
 		failures: make(map[string]int),
 		alerted:  make(map[string]bool),
 	}
 }
+
+// Metrics returns the counters this poller maintains.
+func (p *Poller) Metrics() *metrics.Metrics { return p.metrics }
 
 // LastCycle returns when the last poll cycle finished, or the zero time.
 func (p *Poller) LastCycle() time.Time {
@@ -68,6 +74,7 @@ func (p *Poller) Run(ctx context.Context) {
 			backoff = 1
 		}
 		p.lastCycle.Store(time.Now().Unix())
+		p.metrics.CycleDone(time.Now())
 
 		wait := p.cfg.PollInterval*time.Duration(backoff) + jitter(p.cfg.PollJitter)
 		select {
@@ -127,6 +134,9 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.Item) error {
 	key := itemKey(it)
 	prod, err := p.fetcher.FetchProduct(ctx, region, it.Slug)
+	if ctx.Err() == nil {
+		p.metrics.Fetch(fetchResult(err), time.Now())
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Error("fetch failed", "item", key, "err", err)
@@ -145,6 +155,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 		slog.Warn("failed to link item to product", "item", key, "err", err)
 	}
 	for _, e := range events {
+		p.metrics.Event(e.Kind)
 		slog.Info("change detected", "item", key, "kind", e.Kind, "variant", e.VariantSKU,
 			"old_status", e.OldStatus, "new_status", e.NewStatus)
 	}
@@ -157,6 +168,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 func (p *Poller) recordFailure(ctx context.Context, region config.Region, it store.Item, err error) {
 	key := itemKey(it)
 	p.failures[key]++
+	p.metrics.SetItemsFailing(len(p.failures))
 	if p.failures[key] < p.cfg.FailureAlertAfter || p.alerted[key] {
 		return
 	}
@@ -179,6 +191,24 @@ func (p *Poller) recordSuccess(ctx context.Context, region config.Region, it sto
 	}
 	delete(p.failures, key)
 	delete(p.alerted, key)
+	p.metrics.SetItemsFailing(len(p.failures))
+}
+
+// fetchResult classifies a fetch outcome for the fetches_total metric.
+func fetchResult(err error) string {
+	var he *unistore.HTTPError
+	switch {
+	case err == nil:
+		return metrics.FetchOK
+	case errors.Is(err, unistore.ErrNotFound):
+		return metrics.FetchNotFound
+	case errors.Is(err, unistore.ErrSchema):
+		return metrics.FetchSchema
+	case errors.As(err, &he) && he.Blocked():
+		return metrics.FetchBlocked
+	default:
+		return metrics.FetchError
+	}
 }
 
 func (p *Poller) sendAlert(ctx context.Context, m notify.Message) {
@@ -204,9 +234,11 @@ func (p *Poller) flush(ctx context.Context) {
 		}
 		link := fmt.Sprintf("%s/%s/products/%s", region.BaseURL, region.Path, e.ProductSlug)
 		if err := p.notifier.Send(ctx, notify.FromEvent(e, link)); err != nil {
+			p.metrics.Notification(metrics.NotifyFailed)
 			slog.Error("failed to send notification; will retry", "event", e.ID, "err", err)
 			return
 		}
+		p.metrics.Notification(metrics.NotifySent)
 		if err := p.store.MarkNotified(ctx, e.ID, time.Now()); err != nil {
 			slog.Error("failed to mark event notified", "event", e.ID, "err", err)
 			return

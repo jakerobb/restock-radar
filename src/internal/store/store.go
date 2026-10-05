@@ -515,3 +515,35 @@ func (s *Store) HasProduct(ctx context.Context, region, id string) (bool, error)
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE region = ? AND id = ?`, region, id).Scan(&n)
 	return n > 0, err
 }
+
+// Stats are counts for the metrics endpoint.
+type Stats struct {
+	Items            int
+	PendingEvents    int
+	VariantsByStatus map[string]int
+}
+
+// Stats counts watched items, undelivered events, and variants by status.
+func (s *Store) Stats(ctx context.Context) (Stats, error) {
+	st := Stats{VariantsByStatus: map[string]int{}}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&st.Items); err != nil {
+		return st, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE notified_at IS NULL`).Scan(&st.PendingEvents); err != nil {
+		return st, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM variants GROUP BY status`)
+	if err != nil {
+		return st, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return st, err
+		}
+		st.VariantsByStatus[status] = n
+	}
+	return st, rows.Err()
+}

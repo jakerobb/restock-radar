@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/store"
 	"github.com/jakerobb/restock-radar/internal/unistore"
@@ -177,5 +179,44 @@ func TestAdd(t *testing.T) {
 	p.cycle(ctx)
 	if len(n.sent) != 1 {
 		t.Fatalf("want one restock notification, got %d", len(n.sent))
+	}
+}
+
+func TestMetricsFollowThePoll(t *testing.T) {
+	p, f, n := setup(t)
+	ctx := context.Background()
+	render := func() string {
+		var buf strings.Builder
+		p.Metrics().Render(&buf, metrics.Gauges{})
+		return buf.String()
+	}
+
+	p.cycle(ctx)
+	f.status = "Available"
+	p.cycle(ctx)
+	out := render()
+	for _, want := range []string{`fetches_total{result="ok"} 2`, `events_total{kind="status"} 1`, `notifications_total{result="sent"} 1`, "items_failing 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	f.err = &unistore.HTTPError{Status: 429}
+	p.cycle(ctx)
+	f.err = unistore.ErrSchema
+	p.cycle(ctx)
+	n.fail = true
+	out = render()
+	for _, want := range []string{`fetches_total{result="blocked"} 1`, `fetches_total{result="schema"} 1`, "items_failing 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	f.err = nil
+	f.status = "SoldOut"
+	p.cycle(ctx) // restock reverses; delivery fails
+	if out = render(); !strings.Contains(out, `notifications_total{result="failed"} 1`) || !strings.Contains(out, "items_failing 0") {
+		t.Errorf("failure metrics wrong:\n%s", out)
 	}
 }

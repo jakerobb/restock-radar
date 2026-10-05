@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
 	"github.com/jakerobb/restock-radar/internal/unistore"
@@ -24,6 +25,9 @@ type fakePoller struct {
 }
 
 func (f *fakePoller) LastCycle() time.Time { return time.Time{} }
+func (f *fakePoller) Metrics() *metrics.Metrics {
+	return metrics.New(time.Unix(1_000, 0))
+}
 func (f *fakePoller) Add(_ context.Context, input, region string) (*poller.AddResult, error) {
 	f.got = addItemRequest{Item: input, Region: region}
 	return f.res, f.err
@@ -173,5 +177,25 @@ func TestUnknownAPIPathIsNotTheUI(t *testing.T) {
 	srv, _ := newTestServer(t)
 	if rec := request(srv, "GET", "/v1/nope", "", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("want 404, got %d", rec.Code)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+	rec := request(srv, "GET", "/metrics", "", nil)
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain; version=0.0.4") {
+		t.Fatalf("status %d, type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"restock_radar_last_success_timestamp_seconds 1000",
+		"restock_radar_watched_items 1",                // the one pending item the fixture adds
+		`restock_radar_variants{status="Available"} 1`, // from the fixture's products
+		`restock_radar_variants{status="SoldOut"} 2`,
+		"restock_radar_pending_events 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in:\n%s", want, body)
+		}
 	}
 }
