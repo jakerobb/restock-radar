@@ -88,3 +88,38 @@ regions:
 		t.Error("unknown region should fail")
 	}
 }
+
+func TestMaxItemsAndBackupSettings(t *testing.T) {
+	cfg, err := load(t, `
+ntfy: {url: "https://n", topic: t}
+items: [{slug: a}]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxItems != 200 || cfg.BackupDir != "" || cfg.BackupInterval != 24*time.Hour || cfg.BackupKeep != 14 {
+		t.Errorf("unexpected defaults: %+v", cfg)
+	}
+
+	cfg, err = load(t, `
+ntfy: {url: "https://n", topic: t}
+max_items: 5
+backup_dir: /backups
+backup_interval: 6h
+backup_keep: 3
+`)
+	if err != nil || cfg.MaxItems != 5 || cfg.BackupDir != "/backups" || cfg.BackupInterval != 6*time.Hour || cfg.BackupKeep != 3 {
+		t.Fatalf("explicit settings not applied: %+v %v", cfg, err)
+	}
+
+	for name, yaml := range map[string]string{
+		"more items than max": "max_items: 1\nitems: [{slug: a}, {slug: b}]\n",
+		"negative max":        "max_items: -1\n",
+		"bad interval":        "backup_interval: daily\n",
+		"negative keep":       "backup_keep: -2\n",
+	} {
+		if _, err := load(t, `ntfy: {url: "https://n", topic: t}`+"\n"+yaml); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

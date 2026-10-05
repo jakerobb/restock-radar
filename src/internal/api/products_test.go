@@ -199,3 +199,70 @@ func TestMetricsEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityHeaders(t *testing.T) {
+	srv, _ := newTestServer(t)
+	for _, path := range []string{"/", "/v1/products", "/metrics", "/health", "/nope.js"} {
+		h := request(srv, "GET", path, "", nil).Header()
+		for k, want := range map[string]string{
+			"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+		} {
+			if h.Get(k) != want {
+				t.Errorf("%s: %s = %q, want %q", path, k, h.Get(k), want)
+			}
+		}
+		if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "frame-ancestors 'none'") || strings.Contains(csp, "unsafe") {
+			t.Errorf("%s: weak CSP %q", path, csp)
+		}
+	}
+	for _, path := range []string{"/v1/products", "/metrics"} {
+		if got := request(srv, "GET", path, "", nil).Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s should not be cacheable, got %q", path, got)
+		}
+	}
+}
+
+func TestAddItemIsRateLimited(t *testing.T) {
+	srv, fp := newTestServer(t)
+	fp.res = &poller.AddResult{Title: "X", Variants: 1}
+
+	for i := 0; i < addsPerWindow; i++ {
+		if rec := request(srv, "POST", "/v1/items", `{"item":"x"}`, jsonHeader); rec.Code != 200 {
+			t.Fatalf("add %d: status %d", i, rec.Code)
+		}
+	}
+	rec := request(srv, "POST", "/v1/items", `{"item":"x"}`, jsonHeader)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("want 429 with Retry-After, got %d %v", rec.Code, rec.Header())
+	}
+	// Requests that never reach the store don't use up the allowance.
+	srv2, fp2 := newTestServer(t)
+	fp2.res = &poller.AddResult{Title: "X", Variants: 1}
+	for i := 0; i < addsPerWindow+5; i++ {
+		request(srv2, "POST", "/v1/items", `{`, jsonHeader) // malformed
+	}
+	if rec := request(srv2, "POST", "/v1/items", `{"item":"x"}`, jsonHeader); rec.Code == http.StatusTooManyRequests {
+		t.Error("malformed requests must not count against the limit")
+	}
+}
+
+func TestWindowLimiterSlides(t *testing.T) {
+	now := time.Unix(0, 0)
+	l := newWindowLimiter(2, time.Minute)
+	l.now = func() time.Time { return now }
+
+	if ok, _ := l.allow(); !ok {
+		t.Fatal("first should pass")
+	}
+	now = now.Add(30 * time.Second)
+	if ok, _ := l.allow(); !ok {
+		t.Fatal("second should pass")
+	}
+	if ok, wait := l.allow(); ok || wait != 30*time.Second {
+		t.Fatalf("third should wait for the first to age out, got ok=%v wait=%v", ok, wait)
+	}
+	now = now.Add(31 * time.Second)
+	if ok, _ := l.allow(); !ok {
+		t.Fatal("should pass once the first has aged out")
+	}
+}

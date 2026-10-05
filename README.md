@@ -41,6 +41,9 @@ by that user (in Kubernetes, `fsGroup: 65532`). Run a single replica.
 | `db_path` | `/data/restock-radar.db` | |
 | `user_agent` | `restock-radar (+...)` | |
 | `failure_alert_after` | `3` | consecutive failures before an alert |
+| `max_items` | `200` | cap on the watch list; adding past it is refused |
+| `backup_dir` | | where to copy the database; empty turns backups off |
+| `backup_interval`, `backup_keep` | `24h`, `14` | how often, and how many copies to keep |
 | `ntfy.url`, `ntfy.topic`, `ntfy.token` | | `${ENV_VAR}` is expanded |
 | `regions[]` | US | `id`, `base_url`, `path` (e.g. `us/en`) |
 | `items[]` | | `slug`, optional `region`; may be empty if you add products in the UI |
@@ -84,6 +87,22 @@ GET /v1/events?region=us&since=0&limit=100
 
 Prices are integers in minor units (cents) with a `currency` field.
 
+## Backups
+
+Set `backup_dir` and the service writes a consistent copy of its database
+there every `backup_interval` (`restock-radar-YYYYMMDD-HHMMSS.db`, UTC),
+keeping the newest `backup_keep`. It uses SQLite's `VACUUM INTO`, which reads a
+snapshot, so it's safe while the poller is writing. The schedule is anchored on
+the newest existing copy, so restarting the service doesn't take extra backups.
+Point `backup_dir` at a different volume (or machine) from `db_path`, or a lost
+volume loses the backups too.
+
+What's worth backing up is the products added through the UI, which live only in
+the database (config items are in git), plus the change history.
+
+To restore: stop the service, copy the backup over `db_path` (delete any
+`-wal` and `-shm` files next to it), and start it again.
+
 ## Metrics
 
 `/metrics` serves Prometheus metrics, all prefixed `restock_radar_`:
@@ -94,12 +113,16 @@ Prices are integers in minor units (cents) with a `currency` field.
 | `last_cycle_timestamp_seconds` | gauge | when the last poll cycle finished |
 | `fetches_total{result}` | counter | `ok`, `blocked` (403/429/503), `not_found`, `schema` (JSON changed shape), `error` |
 | `events_total{kind}` | counter | changes detected: `status`, `price` |
-| `notifications_total{result}` | counter | `sent`, `failed` |
+| `notifications_total{result}` | counter | `sent`; `failed` (an attempt that will be retried); `dropped` (rejected for good by ntfy, given up on) |
 | `items_failing` | gauge | watched items whose last fetch failed |
 | `watched_items`, `pending_events` | gauge | watch list size; detected changes not yet delivered |
 | `variants{status}` | gauge | tracked variants by store status |
+| `last_backup_timestamp_seconds` | gauge | last successful backup (only when backups are on) |
+| `backups_total{result}` | counter | `ok`, `error` (only when backups are on) |
 
 To alert on a stalled poller: `time() - restock_radar_last_success_timestamp_seconds > 3600`.
+To alert on stuck notifications: `restock_radar_pending_events > 0` for longer than a poll
+interval, or any increase in `notifications_total{result="dropped"}`.
 
 ## Development
 

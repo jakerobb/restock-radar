@@ -7,6 +7,14 @@ request_delay: 2s    # average pause between items within a pass
 http_port: 8080
 db_path: /data/restock-radar.db
 # failure_alert_after: 3   # consecutive failed checks of one item before an ntfy alert
+# max_items: 200           # cap on the watch list (config items plus ones added in the UI)
+
+# Database backups: a consistent copy of the SQLite file every backup_interval,
+# keeping the newest backup_keep. Point backup_dir at a volume that isn't the one
+# holding db_path. Off unless backup_dir is set.
+# backup_dir: /backups
+# backup_interval: 24h
+# backup_keep: 14
 
 ntfy:
   url: https://ntfy.example.com

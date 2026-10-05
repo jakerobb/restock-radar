@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,6 +125,9 @@ type addItemResponse struct {
 	AlreadyTracked bool   `json:"already_tracked"`
 }
 
+// addTimeout bounds how long adding one product may spend talking to the store.
+const addTimeout = 75 * time.Second
+
 // handleAddItem adds a product, given as a slug or store URL, to the watch list.
 func (srv *Server) handleAddItem(w http.ResponseWriter, r *http.Request) {
 	// A JSON body can't be sent cross-site without a CORS preflight, which
@@ -143,7 +148,15 @@ func (srv *Server) handleAddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := srv.poller.Add(r.Context(), req.Item, req.Region)
+	if ok, wait := srv.adds.allow(); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many products added in the last minute; wait a moment and try again"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), addTimeout)
+	defer cancel()
+	res, err := srv.poller.Add(ctx, req.Item, req.Region)
 	var ue *poller.UserError
 	switch {
 	case errors.As(err, &ue):

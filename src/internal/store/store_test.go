@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -138,5 +139,63 @@ func TestSyncConfigItems(t *testing.T) {
 	items, _ = s.Items(ctx)
 	if items[0].ProductID != "p1" {
 		t.Fatalf("item not linked: %+v", items[0])
+	}
+}
+
+func TestMarkFailedStopsRetrying(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	_, _ = s.Apply(ctx, "us", product("SoldOut", 10900), now)
+	events, _ := s.Apply(ctx, "us", product("Available", 10900), now)
+
+	if err := s.MarkFailed(ctx, events[0].ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if pending, _ := s.PendingEvents(ctx); len(pending) != 0 {
+		t.Fatalf("a failed event must not be pending: %v", pending)
+	}
+	if st, _ := s.Stats(ctx); st.PendingEvents != 0 {
+		t.Fatalf("stats should not count failed events as pending: %+v", st)
+	}
+	all, _ := s.Events(ctx, "us", 0, 10)
+	if len(all) != 1 || all[0].FailedAt == nil || all[0].NotifiedAt != nil {
+		t.Fatalf("history should record the failure: %+v", all)
+	}
+}
+
+func TestMigratesFromSchemaVersion2(t *testing.T) {
+	// A database as the first deployed release left it: migrations 1 and 2 applied.
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := raw.Exec(migrations[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 2`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.Exec(`INSERT INTO events (ts, region, product_id, variant_id, kind) VALUES ('2026-10-05T00:00:00Z', 'us', 'p', 'v', 'status')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
+		t.Fatalf("user_version = %d (%v), want %d", version, err, len(migrations))
+	}
+	// The existing event is intact and still counts as pending.
+	if st, err := s.Stats(context.Background()); err != nil || st.PendingEvents != 1 {
+		t.Fatalf("existing event lost: %+v %v", st, err)
 	}
 }

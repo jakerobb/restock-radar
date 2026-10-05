@@ -33,11 +33,13 @@ func (n *Ntfy) Send(ctx context.Context, m Message) error {
 	if err != nil {
 		return err
 	}
+	// Titles come from the store, so they're untrusted: a control character in
+	// a header value makes the whole request fail before it's sent.
 	if m.Title != "" {
-		req.Header.Set("Title", m.Title)
+		req.Header.Set("Title", headerValue(m.Title))
 	}
 	if m.Click != "" {
-		req.Header.Set("Click", m.Click)
+		req.Header.Set("Click", headerValue(m.Click))
 	}
 	if m.Priority != 0 {
 		req.Header.Set("Priority", strconv.Itoa(m.Priority))
@@ -56,7 +58,28 @@ func (n *Ntfy) Send(ctx context.Context, m Message) error {
 	defer util.CloseCleanly(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("ntfy returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		err := fmt.Errorf("ntfy returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		if resp.StatusCode/100 == 4 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			return &PermanentError{Err: err}
+		}
+		return err
 	}
 	return nil
+}
+
+const maxHeaderValue = 250
+
+// headerValue strips control characters and caps the length of a value that
+// will be sent as an HTTP header.
+func headerValue(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > maxHeaderValue {
+		s = strings.ToValidUTF8(s[:maxHeaderValue], "")
+	}
+	return s
 }

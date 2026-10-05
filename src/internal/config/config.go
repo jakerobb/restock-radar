@@ -24,6 +24,9 @@ const (
 	DefaultDBPath         = "/data/restock-radar.db"
 	DefaultHTTPPort       = 8080
 	DefaultFailureAlertAt = 3
+	DefaultMaxItems       = 200
+	DefaultBackupInterval = 24 * time.Hour
+	DefaultBackupKeep     = 14
 )
 
 // DefaultPaths are the config locations tried, in order, when CONFIG_PATH isn't set.
@@ -40,9 +43,18 @@ type Config struct {
 	DBPath             string        `yaml:"db_path"`
 	UserAgent          string        `yaml:"user_agent"`
 	FailureAlertAfter  int           `yaml:"failure_alert_after"`
-	Ntfy               Ntfy          `yaml:"ntfy"`
-	Regions            []Region      `yaml:"regions"`
-	Items              []Item        `yaml:"items"`
+	// MaxItems caps the watch list, so adding products (from the UI, say)
+	// can't make a poll pass arbitrarily long or the store arbitrarily busy.
+	MaxItems int `yaml:"max_items"`
+	// BackupDir, when set, is where the database is copied to every
+	// BackupInterval, keeping the newest BackupKeep copies. Empty disables backups.
+	BackupDir            string        `yaml:"backup_dir"`
+	BackupIntervalString string        `yaml:"backup_interval"`
+	BackupInterval       time.Duration `yaml:"-"`
+	BackupKeep           int           `yaml:"backup_keep"`
+	Ntfy                 Ntfy          `yaml:"ntfy"`
+	Regions              []Region      `yaml:"regions"`
+	Items                []Item        `yaml:"items"`
 }
 
 type Ntfy struct {
@@ -159,6 +171,21 @@ func validate(cfg *Config) error {
 	if cfg.FailureAlertAfter == 0 {
 		cfg.FailureAlertAfter = DefaultFailureAlertAt
 	}
+	if cfg.MaxItems == 0 {
+		cfg.MaxItems = DefaultMaxItems
+	}
+	if cfg.MaxItems < 0 {
+		return fmt.Errorf("max_items must be positive, got %d", cfg.MaxItems)
+	}
+	if cfg.BackupInterval, err = parseDuration("backup_interval", cfg.BackupIntervalString, DefaultBackupInterval, false); err != nil {
+		return err
+	}
+	if cfg.BackupKeep == 0 {
+		cfg.BackupKeep = DefaultBackupKeep
+	}
+	if cfg.BackupKeep < 0 {
+		return fmt.Errorf("backup_keep must be positive, got %d", cfg.BackupKeep)
+	}
 
 	if cfg.Ntfy.URL == "" {
 		return fmt.Errorf("ntfy.url is required")
@@ -190,6 +217,9 @@ func validate(cfg *Config) error {
 	}
 
 	// items may be empty: products can also be added from the web UI.
+	if len(cfg.Items) > cfg.MaxItems {
+		return fmt.Errorf("%d items listed but max_items is %d", len(cfg.Items), cfg.MaxItems)
+	}
 	seen := make(map[string]bool)
 	for i, it := range cfg.Items {
 		it.Slug = strings.TrimSpace(it.Slug)

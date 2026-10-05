@@ -23,8 +23,15 @@ const (
 
 // Notification results, as the `result` label of restock_radar_notifications_total.
 const (
-	NotifySent   = "sent"
-	NotifyFailed = "failed"
+	NotifySent    = "sent"
+	NotifyFailed  = "failed"  // an attempt failed and will be retried
+	NotifyDropped = "dropped" // permanently rejected; given up on
+)
+
+// Backup results, as the `result` label of restock_radar_backups_total.
+const (
+	BackupOK    = "ok"
+	BackupError = "error"
 )
 
 type counterVec struct {
@@ -62,6 +69,9 @@ type Metrics struct {
 	fetches       *counterVec
 	events        *counterVec
 	notifications *counterVec
+	backups       *counterVec
+	backupEnabled atomic.Bool
+	lastBackup    atomic.Int64 // unix seconds
 	lastSuccess   atomic.Int64 // unix seconds
 	lastCycle     atomic.Int64 // unix seconds
 	itemsFailing  atomic.Int64
@@ -73,7 +83,8 @@ func New(now time.Time) *Metrics {
 	m := &Metrics{
 		fetches:       newCounterVec(FetchOK, FetchBlocked, FetchNotFound, FetchSchema, FetchError),
 		events:        newCounterVec("status", "price"),
-		notifications: newCounterVec(NotifySent, NotifyFailed),
+		notifications: newCounterVec(NotifySent, NotifyFailed, NotifyDropped),
+		backups:       newCounterVec(BackupOK, BackupError),
 	}
 	m.lastSuccess.Store(now.Unix())
 	return m
@@ -85,6 +96,21 @@ func (m *Metrics) Fetch(result string, now time.Time) {
 	m.fetches.inc(result)
 	if result == FetchOK {
 		m.lastSuccess.Store(now.Unix())
+	}
+}
+
+// EnableBackup turns on the backup metrics. The last-backup time starts at now,
+// so a backup job that never succeeds looks stale from the moment it starts.
+func (m *Metrics) EnableBackup(now time.Time) {
+	m.lastBackup.Store(now.Unix())
+	m.backupEnabled.Store(true)
+}
+
+// Backup records one backup attempt.
+func (m *Metrics) Backup(result string, now time.Time) {
+	m.backups.inc(result)
+	if result == BackupOK {
+		m.lastBackup.Store(now.Unix())
 	}
 }
 
@@ -134,6 +160,14 @@ func (m *Metrics) Render(w io.Writer, g Gauges) {
 
 	writeFamily(w, "restock_radar_notifications_total", "counter", "Notification delivery attempts, by result.")
 	writeLabeled(w, "restock_radar_notifications_total", "result", m.notifications.snapshot())
+
+	if m.backupEnabled.Load() {
+		writeFamily(w, "restock_radar_last_backup_timestamp_seconds", "gauge",
+			"Unix time of the last successful database backup (process start time until the first one).")
+		_, _ = fmt.Fprintf(w, "restock_radar_last_backup_timestamp_seconds %d\n", m.lastBackup.Load())
+		writeFamily(w, "restock_radar_backups_total", "counter", "Database backup attempts, by result.")
+		writeLabeled(w, "restock_radar_backups_total", "result", m.backups.snapshot())
+	}
 
 	writeFamily(w, "restock_radar_items_failing", "gauge", "Watched items whose last fetch failed.")
 	_, _ = fmt.Fprintf(w, "restock_radar_items_failing %d\n", m.itemsFailing.Load())

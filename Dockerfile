@@ -1,6 +1,7 @@
 # Compile the web UI to static files. Runs natively on the build host (the
 # output is platform-independent), and the Go build below embeds the result.
-FROM --platform=$BUILDPLATFORM node:24 AS ui
+# Base images are pinned by digest as well as tag; Renovate bumps both together.
+FROM --platform=$BUILDPLATFORM node:24.21.0@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4 AS ui
 
 WORKDIR /ui
 
@@ -12,7 +13,7 @@ RUN npm run build
 
 # Builder runs natively on the build host and cross-compiles for each target
 # platform (no QEMU emulation needed for a CGO-free Go build).
-FROM --platform=$BUILDPLATFORM golang:1.27.1 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jakerobb/restock-radar/internal/api"
 	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/dbcopy"
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
@@ -38,10 +40,12 @@ func main() {
 		"poll_jitter", cfg.PollJitter,
 		"http_port", cfg.HTTPPort,
 		"db_path", cfg.DBPath,
-		"ntfy_url", cfg.Ntfy.URL,
+		"ntfy_url", redactURL(cfg.Ntfy.URL),
 		"ntfy_topic", cfg.Ntfy.Topic,
 		"regions", len(cfg.Regions),
 		"items", len(cfg.Items),
+		"max_items", cfg.MaxItems,
+		"backup_dir", cfg.BackupDir,
 	)
 
 	st, err := store.Open(cfg.DBPath)
@@ -72,6 +76,10 @@ func main() {
 	)
 	go p.Run(ctx)
 
+	if cfg.BackupDir != "" {
+		go dbcopy.Run(ctx, st, cfg.BackupDir, cfg.BackupInterval, cfg.BackupKeep, p.Metrics())
+	}
+
 	srv := api.New(st, p, cfg)
 	slog.Info("HTTP server starting", "port", cfg.HTTPPort)
 	if err := srv.Serve(ctx); err != nil {
@@ -81,4 +89,13 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("shut down")
+}
+
+// redactURL hides any password embedded in a URL so it can be logged.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(unparseable URL)"
+	}
+	return u.Redacted()
 }

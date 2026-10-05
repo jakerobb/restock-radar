@@ -23,6 +23,14 @@ type Message struct {
 	Tags []string
 }
 
+// PermanentError means retrying the same message can't succeed because the
+// server rejected it (a 4xx other than 408 and 429). Callers should give up on
+// that message instead of retrying it forever.
+type PermanentError struct{ Err error }
+
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
+
 type Notifier interface {
 	Send(ctx context.Context, m Message) error
 }

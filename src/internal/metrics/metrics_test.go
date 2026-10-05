@@ -61,3 +61,29 @@ func TestUpdates(t *testing.T) {
 		}
 	}
 }
+
+func TestBackupMetricsOnlyWhenEnabled(t *testing.T) {
+	m := New(time.Unix(1_000, 0))
+	var buf bytes.Buffer
+	m.Render(&buf, Gauges{})
+	if strings.Contains(buf.String(), "backup") {
+		t.Fatalf("backup metrics must be absent when backups are off:\n%s", buf.String())
+	}
+
+	m.EnableBackup(time.Unix(2_000, 0))
+	m.Backup(BackupError, time.Unix(3_000, 0))
+	buf.Reset()
+	m.Render(&buf, Gauges{})
+	for _, want := range []string{"restock_radar_last_backup_timestamp_seconds 2000\n", `backups_total{result="error"} 1`, `backups_total{result="ok"} 0`} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q:\n%s", want, buf.String())
+		}
+	}
+
+	m.Backup(BackupOK, time.Unix(4_000, 0))
+	buf.Reset()
+	m.Render(&buf, Gauges{})
+	if !strings.Contains(buf.String(), "restock_radar_last_backup_timestamp_seconds 4000\n") {
+		t.Errorf("a successful backup should move the timestamp:\n%s", buf.String())
+	}
+}

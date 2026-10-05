@@ -35,10 +35,18 @@ type Server struct {
 	store  *store.Store
 	poller Poller
 	cfg    *config.Config
+	// adds limits how fast products can be added, since each one is checked
+	// against the live store.
+	adds *windowLimiter
 }
 
+const (
+	addsPerWindow = 10
+	addsWindow    = time.Minute
+)
+
 func New(s *store.Store, p Poller, cfg *config.Config) *Server {
-	return &Server{store: s, poller: p, cfg: cfg}
+	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow)}
 }
 
 func (srv *Server) Handler() http.Handler {
@@ -51,7 +59,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
 	// Everything else is the web UI; the patterns above are more specific.
 	mux.Handle("GET /", webui.Handler())
-	return mux
+	return securityHeaders(mux)
 }
 
 // Serve listens until ctx is cancelled, then shuts down gracefully.
@@ -60,6 +68,12 @@ func (srv *Server) Serve(ctx context.Context) error {
 		Addr:              fmt.Sprintf("0.0.0.0:%d", srv.cfg.HTTPPort),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// Adding a product fetches from the store, which can take most of
+		// addTimeout; the write timeout leaves room for the response after it.
+		WriteTimeout:   addTimeout + 15*time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
