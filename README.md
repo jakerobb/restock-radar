@@ -75,6 +75,7 @@ put a UI-added product in the config, the config takes it over.
 
 ```
 GET /health
+GET /metrics              Prometheus format
 GET /v1/products
 POST /v1/items            {"item": "ucg-fiber" | "<store URL>", "region": "us"}
 GET /v1/variants?region=us
@@ -82,6 +83,23 @@ GET /v1/events?region=us&since=0&limit=100
 ```
 
 Prices are integers in minor units (cents) with a `currency` field.
+
+## Metrics
+
+`/metrics` serves Prometheus metrics, all prefixed `restock_radar_`:
+
+| Metric | Type | |
+|--------|------|--|
+| `last_success_timestamp_seconds` | gauge | last successful product fetch; starts at process start time, so a poller that never succeeds still ages |
+| `last_cycle_timestamp_seconds` | gauge | when the last poll cycle finished |
+| `fetches_total{result}` | counter | `ok`, `blocked` (403/429/503), `not_found`, `schema` (JSON changed shape), `error` |
+| `events_total{kind}` | counter | changes detected: `status`, `price` |
+| `notifications_total{result}` | counter | `sent`, `failed` |
+| `items_failing` | gauge | watched items whose last fetch failed |
+| `watched_items`, `pending_events` | gauge | watch list size; detected changes not yet delivered |
+| `variants{status}` | gauge | tracked variants by store status |
+
+To alert on a stalled poller: `time() - restock_radar_last_success_timestamp_seconds > 3600`.
 
 ## Development
 

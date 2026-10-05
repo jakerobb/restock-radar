@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
 	"github.com/jakerobb/restock-radar/internal/webui"
@@ -22,6 +24,7 @@ const (
 
 // Poller is the part of the poller the server needs.
 type Poller interface {
+	Metrics() *metrics.Metrics
 	LastCycle() time.Time
 	Add(ctx context.Context, input, regionID string) (*poller.AddResult, error)
 }
@@ -43,6 +46,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/products", srv.handleProducts)
 	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
 	mux.HandleFunc("GET /health", srv.handleHealth)
+	mux.HandleFunc("GET /metrics", srv.handleMetrics)
 	mux.HandleFunc("GET /v1/variants", srv.handleVariants)
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
 	// Everything else is the web UI; the patterns above are more specific.
@@ -67,6 +71,25 @@ func (srv *Server) Serve(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
+	}
+}
+
+// handleMetrics serves Prometheus metrics: the poller's counters plus a few
+// gauges read from the database.
+func (srv *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	stats, err := srv.store.Stats(r.Context())
+	if err != nil {
+		serverError(w, "failed to read stats", err)
+		return
+	}
+	// Render into a buffer first, so a failure above can still be a 500.
+	var buf bytes.Buffer
+	srv.poller.Metrics().Render(&buf, metrics.Gauges{
+		WatchedItems: stats.Items, PendingEvents: stats.PendingEvents, VariantsByStatus: stats.VariantsByStatus,
+	})
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		slog.Error("failed to write metrics response", "err", err)
 	}
 }
 
