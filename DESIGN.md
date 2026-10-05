@@ -64,6 +64,8 @@ src/internal/unistore   store client: buildId, product fetch, redirects
 src/internal/store      SQLite: products, variants, events; migrations
 src/internal/poller     poll loop, change recording, delivery, failure alerts
 src/internal/notify     Notifier interface, message rendering, ntfy sender
+src/internal/metrics    Prometheus counters and rendering
+src/internal/dbcopy     periodic database backups (VACUUM INTO)
 src/internal/api        JSON API (state, history, add product)
 src/internal/webui      embedded static web UI
 ui/                     React + TypeScript source of the web UI
@@ -125,6 +127,33 @@ successful product fetch and starts at process start, so "no successful fetch
 for an hour" covers a blocked store, an outage, and a hung poller alike
 (`/health` can't, since it only says the process is up). `fetches_total` by
 result tells those causes apart.
+
+### Notification failures
+
+Delivery is in order and retried: an event is marked delivered only after ntfy
+accepts it. A transient failure (network error, 5xx, 429, 408) stops the pass
+and retries on the next one, so nothing is lost across an ntfy outage. A
+permanent rejection (any other 4xx) can never succeed, and retrying it would
+hold up every event behind it, so the event is marked `failed_at`, counted as
+`dropped`, and skipped. Message headers are built from store-supplied titles,
+so control characters are stripped and the length capped before sending.
+
+### Backups
+
+`internal/dbcopy` copies the database with `VACUUM INTO` into `backup_dir`
+every `backup_interval`, keeping the newest `backup_keep` copies. It exists
+because products added in the UI have no other home: config items are in git,
+but UI-added ones live only in the database. Backups are anchored on the
+newest file's age, not process start, so crash-looping doesn't churn them.
+
+### Limits and hardening
+
+The only endpoint that makes the server call out on demand is `POST /v1/items`,
+so it is rate limited (10 per minute) and bounded by `max_items` and a 75s
+timeout. The HTTP server sets read, write and idle timeouts and a header size
+cap. Every response carries a strict Content-Security-Policy (same-origin
+only, no inline script or style, no framing) plus `nosniff`, `no-referrer` and
+`X-Frame-Options: DENY`; API and metrics responses are `no-store`.
 
 ### Notifications
 

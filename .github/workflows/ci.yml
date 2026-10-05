@@ -3,6 +3,10 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+  # Advisories are published against dependencies that haven't changed, so
+  # scan weekly even when nothing is being merged.
+  schedule:
+    - cron: "23 6 * * 1"
 
 jobs:
   go:
@@ -29,6 +33,11 @@ jobs:
         run: go test ./...
         working-directory: src
 
+      # Fails on a known vulnerability in a package the code actually calls.
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        working-directory: src
+
   ui:
     runs-on: ubuntu-latest
 
@@ -52,6 +61,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Vulnerability scan
+        run: npm audit --audit-level=high
 
       - name: Test
         run: npm test

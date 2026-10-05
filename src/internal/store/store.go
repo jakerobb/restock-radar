@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -72,6 +73,11 @@ var migrations = []string{
 		added_at   TEXT NOT NULL,
 		PRIMARY KEY (region, slug)
 	);`,
+	// failed_at marks an event the notifier permanently rejected, so it stops
+	// being retried (and stops blocking the events behind it).
+	`ALTER TABLE events ADD COLUMN failed_at TEXT;
+	DROP INDEX events_pending;
+	CREATE INDEX events_pending ON events (id) WHERE notified_at IS NULL AND failed_at IS NULL;`,
 }
 
 type Store struct {
@@ -142,6 +148,7 @@ type Event struct {
 	NewRegularPriceCents *int64     `json:"new_regular_price_cents,omitempty"`
 	Currency             string     `json:"currency,omitempty"`
 	NotifiedAt           *time.Time `json:"notified_at,omitempty"`
+	FailedAt             *time.Time `json:"failed_at,omitempty"`
 }
 
 // VariantState is the latest observed state of a variant.
@@ -299,7 +306,7 @@ func insertEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 const eventSelect = `
 	SELECT e.id, e.ts, e.region, e.product_id, p.slug, p.title, e.variant_id, v.sku, v.title, e.kind,
 		e.old_status, e.new_status, e.old_price_cents, e.new_price_cents,
-		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at
+		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at
 	FROM events e
 	JOIN products p ON p.region = e.region AND p.id = e.product_id
 	JOIN variants v ON v.region = e.region AND v.id = e.variant_id`
@@ -310,17 +317,21 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var when string
-		var notified sql.NullString
+		var notified, failed sql.NullString
 		if err := rows.Scan(&e.ID, &when, &e.Region, &e.ProductID, &e.ProductSlug, &e.ProductTitle,
 			&e.VariantID, &e.VariantSKU, &e.VariantTitle, &e.Kind, &e.OldStatus, &e.NewStatus,
 			&e.OldPriceCents, &e.NewPriceCents, &e.OldRegularPriceCents, &e.NewRegularPriceCents,
-			&e.Currency, &notified); err != nil {
+			&e.Currency, &notified, &failed); err != nil {
 			return nil, err
 		}
 		e.Timestamp, _ = time.Parse(time.RFC3339, when)
 		if notified.Valid {
 			t, _ := time.Parse(time.RFC3339, notified.String)
 			e.NotifiedAt = &t
+		}
+		if failed.Valid {
+			t, _ := time.Parse(time.RFC3339, failed.String)
+			e.FailedAt = &t
 		}
 		out = append(out, e)
 	}
@@ -344,13 +355,19 @@ func (s *Store) hydrate(ctx context.Context, events []Event) ([]Event, error) {
 	return out, nil
 }
 
-// PendingEvents returns events not yet notified, oldest first.
+// PendingEvents returns events still waiting to be delivered, oldest first.
 func (s *Store) PendingEvents(ctx context.Context) ([]Event, error) {
-	rows, err := s.db.QueryContext(ctx, eventSelect+` WHERE e.notified_at IS NULL ORDER BY e.id`)
+	rows, err := s.db.QueryContext(ctx, eventSelect+` WHERE e.notified_at IS NULL AND e.failed_at IS NULL ORDER BY e.id`)
 	if err != nil {
 		return nil, err
 	}
 	return scanEvents(rows)
+}
+
+// MarkFailed gives up on delivering an event.
+func (s *Store) MarkFailed(ctx context.Context, id int64, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE events SET failed_at = ? WHERE id = ?`, ts(now), id)
+	return err
 }
 
 func (s *Store) MarkNotified(ctx context.Context, id int64, now time.Time) error {
@@ -529,7 +546,7 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&st.Items); err != nil {
 		return st, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE notified_at IS NULL`).Scan(&st.PendingEvents); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE notified_at IS NULL AND failed_at IS NULL`).Scan(&st.PendingEvents); err != nil {
 		return st, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM variants GROUP BY status`)
@@ -546,4 +563,20 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		st.VariantsByStatus[status] = n
 	}
 	return st, rows.Err()
+}
+
+// Backup writes a consistent copy of the whole database to dest while the
+// service keeps running (VACUUM INTO reads a snapshot, so it neither blocks
+// the poller's writes nor copies a half-written file). The copy is built under
+// a temporary name and renamed into place, so dest is either absent or complete.
+func (s *Store) Backup(ctx context.Context, dest string) error {
+	tmp := dest + ".tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("backing up database: %w", err)
+	}
+	return os.Rename(tmp, dest)
 }

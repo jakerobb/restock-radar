@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"],
+  "timezone": "America/Detroit",
+  "packageRules": [
+    {
+      "description": "Keep Node on the active LTS line (the Dockerfile and ui/.nvmrc must agree).",
+      "matchPackageNames": ["node"],
+      "matchDatasources": ["docker"],
+      "allowedVersions": "/^24\\./"
+    },
+    {
+      "description": "typescript-eslint doesn't support TypeScript 7 yet; hold the compiler below 6.1 until it does.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.1.0"
+    }
+  ]
+}

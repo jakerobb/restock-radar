@@ -233,7 +233,20 @@ func (p *Poller) flush(ctx context.Context) {
 			continue
 		}
 		link := fmt.Sprintf("%s/%s/products/%s", region.BaseURL, region.Path, e.ProductSlug)
-		if err := p.notifier.Send(ctx, notify.FromEvent(e, link)); err != nil {
+		err := p.notifier.Send(ctx, notify.FromEvent(e, link))
+		var rejected *notify.PermanentError
+		if errors.As(err, &rejected) {
+			// Retrying can't help, and leaving it at the head of the queue
+			// would hold up every notification behind it.
+			p.metrics.Notification(metrics.NotifyDropped)
+			slog.Error("notification permanently rejected; giving up on it", "event", e.ID, "err", err)
+			if err := p.store.MarkFailed(ctx, e.ID, time.Now()); err != nil {
+				slog.Error("failed to mark event failed", "event", e.ID, "err", err)
+				return
+			}
+			continue
+		}
+		if err != nil {
 			p.metrics.Notification(metrics.NotifyFailed)
 			slog.Error("failed to send notification; will retry", "event", e.ID, "err", err)
 			return
@@ -266,6 +279,15 @@ func (p *Poller) Add(ctx context.Context, input, regionID string) (*AddResult, e
 	region, slug, err := p.cfg.ParseItem(input, regionID)
 	if err != nil {
 		return nil, &UserError{err.Error()}
+	}
+	if p.cfg.MaxItems > 0 {
+		items, err := p.store.Items(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) >= p.cfg.MaxItems {
+			return nil, &UserError{fmt.Sprintf("the watch list is full (%d products); remove one from the config first", p.cfg.MaxItems)}
+		}
 	}
 
 	prod, err := p.fetcher.FetchProduct(ctx, region, slug)

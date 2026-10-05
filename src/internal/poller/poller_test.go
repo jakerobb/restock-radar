@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 type fakeFetcher struct {
 	status string
 	err    error
+	price  int64 // cents; 0 means the default
 }
 
 func (f *fakeFetcher) FetchProduct(context.Context, config.Region, string) (*unistore.Product, error) {
@@ -26,16 +28,21 @@ func (f *fakeFetcher) FetchProduct(context.Context, config.Region, string) (*uni
 	}
 	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Variants: []unistore.Variant{{
 		ID: "v1", SKU: "W-1", Title: "US", Status: f.status,
-		Price: &unistore.Money{Amount: 10900, Currency: "USD"},
+		Price: &unistore.Money{Amount: cmp.Or(f.price, 10900), Currency: "USD"},
 	}}}, nil
 }
 
 type fakeNotifier struct {
 	sent []notify.Message
 	fail bool
+	// reject, when set, permanently rejects messages whose title contains it.
+	reject string
 }
 
 func (n *fakeNotifier) Send(_ context.Context, m notify.Message) error {
+	if n.reject != "" && strings.Contains(m.Title, n.reject) {
+		return &notify.PermanentError{Err: errors.New("ntfy returned HTTP 400")}
+	}
 	if n.fail {
 		return errors.New("ntfy down")
 	}
@@ -218,5 +225,49 @@ func TestMetricsFollowThePoll(t *testing.T) {
 	p.cycle(ctx) // restock reverses; delivery fails
 	if out = render(); !strings.Contains(out, `notifications_total{result="failed"} 1`) || !strings.Contains(out, "items_failing 0") {
 		t.Errorf("failure metrics wrong:\n%s", out)
+	}
+}
+
+func TestPermanentRejectionDoesNotBlockTheQueue(t *testing.T) {
+	p, f, n := setup(t)
+	ctx := context.Background()
+	p.cycle(ctx) // baseline
+
+	// Two changes in one pass: a status change, then a price change. The
+	// status notification is the one the server will refuse.
+	f.status = "Available"
+	f.price = 9900
+	n.reject = "in stock"
+	p.cycle(ctx)
+
+	if len(n.sent) != 1 || !strings.Contains(n.sent[0].Title, "price changed") {
+		t.Fatalf("the price alert behind the rejected one must still go out: %+v", n.sent)
+	}
+	pending, _ := p.store.PendingEvents(ctx)
+	if len(pending) != 0 {
+		t.Fatalf("a rejected event must not stay pending: %+v", pending)
+	}
+	var buf strings.Builder
+	p.Metrics().Render(&buf, metrics.Gauges{})
+	if !strings.Contains(buf.String(), `notifications_total{result="dropped"} 1`) {
+		t.Errorf("dropped metric missing:\n%s", buf.String())
+	}
+
+	// It is not retried on later cycles.
+	n.reject = ""
+	p.cycle(ctx)
+	if len(n.sent) != 1 {
+		t.Fatalf("a dropped event must stay dropped, got %d sent", len(n.sent))
+	}
+}
+
+func TestAddRefusesWhenTheWatchListIsFull(t *testing.T) {
+	p, f, _ := setup(t)
+	f.status = "SoldOut"
+	p.cfg.MaxItems = 1 // setup already put one item on the list
+	_, err := p.Add(context.Background(), "other", "")
+	var ue *UserError
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "full") {
+		t.Fatalf("want a 'full' UserError, got %v", err)
 	}
 }
