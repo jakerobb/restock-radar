@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -188,9 +189,7 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	if len(cfg.Items) == 0 {
-		return fmt.Errorf("at least one entry in items is required")
-	}
+	// items may be empty: products can also be added from the web UI.
 	seen := make(map[string]bool)
 	for i, it := range cfg.Items {
 		it.Slug = strings.TrimSpace(it.Slug)
@@ -211,4 +210,69 @@ func validate(cfg *Config) error {
 		cfg.Items[i] = it
 	}
 	return nil
+}
+
+var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ParseItem turns user input into a region and product slug. Input is either
+// a bare slug (case-insensitive, in regionID or the first region if empty) or
+// a store URL, which picks its own region. Errors are safe to show to users.
+func (c *Config) ParseItem(input, regionID string) (Region, string, error) {
+	s := strings.TrimSpace(input)
+	if s == "" {
+		return Region{}, "", errors.New("enter a product slug or a store URL")
+	}
+
+	if strings.ContainsAny(s, "/.:") {
+		return c.parseItemURL(s)
+	}
+
+	region := c.Regions[0]
+	if regionID != "" {
+		r, ok := c.RegionByID(regionID)
+		if !ok {
+			return Region{}, "", fmt.Errorf("unknown region %q", regionID)
+		}
+		region = r
+	}
+	slug := strings.ToLower(s)
+	if !slugRe.MatchString(slug) {
+		return Region{}, "", fmt.Errorf("%q isn't a valid product slug (letters, digits and dashes only)", s)
+	}
+	return region, slug, nil
+}
+
+func (c *Config) parseItemURL(s string) (Region, string, error) {
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return Region{}, "", errors.New("couldn't read that as a URL")
+	}
+
+	path := strings.Trim(u.Path, "/")
+	var region *Region
+	for i, r := range c.Regions {
+		base, err := url.Parse(r.BaseURL)
+		if err == nil && strings.EqualFold(base.Host, u.Host) && strings.HasPrefix(path+"/", r.Path+"/") {
+			region = &c.Regions[i]
+			break
+		}
+	}
+	if region == nil {
+		return Region{}, "", errors.New("that URL isn't from a store this server watches")
+	}
+
+	segments := strings.Split(path, "/")
+	for i := len(segments) - 2; i >= 0; i-- {
+		if segments[i] == "products" {
+			slug := strings.ToLower(segments[i+1])
+			if !slugRe.MatchString(slug) {
+				break
+			}
+			return *region, slug, nil
+		}
+	}
+	return Region{}, "", errors.New("couldn't find /products/<slug> in that URL")
 }

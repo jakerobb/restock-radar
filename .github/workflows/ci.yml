@@ -29,6 +29,37 @@ jobs:
         run: go test ./...
         working-directory: src
 
+  ui:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # Typechecks, then builds the production bundle.
+      - name: Build
+        run: npm run build
+
   docker:
     runs-on: ubuntu-latest
 

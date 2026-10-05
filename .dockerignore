@@ -4,3 +4,6 @@ DESIGN.md
 .idea/
 .claude/
 config.example.yaml
+ui/node_modules/
+ui/dist/
+src/internal/webui/dist/

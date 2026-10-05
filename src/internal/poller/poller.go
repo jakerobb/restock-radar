@@ -85,13 +85,18 @@ func jitter(max time.Duration) time.Duration {
 	return time.Duration(rand.Int64N(int64(2*max))) - max
 }
 
-func itemKey(it config.Item) string { return it.Region + "/" + it.Slug }
+func itemKey(it store.Item) string { return it.Region + "/" + it.Slug }
 
 // cycle polls every item once and reports whether the store blocked us.
 func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 	p.flush(ctx) // retry anything a previous cycle failed to deliver
 
-	for i, it := range p.cfg.Items {
+	items, err := p.store.Items(ctx)
+	if err != nil {
+		slog.Error("failed to load watch list", "err", err)
+		return false
+	}
+	for i, it := range items {
 		if i > 0 && p.cfg.RequestDelay > 0 {
 			select {
 			case <-ctx.Done():
@@ -103,7 +108,11 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 			return false
 		}
 
-		region, _ := p.cfg.RegionByID(it.Region)
+		region, ok := p.cfg.RegionByID(it.Region)
+		if !ok {
+			slog.Warn("skipping item from a region no longer in config", "item", itemKey(it))
+			continue
+		}
 		err := p.pollItem(ctx, region, it)
 		var he *unistore.HTTPError
 		if errors.As(err, &he) && he.Blocked() {
@@ -115,7 +124,7 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 	return false
 }
 
-func (p *Poller) pollItem(ctx context.Context, region config.Region, it config.Item) error {
+func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.Item) error {
 	key := itemKey(it)
 	prod, err := p.fetcher.FetchProduct(ctx, region, it.Slug)
 	if err != nil {
@@ -132,6 +141,9 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it config.I
 		slog.Error("failed to record observation", "item", key, "err", err)
 		return err
 	}
+	if err := p.store.LinkItem(ctx, it.Region, it.Slug, prod.ID); err != nil {
+		slog.Warn("failed to link item to product", "item", key, "err", err)
+	}
 	for _, e := range events {
 		slog.Info("change detected", "item", key, "kind", e.Kind, "variant", e.VariantSKU,
 			"old_status", e.OldStatus, "new_status", e.NewStatus)
@@ -142,7 +154,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it config.I
 
 // recordFailure alerts once when an item has failed several times in a row,
 // which usually means the store's JSON changed shape or the slug went away.
-func (p *Poller) recordFailure(ctx context.Context, region config.Region, it config.Item, err error) {
+func (p *Poller) recordFailure(ctx context.Context, region config.Region, it store.Item, err error) {
 	key := itemKey(it)
 	p.failures[key]++
 	if p.failures[key] < p.cfg.FailureAlertAfter || p.alerted[key] {
@@ -157,7 +169,7 @@ func (p *Poller) recordFailure(ctx context.Context, region config.Region, it con
 	})
 }
 
-func (p *Poller) recordSuccess(ctx context.Context, region config.Region, it config.Item) {
+func (p *Poller) recordSuccess(ctx context.Context, region config.Region, it store.Item) {
 	key := itemKey(it)
 	if p.alerted[key] {
 		p.sendAlert(ctx, notify.Message{
@@ -201,3 +213,62 @@ func (p *Poller) flush(ctx context.Context) {
 		}
 	}
 }
+
+// AddResult describes the outcome of Add.
+type AddResult struct {
+	Region string
+	Slug   string
+	// Title is the product's display name.
+	Title string
+	// Variants is how many variants the product has.
+	Variants int
+	// AlreadyTracked is true when the product was already on the watch list.
+	AlreadyTracked bool
+}
+
+// Add validates input (a slug or a store URL) against the live store and, if
+// it names a real product, adds it to the watch list and records its current
+// state as the baseline. Errors from parsing and from a missing product are
+// safe to show to users; others are not.
+func (p *Poller) Add(ctx context.Context, input, regionID string) (*AddResult, error) {
+	region, slug, err := p.cfg.ParseItem(input, regionID)
+	if err != nil {
+		return nil, &UserError{err.Error()}
+	}
+
+	prod, err := p.fetcher.FetchProduct(ctx, region, slug)
+	if errors.Is(err, unistore.ErrNotFound) {
+		return nil, &UserError{fmt.Sprintf("the %s store has no product with slug %q", region.ID, slug)}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("checking the store: %w", err)
+	}
+
+	res := &AddResult{Region: region.ID, Slug: prod.Slug, Title: prod.Title, Variants: len(prod.Variants)}
+	if known, err := p.store.HasProduct(ctx, region.ID, prod.ID); err != nil {
+		return nil, err
+	} else if known {
+		res.AlreadyTracked = true
+		return res, nil
+	}
+
+	// Store the canonical slug rather than an alias that needs a redirect.
+	now := time.Now()
+	if _, err := p.store.AddItem(ctx, region.ID, prod.Slug, store.SourceUI, prod.ID, now); err != nil {
+		return nil, err
+	}
+	if err := p.store.LinkItem(ctx, region.ID, prod.Slug, prod.ID); err != nil {
+		return nil, err
+	}
+	// The baseline is silent, so a brand-new product never alerts on its first sighting.
+	if _, err := p.store.Apply(ctx, region.ID, prod, now); err != nil {
+		return nil, err
+	}
+	slog.Info("item added", "item", region.ID+"/"+prod.Slug, "variants", len(prod.Variants))
+	return res, nil
+}
+
+// UserError is an error whose message is meant to be shown to the user.
+type UserError struct{ Msg string }
+
+func (e *UserError) Error() string { return e.Msg }

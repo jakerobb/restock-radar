@@ -96,3 +96,47 @@ func TestVariants(t *testing.T) {
 		t.Fatalf("unexpected variants %+v err=%v", vs, err)
 	}
 }
+
+func TestSyncConfigItems(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+
+	added, removed, err := s.SyncConfigItems(ctx, []ItemKey{{"us", "a"}, {"us", "b"}}, now)
+	if err != nil || added != 2 || removed != 0 {
+		t.Fatalf("first sync: added=%d removed=%d err=%v", added, removed, err)
+	}
+	if isNew, _ := s.AddItem(ctx, "us", "ui-added", SourceUI, "", now); !isNew {
+		t.Fatal("UI item should be new")
+	}
+	if isNew, _ := s.AddItem(ctx, "us", "ui-added", SourceUI, "", now); isNew {
+		t.Fatal("duplicate add should be a no-op")
+	}
+
+	// b leaves the config, c joins; the UI item must survive.
+	added, removed, err = s.SyncConfigItems(ctx, []ItemKey{{"us", "a"}, {"us", "c"}}, now)
+	if err != nil || added != 1 || removed != 1 {
+		t.Fatalf("second sync: added=%d removed=%d err=%v", added, removed, err)
+	}
+	items, _ := s.Items(ctx)
+	var got []string
+	for _, it := range items {
+		got = append(got, it.Slug+":"+it.Source)
+	}
+	if len(got) != 3 || got[0] != "a:config" || got[1] != "c:config" || got[2] != "ui-added:ui" {
+		t.Fatalf("unexpected items: %v", got)
+	}
+
+	// A config entry that matches a UI item takes it over.
+	if added, _, _ := s.SyncConfigItems(ctx, []ItemKey{{"us", "a"}, {"us", "c"}, {"us", "ui-added"}}, now); added != 1 {
+		t.Fatalf("config should claim the UI item, added=%d", added)
+	}
+
+	if err := s.LinkItem(ctx, "us", "a", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	items, _ = s.Items(ctx)
+	if items[0].ProductID != "p1" {
+		t.Fatalf("item not linked: %+v", items[0])
+	}
+}
