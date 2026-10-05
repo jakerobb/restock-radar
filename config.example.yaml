@@ -21,7 +21,8 @@ regions:
 
 # Items are the product slug from the store URL (store.ui.com/us/en/.../products/<slug>).
 # Every variant of a product is watched. Old slugs that the store redirects also work.
-# Add `region: <id>` to an item to pick a non-default region.
+# Add `region: <id>` to an item to pick a non-default region. Items listed here are
+# kept in sync with this file; products added in the web UI are kept separately.
 items:
   - slug: uacc-pro-max-16-rm
   - slug: uacc-rack-panel-ocd

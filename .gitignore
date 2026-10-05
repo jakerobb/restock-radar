@@ -1,6 +1,10 @@
 # Build output
 /src/restock-radar
 
+# Compiled web UI, embedded into the Go binary (see ui/ and the Dockerfile)
+/src/internal/webui/dist/*
+!/src/internal/webui/dist/.gitkeep
+
 # Local data
 *.db
 *.db-shm

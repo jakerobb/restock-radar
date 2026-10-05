@@ -64,7 +64,9 @@ src/internal/unistore   store client: buildId, product fetch, redirects
 src/internal/store      SQLite: products, variants, events; migrations
 src/internal/poller     poll loop, change recording, delivery, failure alerts
 src/internal/notify     Notifier interface, message rendering, ntfy sender
-src/internal/api        read-only JSON API
+src/internal/api        JSON API (state, history, add product)
+src/internal/webui      embedded static web UI
+ui/                     React + TypeScript source of the web UI
 ```
 
 ### Storage
@@ -75,10 +77,37 @@ serialized with `BEGIN IMMEDIATE`. Tables: `products`, `variants` (latest
 state), `events` (history, with `notified_at`). Schema is versioned with
 `PRAGMA user_version`. Needs a single replica and a persistent volume.
 
+### Watch list and web UI
+
+The watch list is the `items` table, not the config. Each row has a `source`:
+`config` rows are reconciled with the config's `items` at startup (added, or
+removed if no longer listed) and `ui` rows are added through the web UI and
+never touched by the reconcile. Once a poll resolves an item, its row records
+the product ID, which is how the UI tells "tracked, waiting for first check"
+from "tracked and seen".
+
+The UI is a React + TypeScript single-page app (Vite, Tailwind CSS v4, React
+Query) in `ui/`. It is compiled to static files and embedded in the Go binary
+with `go:embed`, so deployment is still one `FROM scratch` image: the Dockerfile
+builds the UI in a Node stage and copies the result into the Go build. Next.js
+was considered and passed over; the app has no server rendering or routing
+needs, so Vite gives the same precompiled output with far less framework.
+
+Adding a product goes through `Poller.Add`: parse the slug or URL against the
+configured regions, fetch it from the store, refuse if its product ID is already
+known, otherwise add the item under the store's canonical slug and record a
+silent baseline. `POST /v1/items` requires a JSON content type, which a
+cross-site form can't send, and refuses a foreign `Origin` or
+`Sec-Fetch-Site: cross-site`. There is no authentication in the app; the
+homelab puts Authelia in front.
+
 ### API
 
 | Endpoint | Purpose |
 |----------|---------|
+| `GET /` | web UI (static files embedded in the binary) |
+| `GET /v1/products` | products with variants grouped, last sync time, pending items |
+| `POST /v1/items` | add a product: `{"item": slug-or-URL, "region": optional}` |
 | `GET /health` | liveness; includes time of last completed poll |
 | `GET /v1/variants?region=` | latest state of every variant |
 | `GET /v1/events?region=&since=&limit=` | changes with `id > since`, oldest first |
@@ -107,7 +136,7 @@ a cart link.
 
 ## Out of scope for now
 
-Per-user subscriptions, device tokens, APNs/FCM, anti-scalper measures
+Removing products from the UI, per-user subscriptions, device tokens, APNs/FCM, anti-scalper measures
 (jitter, rate limits, device attestation), Live Activities, trend analysis,
 and regions beyond the US. The event history already stores what trend
 analysis would need. The March design covers those ideas and can be mined

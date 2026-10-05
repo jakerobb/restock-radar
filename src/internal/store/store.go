@@ -62,6 +62,16 @@ var migrations = []string{
 	);
 	CREATE INDEX events_region_id ON events (region, id);
 	CREATE INDEX events_pending ON events (id) WHERE notified_at IS NULL;`,
+	// The watch list. source is "config" (owned by the config file, kept in
+	// sync with it at startup) or "ui" (added through the web UI).
+	`CREATE TABLE items (
+		region     TEXT NOT NULL,
+		slug       TEXT NOT NULL,
+		source     TEXT NOT NULL,
+		product_id TEXT,
+		added_at   TEXT NOT NULL,
+		PRIMARY KEY (region, slug)
+	);`,
 }
 
 type Store struct {
@@ -387,4 +397,121 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+const (
+	SourceConfig = "config"
+	SourceUI     = "ui"
+)
+
+// Item is one entry in the watch list.
+type Item struct {
+	Region  string
+	Slug    string
+	Source  string
+	AddedAt time.Time
+	// ProductID is set once a poll has resolved the slug to a product.
+	ProductID string
+}
+
+// ItemKey identifies a watch list entry.
+type ItemKey struct{ Region, Slug string }
+
+// SyncConfigItems makes the config's items the complete set of config-sourced
+// entries: new ones are added, and config-sourced ones no longer listed are
+// removed. Items added through the UI are never removed. It returns how many
+// were added and removed.
+func (s *Store) SyncConfigItems(ctx context.Context, keys []ItemKey, now time.Time) (added, removed int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	want := make(map[ItemKey]bool, len(keys))
+	for _, k := range keys {
+		want[k] = true
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO items (region, slug, source, added_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (region, slug) DO UPDATE SET source = excluded.source WHERE source != excluded.source`,
+			k.Region, k.Slug, SourceConfig, ts(now))
+		if err != nil {
+			return 0, 0, fmt.Errorf("syncing item %s/%s: %w", k.Region, k.Slug, err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			added++
+		}
+	}
+
+	rows, err := tx.QueryContext(ctx, `SELECT region, slug FROM items WHERE source = ?`, SourceConfig)
+	if err != nil {
+		return 0, 0, err
+	}
+	var stale []ItemKey
+	for rows.Next() {
+		var k ItemKey
+		if err := rows.Scan(&k.Region, &k.Slug); err != nil {
+			_ = rows.Close()
+			return 0, 0, err
+		}
+		if !want[k] {
+			stale = append(stale, k)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, 0, err
+	}
+	for _, k := range stale {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE region = ? AND slug = ?`, k.Region, k.Slug); err != nil {
+			return 0, 0, err
+		}
+		removed++
+	}
+	return added, removed, tx.Commit()
+}
+
+// AddItem adds an entry if it isn't already on the list, reporting whether it was new.
+func (s *Store) AddItem(ctx context.Context, region, slug, source, productID string, now time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO items (region, slug, source, product_id, added_at) VALUES (?, ?, ?, NULLIF(?, ''), ?)
+		 ON CONFLICT (region, slug) DO NOTHING`, region, slug, source, productID, ts(now))
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// LinkItem records which product a slug resolved to.
+func (s *Store) LinkItem(ctx context.Context, region, slug, productID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE items SET product_id = ? WHERE region = ? AND slug = ? AND product_id IS NOT ?`,
+		productID, region, slug, productID)
+	return err
+}
+
+// Items lists the watch list.
+func (s *Store) Items(ctx context.Context) ([]Item, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT region, slug, source, COALESCE(product_id, ''), added_at FROM items ORDER BY region, slug`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Item
+	for rows.Next() {
+		var it Item
+		var added string
+		if err := rows.Scan(&it.Region, &it.Slug, &it.Source, &it.ProductID, &added); err != nil {
+			return nil, err
+		}
+		it.AddedAt, _ = time.Parse(time.RFC3339, added)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// HasProduct reports whether a product has ever been observed.
+func (s *Store) HasProduct(ctx context.Context, region, id string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE region = ? AND id = ?`, region, id).Scan(&n)
+	return n > 0, err
 }

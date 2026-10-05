@@ -38,7 +38,6 @@ items:
 func TestValidationErrors(t *testing.T) {
 	base := `ntfy: {url: "https://n", topic: t}` + "\n"
 	cases := map[string]string{
-		"no items":       base,
 		"bad region":     base + "items:\n  - {slug: a, region: zz}\n",
 		"duplicate item": base + "items:\n  - {slug: a}\n  - {slug: a}\n",
 		"bad interval":   base + "poll_interval: soon\nitems:\n  - {slug: a}\n",
@@ -50,5 +49,42 @@ func TestValidationErrors(t *testing.T) {
 		} else if strings.TrimSpace(err.Error()) == "" {
 			t.Errorf("%s: empty error", name)
 		}
+	}
+}
+
+func TestParseItem(t *testing.T) {
+	cfg, err := load(t, `
+ntfy: {url: "https://n", topic: t}
+regions:
+  - {id: us, path: us/en}
+  - {id: gb, base_url: "https://uk.example", path: gb/en}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok := []struct{ in, region, wantRegion, wantSlug string }{
+		{"UCG-Fiber", "", "us", "ucg-fiber"},
+		{"  ucg-fiber ", "gb", "gb", "ucg-fiber"},
+		{"https://store.ui.com/us/en/category/cloud-gateways-compact/collections/cloud-gateway-fiber/products/ucg-fiber", "", "us", "ucg-fiber"},
+		{"https://store.ui.com/us/en/products/UCG-Fiber?variant=x", "", "us", "ucg-fiber"},
+		{"store.ui.com/us/en/products/ucg-fiber/", "", "us", "ucg-fiber"},
+		{"https://uk.example/gb/en/products/foo", "us", "gb", "foo"},
+	}
+	for _, c := range ok {
+		r, slug, err := cfg.ParseItem(c.in, c.region)
+		if err != nil || r.ID != c.wantRegion || slug != c.wantSlug {
+			t.Errorf("ParseItem(%q, %q) = %q, %q, %v; want %s, %s", c.in, c.region, r.ID, slug, err, c.wantRegion, c.wantSlug)
+		}
+	}
+
+	for _, in := range []string{"", "bad slug", "https://evil.example/us/en/products/x", "https://store.ui.com/us/en/category/switching",
+		"https://store.ui.com/de/en/products/x"} {
+		if _, _, err := cfg.ParseItem(in, ""); err == nil {
+			t.Errorf("ParseItem(%q) should fail", in)
+		}
+	}
+	if _, _, err := cfg.ParseItem("x", "zz"); err == nil {
+		t.Error("unknown region should fail")
 	}
 }

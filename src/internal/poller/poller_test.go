@@ -51,7 +51,9 @@ func setup(t *testing.T) (*Poller, *fakeFetcher, *fakeNotifier) {
 	cfg := &config.Config{
 		FailureAlertAfter: 2,
 		Regions:           []config.Region{{ID: "us", BaseURL: "https://store.example", Path: "us/en"}},
-		Items:             []config.Item{{Slug: "widget", Region: "us"}},
+	}
+	if _, _, err := st.SyncConfigItems(context.Background(), []store.ItemKey{{Region: "us", Slug: "widget"}}, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 	f, n := &fakeFetcher{status: "SoldOut"}, &fakeNotifier{}
 	return New(cfg, f, st, n), f, n
@@ -129,5 +131,51 @@ func TestJitterBounds(t *testing.T) {
 	}
 	if jitter(0) != 0 {
 		t.Fatal("zero jitter must be zero")
+	}
+}
+
+func TestAdd(t *testing.T) {
+	ctx := context.Background()
+	p, f, n := setup(t)
+	f.status = "SoldOut"
+
+	if _, err := p.Add(ctx, "bad slug", ""); err == nil {
+		t.Fatal("invalid input should fail")
+	} else if ue := new(UserError); !errors.As(err, &ue) {
+		t.Fatalf("want a UserError, got %T", err)
+	}
+
+	f.err = unistore.ErrNotFound
+	if _, err := p.Add(ctx, "nope", ""); err == nil || !errors.As(err, new(*UserError)) {
+		t.Fatalf("missing product should be a UserError, got %v", err)
+	}
+
+	f.err = nil
+	if _, err := p.Add(ctx, "https://other.example/us/en/products/widget", ""); err == nil {
+		t.Fatal("a URL from an unknown store should fail")
+	}
+	res, err := p.Add(ctx, "Widget", "")
+	if err != nil || res.AlreadyTracked || res.Slug != "widget" || res.Variants != 1 {
+		t.Fatalf("unexpected result %+v err=%v", res, err)
+	}
+	items, _ := p.store.Items(ctx)
+	var found bool
+	for _, it := range items {
+		found = found || (it.Slug == "widget" && it.ProductID == "p1")
+	}
+	if !found {
+		t.Fatalf("item not recorded: %+v", items)
+	}
+
+	res, err = p.Add(ctx, "widget", "")
+	if err != nil || !res.AlreadyTracked {
+		t.Fatalf("second add should report already tracked: %+v err=%v", res, err)
+	}
+
+	// The baseline is silent, and a later restock alerts normally.
+	f.status = "Available"
+	p.cycle(ctx)
+	if len(n.sent) != 1 {
+		t.Fatalf("want one restock notification, got %d", len(n.sent))
 	}
 }

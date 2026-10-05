@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens. Components never name a raw color: they use the semantic
+ * utilities these produce (bg-surface, text-muted, bg-ok-soft, ...), so the
+ * whole palette, including dark mode, is changed here and nowhere else.
+ */
+:root {
+  --canvas: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #1c2330;
+  --muted: #667085;
+  --line: #e3e7ee;
+  --accent: #1b5fd6;
+  --on-accent: #ffffff;
+  --ok: #0a7d3b;
+  --ok-soft: #e3f6ea;
+  --bad: #b42318;
+  --bad-soft: #fde8e6;
+  --warn: #8a5a00;
+  --warn-soft: #fff3d6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #12151b;
+    --surface: #1b2029;
+    --ink: #e7eaf0;
+    --muted: #98a2b3;
+    --line: #2b3240;
+    --accent: #7aa7ff;
+    --on-accent: #0b1220;
+    --ok: #5fd68a;
+    --ok-soft: #12301f;
+    --bad: #ff8a80;
+    --bad-soft: #3a1a18;
+    --warn: #f2c14e;
+    --warn-soft: #36290a;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans text-[15px] leading-snug antialiased;
+  }
+}

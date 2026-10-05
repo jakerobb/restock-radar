@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jakerobb/restock-radar/internal/api"
 	"github.com/jakerobb/restock-radar/internal/config"
@@ -50,6 +51,17 @@ func main() {
 	}
 	defer util.CloseCleanly(st)
 
+	keys := make([]store.ItemKey, len(cfg.Items))
+	for i, it := range cfg.Items {
+		keys[i] = store.ItemKey{Region: it.Region, Slug: it.Slug}
+	}
+	added, removed, err := st.SyncConfigItems(context.Background(), keys, time.Now())
+	if err != nil {
+		slog.Error("failed to sync watch list from config", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("watch list synced from config", "added", added, "removed", removed)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -60,7 +72,7 @@ func main() {
 	)
 	go p.Run(ctx)
 
-	srv := api.New(st, p.LastCycle, cfg.HTTPPort)
+	srv := api.New(st, p, cfg)
 	slog.Info("HTTP server starting", "port", cfg.HTTPPort)
 	if err := srv.Serve(ctx); err != nil {
 		slog.Error("HTTP server failed", "err", err)

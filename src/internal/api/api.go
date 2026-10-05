@@ -9,7 +9,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jakerobb/restock-radar/internal/config"
+	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/webui"
 )
 
 const (
@@ -17,30 +20,40 @@ const (
 	maxEventLimit     = 1000
 )
 
-// Server exposes current state and change history as JSON. Everything is
-// region-aware: an empty ?region= means all regions.
-type Server struct {
-	store     *store.Store
-	lastCycle func() time.Time
-	port      int
+// Poller is the part of the poller the server needs.
+type Poller interface {
+	LastCycle() time.Time
+	Add(ctx context.Context, input, regionID string) (*poller.AddResult, error)
 }
 
-func New(s *store.Store, lastCycle func() time.Time, port int) *Server {
-	return &Server{store: s, lastCycle: lastCycle, port: port}
+// Server serves the web UI and exposes current state and change history as
+// JSON. The JSON API is region-aware: an empty ?region= means all regions.
+type Server struct {
+	store  *store.Store
+	poller Poller
+	cfg    *config.Config
+}
+
+func New(s *store.Store, p Poller, cfg *config.Config) *Server {
+	return &Server{store: s, poller: p, cfg: cfg}
 }
 
 func (srv *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/products", srv.handleProducts)
+	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
 	mux.HandleFunc("GET /health", srv.handleHealth)
 	mux.HandleFunc("GET /v1/variants", srv.handleVariants)
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
+	// Everything else is the web UI; the patterns above are more specific.
+	mux.Handle("GET /", webui.Handler())
 	return mux
 }
 
 // Serve listens until ctx is cancelled, then shuts down gracefully.
 func (srv *Server) Serve(ctx context.Context) error {
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", srv.port),
+		Addr:              fmt.Sprintf("0.0.0.0:%d", srv.cfg.HTTPPort),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -60,7 +73,7 @@ func (srv *Server) Serve(ctx context.Context) error {
 // handleHealth reports the process is up and when the poller last finished.
 func (srv *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	body := map[string]any{"status": "ok"}
-	if t := srv.lastCycle(); !t.IsZero() {
+	if t := srv.poller.LastCycle(); !t.IsZero() {
 		body["last_poll"] = t.UTC()
 	}
 	writeJSON(w, http.StatusOK, body)

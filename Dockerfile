@@ -1,3 +1,15 @@
+# Compile the web UI to static files. Runs natively on the build host (the
+# output is platform-independent), and the Go build below embeds the result.
+FROM --platform=$BUILDPLATFORM node:24 AS ui
+
+WORKDIR /ui
+
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+COPY ui/ .
+RUN npm run build
+
 # Builder runs natively on the build host and cross-compiles for each target
 # platform (no QEMU emulation needed for a CGO-free Go build).
 FROM --platform=$BUILDPLATFORM golang:1.27.1 AS builder
@@ -12,6 +24,7 @@ COPY src/go.sum .
 RUN go mod download
 
 COPY src/ .
+COPY --from=ui /ui/dist/ ./internal/webui/dist/
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o restock-radar "./cmd"
 
