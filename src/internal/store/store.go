@@ -149,6 +149,12 @@ type Event struct {
 	Currency             string     `json:"currency,omitempty"`
 	NotifiedAt           *time.Time `json:"notified_at,omitempty"`
 	FailedAt             *time.Time `json:"failed_at,omitempty"`
+	// PreviousStateSince is when the variant entered OldStatus: the preceding
+	// status change, or when we first saw the variant if there was none. It is
+	// zero if unknown. PreviousStateSinceFirstSeen marks the latter case, where
+	// the true duration may be longer than we can tell.
+	PreviousStateSince          time.Time `json:"previous_state_since,omitzero"`
+	PreviousStateSinceFirstSeen bool      `json:"previous_state_since_first_seen,omitempty"`
 }
 
 // VariantState is the latest observed state of a variant.
@@ -245,7 +251,7 @@ func (s *Store) Apply(ctx context.Context, region string, p *unistore.Product, n
 			e, err := insertEvent(ctx, tx, Event{
 				Timestamp: now, Region: region, ProductID: p.ID, VariantID: v.ID, Kind: KindStatus,
 				OldStatus: oldStatus, NewStatus: v.Status, Currency: cur,
-				NewPriceCents: newPrice, NewRegularPriceCents: newRegular,
+				OldPriceCents: oldPrice, NewPriceCents: newPrice, NewRegularPriceCents: newRegular,
 			})
 			if err != nil {
 				return nil, err
@@ -306,7 +312,10 @@ func insertEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 const eventSelect = `
 	SELECT e.id, e.ts, e.region, e.product_id, p.slug, p.title, e.variant_id, v.sku, v.title, e.kind,
 		e.old_status, e.new_status, e.old_price_cents, e.new_price_cents,
-		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at
+		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at,
+		(SELECT MAX(x.ts) FROM events x WHERE x.region = e.region AND x.variant_id = e.variant_id
+			AND x.kind = 'status' AND x.id < e.id),
+		v.first_seen
 	FROM events e
 	JOIN products p ON p.region = e.region AND p.id = e.product_id
 	JOIN variants v ON v.region = e.region AND v.id = e.variant_id`
@@ -317,14 +326,21 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var when string
-		var notified, failed sql.NullString
+		var notified, failed, prevStatusTS sql.NullString
+		var firstSeen string
 		if err := rows.Scan(&e.ID, &when, &e.Region, &e.ProductID, &e.ProductSlug, &e.ProductTitle,
 			&e.VariantID, &e.VariantSKU, &e.VariantTitle, &e.Kind, &e.OldStatus, &e.NewStatus,
 			&e.OldPriceCents, &e.NewPriceCents, &e.OldRegularPriceCents, &e.NewRegularPriceCents,
-			&e.Currency, &notified, &failed); err != nil {
+			&e.Currency, &notified, &failed, &prevStatusTS, &firstSeen); err != nil {
 			return nil, err
 		}
 		e.Timestamp, _ = time.Parse(time.RFC3339, when)
+		if prevStatusTS.Valid {
+			e.PreviousStateSince, _ = time.Parse(time.RFC3339, prevStatusTS.String)
+		} else {
+			e.PreviousStateSince, _ = time.Parse(time.RFC3339, firstSeen)
+			e.PreviousStateSinceFirstSeen = true
+		}
 		if notified.Valid {
 			t, _ := time.Parse(time.RFC3339, notified.String)
 			e.NotifiedAt = &t
