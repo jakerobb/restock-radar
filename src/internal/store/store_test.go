@@ -199,3 +199,24 @@ func TestMigratesFromSchemaVersion2(t *testing.T) {
 		t.Fatalf("existing event lost: %+v %v", st, err)
 	}
 }
+
+func TestEventPreviousStateSince(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	_, _ = s.Apply(ctx, "us", product("SoldOut", 10900), t0)
+
+	// The price change in between must not reset the clock on the status.
+	_, _ = s.Apply(ctx, "us", product("SoldOut", 11900), t0.Add(time.Hour))
+	events, _ := s.Apply(ctx, "us", product("Available", 11900), t0.Add(2*time.Hour))
+	if len(events) != 1 || !events[0].PreviousStateSince.Equal(t0) || !events[0].PreviousStateSinceFirstSeen ||
+		events[0].OldPriceCents == nil || *events[0].OldPriceCents != 11900 {
+		t.Fatalf("first change should measure from first seen with the old price, got %+v", events)
+	}
+
+	t1 := t0.Add(5 * time.Hour)
+	events, _ = s.Apply(ctx, "us", product("SoldOut", 11900), t1)
+	if len(events) != 1 || !events[0].PreviousStateSince.Equal(t0.Add(2*time.Hour)) || events[0].PreviousStateSinceFirstSeen {
+		t.Fatalf("later change should measure from the previous status event, got %+v", events)
+	}
+}
