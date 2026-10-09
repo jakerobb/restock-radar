@@ -266,3 +266,28 @@ func TestWindowLimiterSlides(t *testing.T) {
 		t.Fatal("should pass once the first has aged out")
 	}
 }
+
+func TestHistory(t *testing.T) {
+	srv, _ := newTestServer(t)
+	rec := request(srv, "GET", "/v1/history", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var resp struct {
+		Variants []struct {
+			VariantID string `json:"variant_id"`
+			Points    []struct {
+				Status string `json:"status"`
+			} `json:"points"`
+		} `json:"variants"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Variants) != 3 || len(resp.Variants[0].Points) != 1 {
+		t.Fatalf("unexpected history: %s", rec.Body)
+	}
+	if rec := request(srv, "GET", "/v1/history?days=0", "", nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("days=0 gave %d", rec.Code)
+	}
+}

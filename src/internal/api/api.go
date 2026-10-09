@@ -55,6 +55,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
 	mux.HandleFunc("GET /health", srv.handleHealth)
 	mux.HandleFunc("GET /metrics", srv.handleMetrics)
+	mux.HandleFunc("GET /v1/history", srv.handleHistory)
 	mux.HandleFunc("GET /v1/variants", srv.handleVariants)
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
 	// Everything else is the web UI; the patterns above are more specific.

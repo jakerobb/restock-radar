@@ -111,6 +111,7 @@ homelab puts Authelia in front.
 | `GET /v1/products` | products with variants grouped, last sync time, pending items |
 | `POST /v1/items` | add a product: `{"item": slug-or-URL, "region": optional}` |
 | `GET /health` | liveness; includes time of last completed poll |
+| `GET /v1/history?days=` | each variant's status and price timeline over the last `days` (default 30, max 365), rebuilt from `events` |
 | `GET /v1/variants?region=` | latest state of every variant |
 | `GET /v1/events?region=&since=&limit=` | changes with `id > since`, oldest first |
 

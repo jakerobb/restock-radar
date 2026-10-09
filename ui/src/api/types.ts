@@ -50,3 +50,27 @@ export interface AddItemResult {
   variants: number
   already_tracked: boolean
 }
+
+/** A variant's state from `time` until the next point (or the end of known data). */
+export interface HistoryPoint {
+  time: string
+  status: string
+  price_cents: number | null
+}
+
+export interface VariantHistory {
+  region: string
+  variant_id: string
+  /** Nothing is known before this (when the variant was first seen)... */
+  from: string
+  /** ...or after this (when it was last checked). */
+  until: string
+  points: HistoryPoint[]
+}
+
+export interface HistoryResponse {
+  /** The window the points were selected for. */
+  since: string
+  until: string
+  variants: VariantHistory[]
+}
