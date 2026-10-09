@@ -2,6 +2,8 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"],
   "timezone": "America/Detroit",
+  "gitAuthor": "Jake Robb <jakerobb@users.noreply.github.com>",
+  "platformCommit": "disabled",
   "packageRules": [
     {
       "description": "Keep Node on the active LTS line (the Dockerfile and ui/.nvmrc must agree).",
