@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react'
 import App from './App'
-import { product, productsResponse, variant } from './test/fixtures'
+import { historyResponse, product, productsResponse, variant } from './test/fixtures'
 import { renderWithClient, stubFetch } from './test/render'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -8,6 +8,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('App', () => {
   it('shows products with grouped variants, the last sync time, and pending items', async () => {
     stubFetch({
+      'GET /v1/history?days=30': { body: historyResponse() },
       'GET /v1/products': {
         body: productsResponse({
           products: [
@@ -28,7 +29,7 @@ describe('App', () => {
   })
 
   it('says so before the first sync', async () => {
-    stubFetch({ 'GET /v1/products': { body: productsResponse({ last_sync: null, products: [] }) } })
+    stubFetch({ 'GET /v1/history?days=30': { body: historyResponse() }, 'GET /v1/products': { body: productsResponse({ last_sync: null, products: [] }) } })
     renderWithClient(<App />)
     expect(await screen.findByText(/Not synced yet/)).toBeInTheDocument()
     expect(screen.getByText(/No products tracked yet/)).toBeInTheDocument()

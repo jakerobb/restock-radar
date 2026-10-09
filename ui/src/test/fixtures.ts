@@ -1,4 +1,4 @@
-import type { Product, ProductsResponse, Variant } from '../api/types'
+import type { HistoryResponse, Product, ProductsResponse, Variant } from '../api/types'
 
 export function variant(overrides: Partial<Variant> = {}): Variant {
   return {
@@ -29,4 +29,14 @@ export function product(overrides: Partial<Product> = {}): Product {
 
 export function productsResponse(overrides: Partial<ProductsResponse> = {}): ProductsResponse {
   return { last_sync: new Date().toISOString(), regions: ['us'], products: [product()], pending: [], ...overrides }
+}
+
+export function historyResponse(overrides: Partial<HistoryResponse> = {}): HistoryResponse {
+  const until = Date.now()
+  return {
+    since: new Date(until - 30 * 86_400_000).toISOString(),
+    until: new Date(until).toISOString(),
+    variants: [],
+    ...overrides,
+  }
 }

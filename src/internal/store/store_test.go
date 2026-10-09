@@ -220,3 +220,34 @@ func TestEventPreviousStateSince(t *testing.T) {
 		t.Fatalf("later change should measure from the previous status event, got %+v", events)
 	}
 }
+
+func TestHistoryReconstructsTimeline(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	_, _ = s.Apply(ctx, "us", product("SoldOut", 10900), t0)
+	_, _ = s.Apply(ctx, "us", product("Available", 10900), t0.Add(24*time.Hour))
+	_, _ = s.Apply(ctx, "us", product("Available", 9900), t0.Add(48*time.Hour))
+	_, _ = s.Apply(ctx, "us", product("Available", 9900), t0.Add(72*time.Hour))
+
+	h, err := s.History(ctx, t0.Add(-time.Hour))
+	if err != nil || len(h) != 1 {
+		t.Fatalf("history=%+v err=%v", h, err)
+	}
+	pts := h[0].Points
+	if len(pts) != 3 || pts[0].Status != "SoldOut" || *pts[0].PriceCents != 10900 ||
+		pts[1].Status != "Available" || *pts[1].PriceCents != 10900 ||
+		pts[2].Status != "Available" || *pts[2].PriceCents != 9900 {
+		t.Fatalf("unexpected points: %+v", pts)
+	}
+	if !h[0].From.Equal(t0) || !h[0].Until.Equal(t0.Add(72*time.Hour)) {
+		t.Fatalf("from/until = %v / %v", h[0].From, h[0].Until)
+	}
+
+	// A window starting mid-way keeps only the state in effect at its start onward.
+	h, _ = s.History(ctx, t0.Add(36*time.Hour))
+	pts = h[0].Points
+	if len(pts) != 2 || pts[0].Status != "Available" || *pts[0].PriceCents != 10900 || *pts[1].PriceCents != 9900 {
+		t.Fatalf("unexpected windowed points: %+v", pts)
+	}
+}

@@ -56,7 +56,9 @@ The config is read from `CONFIG_PATH`, else `/etc/restock-radar/config.yaml`.
 The server's root (`/`) is a React app (source in [ui/](ui/)): every tracked
 product with its variants grouped underneath, each variant's stock status and
 price (struck-through regular price when discounted), and the time of the last
-sync. A form at the top adds a product by slug (`ucg-fiber`, case-insensitive)
+sync. Under each product, a chart per variant shows the last 30 days: price as
+a line, stock status as the background (green in stock, red sold out, yellow
+coming soon, white where nothing was observed). A form at the top adds a product by slug (`ucg-fiber`, case-insensitive)
 or by pasting its store URL. The product is checked against the live store
 first, so a typo is rejected with a message instead of being saved.
 
@@ -81,6 +83,7 @@ GET /health
 GET /metrics              Prometheus format
 GET /v1/products
 POST /v1/items            {"item": "ucg-fiber" | "<store URL>", "region": "us"}
+GET /v1/history?days=30   per-variant price and status timeline
 GET /v1/variants?region=us
 GET /v1/events?region=us&since=0&limit=100
 ```

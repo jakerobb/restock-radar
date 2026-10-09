@@ -1,4 +1,4 @@
-import type { AddItemRequest, AddItemResult, ProductsResponse } from './types'
+import type { AddItemRequest, AddItemResult, HistoryResponse, ProductsResponse } from './types'
 
 /** An error response from the API; message is safe to show to the user. */
 export class ApiError extends Error {
@@ -25,6 +25,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getProducts = () => request<ProductsResponse>('/v1/products')
+
+export const getHistory = (days: number) => request<HistoryResponse>(`/v1/history?days=${days}`)
 
 export const addItem = (req: AddItemRequest) =>
   request<AddItemResult>('/v1/items', {

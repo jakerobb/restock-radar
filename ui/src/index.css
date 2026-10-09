@@ -19,6 +19,12 @@
   --bad-soft: #fde8e6;
   --warn: #8a5a00;
   --warn-soft: #fff3d6;
+  /* Chart backdrops are the same in dark mode: they're data, not chrome. */
+  --stock-in: #aaffaa;
+  --stock-out: #ffaaaa;
+  --stock-soon: #ffffaa;
+  --chart-empty: #ffffff;
+  --chart-ink: #1c2330;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,6 +59,11 @@
   --color-bad-soft: var(--bad-soft);
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
+  --color-stock-in: var(--stock-in);
+  --color-stock-out: var(--stock-out);
+  --color-stock-soon: var(--stock-soon);
+  --color-chart-empty: var(--chart-empty);
+  --color-chart-ink: var(--chart-ink);
 }
 
 @layer base {
