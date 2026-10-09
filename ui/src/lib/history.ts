@@ -1,4 +1,4 @@
-import type { VariantHistory } from '../api/types'
+import type { HistoryResponse, VariantHistory } from '../api/types'
 
 const DAY_MS = 86_400_000
 
@@ -71,4 +71,19 @@ export function dayTicks(windowEnd: number, days: number, every: number): number
   const ticks: number[] = []
   for (let d = days; d >= 0; d -= every) ticks.push(windowEnd - d * DAY_MS)
   return ticks
+}
+
+/** The history response, with variants findable by region and id. */
+export interface HistoryIndex {
+  start: number
+  end: number
+  days: number
+  variant(region: string, id: string): VariantHistory | undefined
+}
+
+export function indexHistory(history: HistoryResponse): HistoryIndex {
+  const byKey = new Map(history.variants.map((h) => [`${h.region}/${h.variant_id}`, h]))
+  const start = Date.parse(history.since)
+  const end = Date.parse(history.until)
+  return { start, end, days: Math.round((end - start) / DAY_MS), variant: (region, id) => byKey.get(`${region}/${id}`) }
 }

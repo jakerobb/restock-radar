@@ -1,9 +1,16 @@
+import type { ReactNode } from 'react'
 import type { Variant } from '../api/types'
 import { VariantRow } from './VariantRow'
 
 const headerCell = 'pb-1 text-xs font-medium text-muted'
 
-export function VariantTable({ variants }: { variants: Variant[] }) {
+interface VariantTableProps {
+  variants: Variant[]
+  /** Optionally supplies the chart shown beneath a variant's row. */
+  chartFor?: (variant: Variant) => ReactNode
+}
+
+export function VariantTable({ variants, chartFor }: VariantTableProps) {
   return (
     <table className="w-full border-collapse text-left">
       <thead>
@@ -16,7 +23,7 @@ export function VariantTable({ variants }: { variants: Variant[] }) {
       </thead>
       <tbody>
         {variants.map((variant) => (
-          <VariantRow key={variant.id} variant={variant} />
+          <VariantRow key={variant.id} variant={variant} chart={chartFor?.(variant)} />
         ))}
       </tbody>
     </table>

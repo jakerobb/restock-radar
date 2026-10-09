@@ -20,11 +20,15 @@ export function statusInfo(status: string): StatusInfo {
   }
 }
 
-/** One line for a whole product: "In stock", "Sold out", or "1 of 2 in stock". */
+/**
+ * One line for a whole product: "In stock", "Sold out", "Coming soon" (any
+ * status all its variants share), or "1 of 2 in stock" when they differ.
+ */
 export function summarizeVariants(variants: Variant[]): StatusInfo {
+  const first = variants[0]
+  if (first && variants.every((v) => v.status === first.status)) return statusInfo(first.status)
+  if (!first) return statusInfo('SoldOut')
   const inStock = variants.filter((v) => v.status === 'Available').length
-  if (inStock === variants.length && inStock > 0) return statusInfo('Available')
-  if (inStock === 0) return statusInfo('SoldOut')
   return { label: `${inStock} of ${variants.length} in stock`, tone: 'warn' }
 }
 

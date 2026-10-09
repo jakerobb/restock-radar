@@ -1,5 +1,5 @@
 import type { VariantHistory } from '../api/types'
-import { buildHistoryModel, dayTicks } from './history'
+import { buildHistoryModel, dayTicks, indexHistory } from './history'
 
 const t = (day: number) => new Date(Date.UTC(2026, 9, day)).toISOString()
 const ms = (day: number) => Date.UTC(2026, 9, day)
@@ -84,5 +84,16 @@ describe('buildHistoryModel', () => {
 describe('dayTicks', () => {
   it('counts back from the end of the window', () => {
     expect(dayTicks(ms(30), 30, 10)).toEqual([ms(0), ms(10), ms(20), ms(30)])
+  })
+})
+
+describe('indexHistory', () => {
+  it('finds a variant by region and id, and reports the window', () => {
+    const h = history({ region: 'us', variant_id: 'v1' })
+    const index = indexHistory({ since: t(1), until: t(31), variants: [h] })
+    expect(index.variant('us', 'v1')).toBe(h)
+    expect(index.variant('eu', 'v1')).toBeUndefined()
+    expect(index.days).toBe(30)
+    expect(index.end).toBe(ms(31))
   })
 })

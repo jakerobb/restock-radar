@@ -21,6 +21,12 @@ describe('summarizeVariants', () => {
     expect(summarizeVariants([soldOut, soldOut]).label).toBe('Sold out')
     expect(summarizeVariants([inStock, soldOut])).toEqual({ label: '1 of 2 in stock', tone: 'warn' })
   })
+
+  it('reports a shared status that is not stock-related as itself', () => {
+    const soon = variant({ id: 'c', status: 'ComingSoon' })
+    expect(summarizeVariants([soon, soon])).toEqual({ label: 'Coming soon', tone: 'warn' })
+    expect(summarizeVariants([soon, soldOut])).toEqual({ label: '0 of 2 in stock', tone: 'warn' })
+  })
 })
 
 describe('variantName', () => {
