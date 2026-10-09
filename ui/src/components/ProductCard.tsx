@@ -1,6 +1,8 @@
-import type { HistoryResponse, Product } from '../api/types'
+import type { Product } from '../api/types'
+import type { HistoryIndex } from '../lib/history'
 import { summarizeVariants } from '../lib/status'
-import { ProductHistory } from './ProductHistory'
+import { HistoryLegend } from './HistoryLegend'
+import { VariantHistoryChart } from './VariantHistoryChart'
 import { VariantTable } from './VariantTable'
 import { Badge } from './ui/Badge'
 import { Card } from './ui/Card'
@@ -10,7 +12,7 @@ interface ProductCardProps {
   /** Label the region, which is only worth saying when there's more than one. */
   showRegion: boolean
   /** The price and stock history; the charts are left out until it's loaded. */
-  history?: HistoryResponse
+  history?: HistoryIndex
 }
 
 /** One product: its name and overall stock, with every variant beneath it. */
@@ -25,8 +27,15 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
         <Badge tone={tone}>{label}</Badge>
         {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
       </h2>
-      <VariantTable variants={product.variants} />
-      {history && <ProductHistory product={product} history={history} />}
+      {history && (
+        <div className="mb-1">
+          <HistoryLegend days={history.days} />
+        </div>
+      )}
+      <VariantTable
+        variants={product.variants}
+        chartFor={history && ((variant) => <VariantHistoryChart product={product} variant={variant} history={history} />)}
+      />
     </Card>
   )
 }
