@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addItem, getHistory, getProducts } from './client'
 
 const productsKey = ['products'] as const
@@ -10,11 +10,17 @@ export function useProducts() {
   return useQuery({ queryKey: productsKey, queryFn: getProducts, refetchInterval: REFRESH_MS })
 }
 
-/** How much history the charts show. */
-export const HISTORY_DAYS = 30
-
-export function useHistory() {
-  return useQuery({ queryKey: ['history', HISTORY_DAYS], queryFn: () => getHistory(HISTORY_DAYS), refetchInterval: REFRESH_MS })
+/**
+ * The last `days` of history. Switching ranges keeps showing the previous range's
+ * charts until the new one arrives, so the page never flashes empty.
+ */
+export function useHistory(days: number) {
+  return useQuery({
+    queryKey: ['history', days],
+    queryFn: () => getHistory(days),
+    refetchInterval: REFRESH_MS,
+    placeholderData: keepPreviousData,
+  })
 }
 
 export function useAddProduct() {

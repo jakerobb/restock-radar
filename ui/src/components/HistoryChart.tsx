@@ -1,5 +1,5 @@
 import type { HistoryModel, PriceStep } from '../lib/history'
-import { dayTicks } from '../lib/history'
+import { dayTicks, tickEveryDays } from '../lib/history'
 import { formatMoney } from '../lib/format'
 import { statusInfo } from '../lib/status'
 import type { Tone } from './ui/tone'
@@ -15,7 +15,6 @@ export const stockFill: Record<Tone, string> = {
 const WIDTH = 600
 const HEIGHT = 120
 const PLOT = { left: 52, right: 8, top: 8, bottom: 20 }
-const TICK_EVERY_DAYS = 5
 
 interface HistoryChartProps {
   model: HistoryModel
@@ -103,7 +102,7 @@ export function HistoryChart({ model, currency, label }: HistoryChartProps) {
       )}
 
       <g className="fill-muted" textAnchor="middle">
-        {dayTicks(end, days, TICK_EVERY_DAYS).map((tick, i, all) => (
+        {dayTicks(end, days, tickEveryDays(days)).map((tick, i, all) => (
           <text
             key={tick}
             x={x(tick)}
