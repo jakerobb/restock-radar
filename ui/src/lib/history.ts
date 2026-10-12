@@ -49,9 +49,13 @@ export function buildHistoryModel(history: VariantHistory, windowStart: number, 
     const end = Math.min(next ? Date.parse(next.time) : known.end, known.end)
     if (!(end > start)) return
 
-    const last = bands[bands.length - 1]
-    if (last && last.status === point.status && last.end === start) last.end = end
-    else bands.push({ start, end, status: point.status })
+    // An empty status means the stock was never observed (imported price history), so the
+    // background is left blank like any other gap.
+    if (point.status !== '') {
+      const last = bands[bands.length - 1]
+      if (last && last.status === point.status && last.end === start) last.end = end
+      else bands.push({ start, end, status: point.status })
+    }
 
     if (point.price_cents === null) return
     const cents = point.price_cents

@@ -30,6 +30,24 @@ describe('buildHistoryModel', () => {
     expect(m.priceRange).toEqual({ min: 9000, max: 10000 })
   })
 
+  it('draws the price but no band where the stock status is unknown', () => {
+    const m = buildHistoryModel(
+      history({
+        points: [
+          { time: t(1), status: '', price_cents: 500 },
+          { time: t(10), status: 'Available', price_cents: 500 },
+        ],
+      }),
+      ms(1),
+      ms(20),
+    )
+    expect(m.bands).toEqual([{ start: ms(10), end: ms(20), status: 'Available' }])
+    expect(m.runs[0]!.map((s) => [s.start, s.end])).toEqual([
+      [ms(1), ms(10)],
+      [ms(10), ms(20)],
+    ])
+  })
+
   it('leaves the time before the first sighting and after the last check empty', () => {
     const m = buildHistoryModel(
       history({ from: t(5), until: t(12), points: [{ time: t(5), status: 'Available', price_cents: 500 }] }),
