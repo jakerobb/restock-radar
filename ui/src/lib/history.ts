@@ -70,6 +70,14 @@ export function buildHistoryModel(history: VariantHistory, windowStart: number, 
   return { start: windowStart, end: windowEnd, bands, runs, priceRange: runs.length > 0 ? { min, max } : null }
 }
 
+/** Days between axis labels, chosen so a window of any length gets about six. */
+export function tickEveryDays(days: number): number {
+  if (days <= 7) return 1
+  if (days <= 30) return 5
+  if (days <= 90) return 15
+  return 60
+}
+
 /** Epoch ms of the day boundaries `daysAgo` before windowEnd, for axis ticks. */
 export function dayTicks(windowEnd: number, days: number, every: number): number[] {
   const ticks: number[] = []

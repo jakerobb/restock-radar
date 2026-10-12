@@ -1,5 +1,5 @@
 import type { VariantHistory } from '../api/types'
-import { buildHistoryModel, dayTicks, indexHistory } from './history'
+import { buildHistoryModel, dayTicks, indexHistory, tickEveryDays } from './history'
 
 const t = (day: number) => new Date(Date.UTC(2026, 9, day)).toISOString()
 const ms = (day: number) => Date.UTC(2026, 9, day)
@@ -113,5 +113,15 @@ describe('indexHistory', () => {
     expect(index.variant('eu', 'v1')).toBeUndefined()
     expect(index.days).toBe(30)
     expect(index.end).toBe(ms(31))
+  })
+})
+
+describe('tickEveryDays', () => {
+  it('keeps every offered range to a handful of axis labels', () => {
+    for (const days of [7, 30, 90, 365]) {
+      const labels = dayTicks(0, days, tickEveryDays(days)).length
+      expect(labels).toBeGreaterThanOrEqual(5)
+      expect(labels).toBeLessThanOrEqual(8)
+    }
   })
 })

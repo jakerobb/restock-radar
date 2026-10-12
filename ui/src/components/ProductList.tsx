@@ -5,8 +5,8 @@ import { indexHistory } from '../lib/history'
 import { PendingList } from './PendingList'
 import { ProductCard } from './ProductCard'
 
-export function ProductList({ data }: { data: ProductsResponse }) {
-  const { data: historyData } = useHistory()
+export function ProductList({ data, historyDays }: { data: ProductsResponse; historyDays: number }) {
+  const { data: historyData } = useHistory(historyDays)
   const history = useMemo(() => historyData && indexHistory(historyData), [historyData])
   const showRegion = data.regions.length > 1
   if (data.products.length === 0 && data.pending.length === 0) {
