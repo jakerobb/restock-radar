@@ -15,6 +15,15 @@
       "description": "typescript-eslint doesn't support TypeScript 7 yet; hold the compiler below 6.1 until it does.",
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6.1.0"
+    },
+    {
+      "description": "Keep the go directive (which CI's setup-go builds with) on the latest patch release, so govulncheck sees the fixed standard library.",
+      "matchDatasources": ["golang-version"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump"
     }
-  ]
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
 }
