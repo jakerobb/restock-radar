@@ -4,10 +4,17 @@
   "timezone": "America/Detroit",
   "gitAuthor": "Jake Robb <jakerobb@users.noreply.github.com>",
   "platformCommit": "disabled",
+  "prHourlyLimit": 0,
   "constraints": {
     "npm": "<12"
   },
   "packageRules": [
+    {
+      "description": "Don't let Renovate bump the constraints.npm cap above. It's a workaround for npm 12's EALLOWREMOTE bug (npm/cli#9800), removed by hand (see todo/FUTURE.md in the homelab repo), not by an update PR.",
+      "matchManagers": ["renovate-config"],
+      "matchPackageNames": ["npm"],
+      "enabled": false
+    },
     {
       "description": "Keep Node on the active LTS line (the Dockerfile and ui/.nvmrc must agree).",
       "matchPackageNames": ["node"],
