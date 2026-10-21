@@ -4,6 +4,9 @@
   "timezone": "America/Detroit",
   "gitAuthor": "Jake Robb <jakerobb@users.noreply.github.com>",
   "platformCommit": "disabled",
+  "constraints": {
+    "npm": "<12"
+  },
   "packageRules": [
     {
       "description": "Keep Node on the active LTS line (the Dockerfile and ui/.nvmrc must agree).",
