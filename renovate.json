@@ -25,5 +25,10 @@
   ],
   "vulnerabilityAlerts": {
     "enabled": true
+  },
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["at any time"]
   }
 }
