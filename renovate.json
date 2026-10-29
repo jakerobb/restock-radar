@@ -16,10 +16,9 @@
       "enabled": false
     },
     {
-      "description": "Keep Node on the active LTS line (the Dockerfile and ui/.nvmrc must agree).",
-      "matchPackageNames": ["node"],
-      "matchDatasources": ["docker"],
-      "allowedVersions": "/^24\\./"
+      "description": "Move Node (the Dockerfile image and ui/.nvmrc, which must agree) and @types/node together. No version pin: Renovate's node versioning only treats a major as stable once it reaches LTS, so a new LTS line is proposed on its own.",
+      "matchPackageNames": ["node", "@types/node"],
+      "groupName": "Node.js"
     },
     {
       "description": "typescript-eslint doesn't support TypeScript 7 yet; hold the compiler below 6.1 until it does.",
