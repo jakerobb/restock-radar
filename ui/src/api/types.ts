@@ -14,6 +14,8 @@ export interface Variant {
   restock_eta?: string
   last_checked: string
   last_changed: string
+  /** When the variant was first seen, i.e. when it started being tracked. */
+  first_seen: string
 }
 
 export interface Product {

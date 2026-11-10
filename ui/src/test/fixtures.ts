@@ -11,6 +11,7 @@ export function variant(overrides: Partial<Variant> = {}): Variant {
     currency: 'USD',
     last_checked: new Date().toISOString(),
     last_changed: new Date().toISOString(),
+    first_seen: new Date().toISOString(),
     ...overrides,
   }
 }

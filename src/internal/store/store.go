@@ -173,6 +173,7 @@ type VariantState struct {
 	RestockETA        string    `json:"restock_eta,omitempty"`
 	LastChecked       time.Time `json:"last_checked"`
 	LastChanged       time.Time `json:"last_changed"`
+	FirstSeen         time.Time `json:"first_seen"`
 }
 
 func cents(m *unistore.Money) *int64 {
@@ -406,7 +407,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.region, v.product_id, p.slug, p.title, v.id, v.sku, v.title, v.status, v.price_cents,
-			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed
+			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
 		WHERE ? = '' OR v.region = ?
@@ -419,14 +420,15 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	var out []VariantState
 	for rows.Next() {
 		var v VariantState
-		var checked, changed string
+		var checked, changed, first string
 		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.Currency, &v.RestockETA,
-			&checked, &changed); err != nil {
+			&checked, &changed, &first); err != nil {
 			return nil, err
 		}
 		v.LastChecked, _ = time.Parse(time.RFC3339, checked)
 		v.LastChanged, _ = time.Parse(time.RFC3339, changed)
+		v.FirstSeen, _ = time.Parse(time.RFC3339, first)
 		out = append(out, v)
 	}
 	return out, rows.Err()
