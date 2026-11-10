@@ -23,6 +23,8 @@ export interface Product {
   id: string
   slug: string
   title: string
+  /** Product type for filtering (Gateways, Switches, ...); empty when not yet known. */
+  type: string
   url: string
   variants: Variant[]
 }

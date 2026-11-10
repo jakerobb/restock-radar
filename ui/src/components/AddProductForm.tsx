@@ -18,7 +18,7 @@ export function AddProductForm({ regions }: { regions: string[] }) {
   }
 
   return (
-    <div className="mb-5">
+    <div>
       <form className="flex flex-wrap gap-2" onSubmit={submit}>
         <TextInput
           className="min-w-64 flex-1"
@@ -27,7 +27,8 @@ export function AddProductForm({ regions }: { regions: string[] }) {
             setItem(e.target.value)
             if (!add.isIdle) add.reset()
           }}
-          placeholder="Add a product: slug (ucg-fiber) or store URL"
+          placeholder="Slug (ucg-fiber) or store URL"
+          autoFocus
           aria-label="Product slug or URL"
           autoComplete="off"
           required

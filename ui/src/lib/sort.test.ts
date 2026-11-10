@@ -8,6 +8,7 @@ function product(title: string, price: number | null, seen: string, changed: str
     id: title,
     slug: title,
     title,
+    type: '',
     url: '',
     variants: [
       {
