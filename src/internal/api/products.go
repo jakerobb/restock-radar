@@ -29,6 +29,7 @@ type variantJSON struct {
 	RestockETA        string    `json:"restock_eta,omitempty"`
 	LastChecked       time.Time `json:"last_checked"`
 	LastChanged       time.Time `json:"last_changed"`
+	FirstSeen         time.Time `json:"first_seen"`
 }
 
 type productJSON struct {
@@ -55,7 +56,7 @@ type productsResponse struct {
 }
 
 // handleProducts returns every tracked product with its variants grouped
-// beneath it, ordered by title, plus what the page header needs.
+// beneath it, ordered by title (the UI re-sorts as chosen), plus what the page header needs.
 func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 	variants, err := srv.store.Variants(r.Context(), "")
 	if err != nil {
@@ -93,7 +94,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		resp.Products[i].Variants = append(resp.Products[i].Variants, variantJSON{
 			ID: v.VariantID, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,
 			PriceCents: v.PriceCents, RegularPriceCents: v.RegularPriceCents, Currency: v.Currency,
-			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged,
+			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, FirstSeen: v.FirstSeen,
 		})
 	}
 	sort.Slice(resp.Products, func(i, j int) bool {
