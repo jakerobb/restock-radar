@@ -33,10 +33,12 @@ type variantJSON struct {
 }
 
 type productJSON struct {
-	Region   string        `json:"region"`
-	ID       string        `json:"id"`
-	Slug     string        `json:"slug"`
-	Title    string        `json:"title"`
+	Region string `json:"region"`
+	ID     string `json:"id"`
+	Slug   string `json:"slug"`
+	Title  string `json:"title"`
+	// Type is the product type shown in the UI filter (Gateways, Switches, ...); empty when unknown.
+	Type     string        `json:"type"`
 	URL      string        `json:"url"`
 	Variants []variantJSON `json:"variants"`
 }
@@ -83,7 +85,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		key := [2]string{v.Region, v.ProductID}
 		i, ok := index[key]
 		if !ok {
-			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Variants: []variantJSON{}}
+			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Variants: []variantJSON{}}
 			if reg, ok := srv.cfg.RegionByID(v.Region); ok {
 				p.URL = fmt.Sprintf("%s/%s/products/%s", reg.BaseURL, reg.Path, url.PathEscape(v.ProductSlug))
 			}

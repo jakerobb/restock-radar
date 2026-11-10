@@ -67,10 +67,12 @@ type Variant struct {
 }
 
 type Product struct {
-	ID       string
-	Slug     string
-	Name     string
-	Title    string
+	ID    string
+	Slug  string
+	Name  string
+	Title string
+	// Category is the store's category id (e.g. "switching-enterprise"); empty when unknown.
+	Category string
 	Variants []Variant
 }
 
@@ -139,7 +141,12 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 			PageProps struct {
 				Redirect         string `json:"__N_REDIRECT"`
 				CurrentProductID string `json:"currentProductId"`
-				Collection       struct {
+				Category         struct {
+					Current struct {
+						ID string `json:"id"`
+					} `json:"currentCategory"`
+				} `json:"category"`
+				Collection struct {
 					Products []rawProduct `json:"products"`
 				} `json:"collection"`
 			} `json:"pageProps"`
@@ -154,7 +161,11 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 			path = strings.SplitN(r, "?", 2)[0]
 			continue
 		}
-		return parseProduct(page.PageProps.CurrentProductID, page.PageProps.Collection.Products, slug)
+		prod, stale, err := parseProduct(page.PageProps.CurrentProductID, page.PageProps.Collection.Products, slug)
+		if prod != nil {
+			prod.Category = page.PageProps.Category.Current.ID
+		}
+		return prod, stale, err
 	}
 	return nil, false, fmt.Errorf("%w: too many redirects for slug %q", ErrSchema, slug)
 }

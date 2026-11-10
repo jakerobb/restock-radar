@@ -78,6 +78,8 @@ var migrations = []string{
 	`ALTER TABLE events ADD COLUMN failed_at TEXT;
 	DROP INDEX events_pending;
 	CREATE INDEX events_pending ON events (id) WHERE notified_at IS NULL AND failed_at IS NULL;`,
+	// The store's category id, which the UI groups products by.
+	`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -163,6 +165,7 @@ type VariantState struct {
 	ProductID         string    `json:"product_id"`
 	ProductSlug       string    `json:"product_slug"`
 	ProductTitle      string    `json:"product_title"`
+	ProductCategory   string    `json:"product_category"`
 	VariantID         string    `json:"variant_id"`
 	SKU               string    `json:"sku"`
 	VariantTitle      string    `json:"variant_title"`
@@ -213,9 +216,10 @@ func (s *Store) Apply(ctx context.Context, region string, p *unistore.Product, n
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO products (region, id, slug, name, title) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title`,
-		region, p.ID, p.Slug, p.Name, p.Title)
+		INSERT INTO products (region, id, slug, name, title, category) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
+			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END`,
+		region, p.ID, p.Slug, p.Name, p.Title, p.Category)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}
@@ -406,7 +410,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.category, v.id, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
@@ -421,7 +425,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	for rows.Next() {
 		var v VariantState
 		var checked, changed, first string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.VariantID, &v.SKU,
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
