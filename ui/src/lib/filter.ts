@@ -72,6 +72,32 @@ export function tagCounts(products: Product[], counted: Product[] = products): T
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
 }
 
+export interface TagGroupCounts {
+  prefix: string
+  options: TagCount[]
+}
+
+/** The prefix of a `prefix:name` tag (feature:4k -> feature); null for plain tags. */
+export function tagPrefix(tag: string): string | null {
+  const i = tag.indexOf(':')
+  return i > 0 && i < tag.length - 1 ? tag.slice(0, i) : null
+}
+
+/** Splits tags into plain ones and `prefix:` groups (alphabetical by prefix); each keeps its incoming order. */
+export function groupTags(tags: TagCount[]): { plain: TagCount[]; groups: TagGroupCounts[] } {
+  const plain: TagCount[] = []
+  const byPrefix = new Map<string, TagCount[]>()
+  for (const t of tags) {
+    const prefix = tagPrefix(t.tag)
+    if (prefix === null) plain.push(t)
+    else byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), t])
+  }
+  const groups = [...byPrefix]
+    .map(([prefix, options]) => ({ prefix, options }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix))
+  return { plain, groups }
+}
+
 export interface TypeCount {
   type: string
   count: number

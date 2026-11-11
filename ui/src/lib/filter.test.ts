@@ -1,4 +1,4 @@
-import { filterProducts, isInStock, matchesQuery, tagCounts, typeCounts } from './filter'
+import { filterProducts, groupTags, isInStock, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -104,5 +104,23 @@ describe('tagCounts with a filtered subset', () => {
       { tag: 'x', count: 0 },
       { tag: 'y', count: 0 },
     ])
+  })
+})
+
+describe('groupTags', () => {
+  it('splits on the first colon and sorts groups by prefix', () => {
+    expect(tagPrefix('feature:4k')).toBe('feature')
+    expect(tagPrefix('a:b:c')).toBe('a')
+    expect(tagPrefix('plain')).toBeNull()
+    expect(tagPrefix(':odd')).toBeNull()
+    expect(tagPrefix('odd:')).toBeNull()
+    const t = (tag: string, count = 1) => ({ tag, count })
+    expect(groupTags([t('sale', 3), t('feature:poe', 2), t('color:red'), t('feature:4k')])).toEqual({
+      plain: [t('sale', 3)],
+      groups: [
+        { prefix: 'color', options: [t('color:red')] },
+        { prefix: 'feature', options: [t('feature:poe', 2), t('feature:4k')] },
+      ],
+    })
   })
 })
