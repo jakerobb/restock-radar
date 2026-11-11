@@ -351,3 +351,33 @@ func TestProductTags(t *testing.T) {
 		t.Fatalf("tags the store dropped should go away: %v", got)
 	}
 }
+
+func TestProductCollection(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	collectionOf := func() string {
+		t.Helper()
+		vs, err := s.Variants(ctx, "us")
+		if err != nil || len(vs) != 1 {
+			t.Fatalf("variants=%v err=%v", vs, err)
+		}
+		return vs[0].ProductCollection
+	}
+
+	p := product("Available", 10900)
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := collectionOf(); got != "" {
+		t.Fatalf("expected no collection, got %q", got)
+	}
+	p.Collection = "power-distribution"
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := collectionOf(); got != "power-distribution" {
+		t.Fatalf("collection not stored: %q", got)
+	}
+	// An observation that doesn't say keeps what we know.
+	p.Collection = ""
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := collectionOf(); got != "power-distribution" {
+		t.Fatalf("unknown collection must not erase a known one: %q", got)
+	}
+}

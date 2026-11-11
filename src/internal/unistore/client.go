@@ -78,6 +78,10 @@ type Product struct {
 	Title string
 	// Category is the store's category id (e.g. "switching-enterprise"); empty when unknown.
 	Category string
+	// Collection is the slug of the store collection the product belongs to;
+	// products sharing one are presented by the store as a single product with a
+	// choice between them. Empty when the product stands alone or it is unknown.
+	Collection string
 	// Tags are the store's labels for the product (e.g. "black-friday",
 	// "feature:4k"), sorted and without duplicates. Nil means the response
 	// didn't say, which is different from having no tags.
@@ -281,7 +285,11 @@ type rawProduct struct {
 	Slug  string `json:"slug"`
 	Name  string `json:"name"`
 	Title string `json:"title"`
-	Tags  []struct {
+	// The store shows products sharing a collection slug as one page with a
+	// choice between them. Either field may carry it.
+	ProCollectionSlug            string `json:"proCollectionSlug"`
+	OrganizationalCollectionSlug string `json:"organizationalCollectionSlug"`
+	Tags                         []struct {
 		Name string `json:"name"`
 	} `json:"tags"`
 	Variants []struct {
@@ -317,7 +325,10 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		return nil, fmt.Errorf("%w: product %q has no variants", ErrSchema, raw.Slug)
 	}
 
-	p := &Product{ID: raw.ID, Slug: raw.Slug, Name: raw.Name, Title: raw.Title}
+	p := &Product{ID: raw.ID, Slug: raw.Slug, Name: raw.Name, Title: raw.Title, Collection: raw.ProCollectionSlug}
+	if p.Collection == "" {
+		p.Collection = raw.OrganizationalCollectionSlug
+	}
 	if raw.Tags != nil {
 		p.Tags = []string{}
 		for _, t := range raw.Tags {

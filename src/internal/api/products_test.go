@@ -44,7 +44,7 @@ func newTestServer(t *testing.T) (*Server, *fakePoller) {
 	now := time.Now()
 	price := func(a int64) *unistore.Money { return &unistore.Money{Amount: a, Currency: "USD"} }
 	for _, p := range []*unistore.Product{
-		{ID: "p2", Slug: "zeta", Title: "Zeta Cam", Tags: []string{"black-friday", "feature:4k"}, Variants: []unistore.Variant{
+		{ID: "p2", Slug: "zeta", Title: "Zeta Cam", Collection: "cams", Tags: []string{"black-friday", "feature:4k"}, Variants: []unistore.Variant{
 			{ID: "v3", SKU: "ZETA-B", Title: "Black", Status: "Available", Price: price(19900)},
 			{ID: "v4", SKU: "ZETA-W", Title: "White", Status: "SoldOut", Price: price(24900), RegularPrice: price(29900)}}},
 		{ID: "p1", Slug: "alpha", Title: "Alpha Switch", Variants: []unistore.Variant{
@@ -95,6 +95,9 @@ func TestProductsGroupsVariants(t *testing.T) {
 	}
 	if len(zeta.Tags) != 2 || zeta.Tags[0] != "black-friday" || got.Products[0].Tags == nil || len(got.Products[0].Tags) != 0 {
 		t.Errorf("tags should be listed, and be [] rather than null when there are none: %+v / %+v", zeta.Tags, got.Products[0].Tags)
+	}
+	if zeta.Collection != "cams" || got.Products[0].Collection != "" {
+		t.Errorf("collection should be passed through: %q / %q", zeta.Collection, got.Products[0].Collection)
 	}
 	if v := zeta.Variants[1]; v.RegularPriceCents == nil || *v.RegularPriceCents != 29900 || *v.PriceCents != 24900 {
 		t.Errorf("discount lost: %+v", v)

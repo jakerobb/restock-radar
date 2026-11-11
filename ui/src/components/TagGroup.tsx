@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useMemo, useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/cn'
 import type { TagGroupCounts } from '../lib/filter'
 
 interface TagGroupProps extends TagGroupCounts {
+  /** How many of the products currently shown carry any tag of this prefix. */
+  total: number
   selected: string[]
   onToggle: (tag: string) => void
 }
@@ -13,13 +15,14 @@ const POPOVER_WIDTH = 256
  * One chip for a family of `prefix:name` tags (feature:4k, feature:poe, ...).
  * Clicking it pops up the options, each with a checkbox; chosen options combine like any other tags.
  */
-export function TagGroup({ prefix, options, selected, onToggle }: TagGroupProps) {
+export function TagGroup({ prefix, options: unsorted, total, selected, onToggle }: TagGroupProps) {
   // Fixed positioning lets the popup escape the scrolling containers around the chips.
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const open = pos !== null
   const close = useCallback(() => setPos(null), [])
+  const options = useMemo(() => [...unsorted].sort((a, b) => a.tag.localeCompare(b.tag)), [unsorted])
   const chosen = options.filter((o) => selected.includes(o.tag)).length
 
   useEffect(() => {
@@ -66,9 +69,10 @@ export function TagGroup({ prefix, options, selected, onToggle }: TagGroupProps)
         className={cn(
           'cursor-pointer rounded-full border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
           chosen > 0 ? 'border-accent bg-accent text-on-accent' : 'border-line bg-surface text-ink hover:border-accent',
+          total === 0 && chosen === 0 && 'opacity-50',
         )}
       >
-        {prefix} <span className={chosen > 0 ? 'opacity-80' : 'text-muted'}>{chosen > 0 ? `${chosen} chosen` : options.length}</span> {open ? '▴' : '▾'}
+        {prefix} <span className={chosen > 0 ? 'opacity-80' : 'text-muted'}>{chosen > 0 ? `${chosen} chosen` : total}</span> {open ? '▴' : '▾'}
       </button>
       {pos && (
         <div

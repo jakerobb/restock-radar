@@ -98,15 +98,30 @@ export function groupTags(tags: TagCount[]): { plain: TagCount[]; groups: TagGro
   return { plain, groups }
 }
 
+/** For each tag prefix, how many of `products` carry at least one tag with it. */
+export function prefixCounts(products: Product[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const p of products) {
+    for (const prefix of new Set(p.tags.map(tagPrefix))) {
+      if (prefix !== null) counts.set(prefix, (counts.get(prefix) ?? 0) + 1)
+    }
+  }
+  return counts
+}
+
 export interface TypeCount {
   type: string
   count: number
 }
 
-/** The types present, with how many of `products` each holds: alphabetical, with Other last. */
-export function typeCounts(products: Product[]): TypeCount[] {
+/**
+ * The types present in `products`, alphabetical with Other last.
+ * Pass `counted` (e.g. the products left by every other filter) to count only those; types with none stay listed at 0.
+ */
+export function typeCounts(products: Product[], counted: Product[] = products): TypeCount[] {
   const counts = new Map<string, number>()
-  for (const p of products) counts.set(typeOf(p), (counts.get(typeOf(p)) ?? 0) + 1)
+  for (const p of products) counts.set(typeOf(p), 0)
+  for (const p of counted) counts.set(typeOf(p), (counts.get(typeOf(p)) ?? 0) + 1)
   return [...counts]
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => (a.type === OTHER_TYPE ? 1 : b.type === OTHER_TYPE ? -1 : a.type.localeCompare(b.type)))

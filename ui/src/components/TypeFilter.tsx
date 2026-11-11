@@ -9,10 +9,10 @@ interface TypeFilterProps {
   onChange: (type: string) => void
 }
 
-/** Chips narrowing the list to one product type. */
+/** Underlined tabs narrowing the list to one product type; they scroll sideways when there are too many to fit. */
 export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps) {
   if (types.length < 2) return null
-  const chip = (type: string, label: string, count: number) => {
+  const tab = (type: string, label: string, count: number) => {
     const active = selected === type
     return (
       <button
@@ -21,18 +21,19 @@ export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps
         aria-pressed={active}
         onClick={() => onChange(active ? '' : type)}
         className={cn(
-          'cursor-pointer rounded-full border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-          active ? 'border-accent bg-accent text-on-accent' : 'border-line bg-surface text-ink hover:border-accent',
+          '-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-0.5 pt-1 pb-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+          active ? 'border-accent font-semibold text-ink' : 'border-transparent text-muted hover:border-line hover:text-ink',
+          count === 0 && !active && 'opacity-50',
         )}
       >
-        {label} <span className={active ? 'opacity-80' : 'text-muted'}>{count}</span>
+        {label} <span className={active ? 'text-muted' : 'opacity-80'}>{count}</span>
       </button>
     )
   }
   return (
-    <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by product type">
-      {chip('', 'All', total)}
-      {types.map((t) => chip(t.type, t.type, t.count))}
+    <div className="mt-3 mb-4 flex gap-5 overflow-x-auto border-b border-line [scrollbar-width:thin]" role="group" aria-label="Filter by product type">
+      {tab('', 'All', total)}
+      {types.map((t) => tab(t.type, t.type, t.count))}
     </div>
   )
 }
