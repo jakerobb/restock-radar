@@ -23,6 +23,7 @@ export function product(overrides: Partial<Product> = {}): Product {
     slug: 'widget',
     title: 'Widget',
     type: '',
+    category: '',
     url: 'https://store.example/us/en/products/widget',
     variants: [variant()],
     ...overrides,
