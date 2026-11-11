@@ -9,6 +9,7 @@ function product(title: string, price: number | null, seen: string, changed: str
     slug: title,
     title,
     type: '',
+    category: '',
     url: '',
     variants: [
       {

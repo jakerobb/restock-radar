@@ -25,6 +25,8 @@ export interface Product {
   title: string
   /** Product type for filtering (Gateways, Switches, ...); empty when not yet known. */
   type: string
+  /** The store's category id (e.g. "physical-security-nvr"); empty when not yet known. */
+  category: string
   url: string
   variants: Variant[]
 }

@@ -8,12 +8,30 @@ export function typeOf(p: Product): string {
   return p.type || OTHER_TYPE
 }
 
-/** True when every word of `query` appears in the product's name or one of its variants' names. */
+/** Other ways to say a search word: typing the key also finds the phrases. */
+const ALIASES: Record<string, string[]> = {
+  nvr: ['network video recorder'],
+  nas: ['network attached storage', 'network storage'],
+  ups: ['uninterruptible power'],
+  poe: ['power over ethernet'],
+  gateway: ['router'],
+  router: ['gateway'],
+}
+
+/** The text a search runs over: names, SKUs, and the words of the store category (physical-security-nvr). */
+function searchText(p: Product): string {
+  return [p.title, p.category.replaceAll('-', ' '), ...p.variants.flatMap((v) => [v.title, v.sku])].join('\n').toLowerCase()
+}
+
+/**
+ * True when every word of `query` (or one of its aliases) appears in the
+ * product's or its variants' names or SKUs, or in its store category.
+ */
 export function matchesQuery(p: Product, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (words.length === 0) return true
-  const haystack = [p.title, ...p.variants.map((v) => v.title)].join('\n').toLowerCase()
-  return words.every((w) => haystack.includes(w))
+  const haystack = searchText(p)
+  return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
 }
 
 /** Products matching the search text and (when non-empty) the chosen type. */

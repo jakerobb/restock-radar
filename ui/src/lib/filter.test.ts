@@ -18,6 +18,23 @@ describe('matchesQuery', () => {
   it('matches everything when blank', () => expect(matchesQuery(camera, '   ')).toBe(true))
 })
 
+describe('matchesQuery extras', () => {
+  const unvr = product({ title: 'Network Video Recorder', category: 'physical-security-nvr', variants: [variant({ title: 'Default', sku: 'UNVR' })] })
+  const aiKey = product({ title: 'AI Key', category: 'physical-security-nvr', variants: [variant({ title: 'Default', sku: 'AI-KEY' })] })
+  const nas = product({ title: 'Network Attached Storage', category: 'network-storage', variants: [variant({ sku: 'UNAS-2' })] })
+  it('matches SKUs and category words', () => {
+    expect(matchesQuery(unvr, 'unvr')).toBe(true)
+    expect(matchesQuery(aiKey, 'nvr')).toBe(true)
+    expect(matchesQuery(aiKey, 'physical security')).toBe(true)
+    expect(matchesQuery(gateway, 'nvr')).toBe(false)
+  })
+  it('expands aliases', () => {
+    expect(matchesQuery(product({ title: 'Network Video Recorder Pro', variants: [variant({ sku: 'X' })] }), 'nvr')).toBe(true)
+    expect(matchesQuery(nas, 'nas')).toBe(true)
+    expect(matchesQuery(product({ title: 'Dream Router 7' }), 'gateway')).toBe(true)
+  })
+})
+
 describe('filterProducts', () => {
   const all = [camera, gateway, mystery]
   it('combines search and type', () => {
