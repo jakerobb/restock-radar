@@ -251,3 +251,103 @@ func TestHistoryReconstructsTimeline(t *testing.T) {
 		t.Fatalf("unexpected windowed points: %+v", pts)
 	}
 }
+
+func TestDiscover(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	p := product("Available", 10900)
+	p.Category = "cat-a"
+
+	// Silent: tracked and baselined, but nothing to announce.
+	ev, err := s.Discover(ctx, "us", p, false, now)
+	if err != nil || ev != nil {
+		t.Fatalf("silent discovery: ev=%v err=%v", ev, err)
+	}
+	items, _ := s.Items(ctx)
+	if len(items) != 1 || items[0].Source != SourceDiscovered || items[0].ProductID != "p1" || items[0].Category != "cat-a" {
+		t.Fatalf("discovered item not tracked: %+v", items)
+	}
+	if pending, _ := s.PendingEvents(ctx); len(pending) != 0 {
+		t.Fatalf("silent discovery queued %v", pending)
+	}
+	known, _ := s.KnownProducts(ctx, "us")
+	if !known["p1"] || known["p2"] {
+		t.Fatalf("known products wrong: %v", known)
+	}
+
+	// Announced: the product and its event arrive together.
+	q := &unistore.Product{ID: "p2", Slug: "gadget", Name: "Gadget", Title: "Gadget", Category: "cat-a", Variants: []unistore.Variant{
+		{ID: "v2", SKU: "G-1", Status: "SoldOut", Price: &unistore.Money{Amount: 500, Currency: "USD"}},
+		{ID: "v3", SKU: "G-2", Status: "Available", Price: &unistore.Money{Amount: 900, Currency: "USD"}}}}
+	ev, err = s.Discover(ctx, "us", q, true, now)
+	if err != nil || ev == nil || ev.Kind != KindNew || ev.ProductSlug != "gadget" || ev.VariantCount != 2 || ev.NewStatus != "SoldOut" {
+		t.Fatalf("announced discovery: ev=%+v err=%v", ev, err)
+	}
+	if pending, _ := s.PendingEvents(ctx); len(pending) != 1 || pending[0].ID != ev.ID {
+		t.Fatalf("want the new-product event pending, got %v", pending)
+	}
+
+	// Seeing it again is an ordinary observation, not another discovery.
+	if events, err := s.Apply(ctx, "us", q, now); err != nil || len(events) != 0 {
+		t.Fatalf("re-observation: events=%v err=%v", events, err)
+	}
+}
+
+func TestSeenCategories(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	if seen, _ := s.SeenCategories(ctx, "us"); len(seen) != 0 {
+		t.Fatalf("nothing should be seen yet: %v", seen)
+	}
+	for range 2 { // idempotent
+		if err := s.MarkCategoriesSeen(ctx, "us", []string{"a", "b"}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen, _ := s.SeenCategories(ctx, "us")
+	other, _ := s.SeenCategories(ctx, "ca")
+	if len(seen) != 2 || !seen["a"] || len(other) != 0 {
+		t.Fatalf("seen=%v other=%v", seen, other)
+	}
+}
+
+func TestProductTags(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	tagsOf := func() []string {
+		t.Helper()
+		vs, err := s.Variants(ctx, "us")
+		if err != nil || len(vs) != 1 {
+			t.Fatalf("variants=%v err=%v", vs, err)
+		}
+		return vs[0].ProductTags
+	}
+
+	p := product("Available", 10900)
+	if _, err := s.Apply(ctx, "us", p, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := tagsOf(); got == nil || len(got) != 0 {
+		t.Fatalf("a product with unknown tags should report an empty list, got %#v", got)
+	}
+
+	p.Tags = []string{"black-friday", "feature:color-black"}
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := tagsOf(); len(got) != 2 || got[0] != "black-friday" {
+		t.Fatalf("tags not stored: %v", got)
+	}
+
+	// An observation that says nothing about tags keeps what we have...
+	p.Tags = nil
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := tagsOf(); len(got) != 2 {
+		t.Fatalf("unknown tags must not erase known ones: %v", got)
+	}
+	// ...but an explicit empty list (the sale ended) clears them.
+	p.Tags = []string{}
+	_, _ = s.Apply(ctx, "us", p, time.Now())
+	if got := tagsOf(); len(got) != 0 {
+		t.Fatalf("tags the store dropped should go away: %v", got)
+	}
+}

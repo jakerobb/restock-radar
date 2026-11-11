@@ -1,4 +1,4 @@
-import { filterProducts, matchesQuery, typeCounts } from './filter'
+import { filterProducts, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -52,5 +52,28 @@ describe('typeCounts', () => {
       { type: 'Gateways', count: 2 },
       { type: 'Other', count: 1 },
     ])
+  })
+})
+
+describe('tags', () => {
+  const sale = product({ id: 's', title: 'AI Port', tags: ['black-friday', 'feature:color-black'] })
+  const black = product({ id: 'k', title: 'Dome', tags: ['feature:color-black'] })
+  const plain = product({ id: 'n', title: 'Switch', tags: [] })
+  const all = [sale, black, plain]
+
+  it('counts every tag, most common first then alphabetical', () => {
+    expect(tagCounts(all)).toEqual([
+      { tag: 'feature:color-black', count: 2 },
+      { tag: 'black-friday', count: 1 },
+    ])
+    expect(tagCounts([plain])).toEqual([])
+  })
+
+  it('narrows to products that have every chosen tag', () => {
+    expect(filterProducts(all, '', '', ['black-friday'])).toEqual([sale])
+    expect(filterProducts(all, '', '', ['feature:color-black'])).toEqual([sale, black])
+    expect(filterProducts(all, '', '', ['feature:color-black', 'black-friday'])).toEqual([sale])
+    expect(filterProducts(all, '', '', ['nope'])).toEqual([])
+    expect(filterProducts(all, 'dome', '', ['feature:color-black'])).toEqual([black])
   })
 })

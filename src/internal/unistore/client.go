@@ -4,6 +4,10 @@
 package unistore
 
 import (
+	"bufio"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +78,10 @@ type Product struct {
 	Title string
 	// Category is the store's category id (e.g. "switching-enterprise"); empty when unknown.
 	Category string
+	// Tags are the store's labels for the product (e.g. "black-friday",
+	// "feature:4k"), sorted and without duplicates. Nil means the response
+	// didn't say, which is different from having no tags.
+	Tags     []string
 	Variants []Variant
 }
 
@@ -98,20 +107,124 @@ func New(userAgent string) *Client {
 }
 
 // FetchProduct returns the current state of the product with the given slug.
-func (c *Client) FetchProduct(ctx context.Context, region config.Region, slug string) (*Product, error) {
-	refreshed := false
-	for attempt := 0; ; attempt++ {
+func (c *Client) FetchProduct(ctx context.Context, region config.Region, slug string) (p *Product, err error) {
+	err = c.withBuildID(ctx, region, func(id string) (bool, error) {
+		var stale bool
+		p, stale, err = c.fetchProduct(ctx, region, id, "/"+region.Path+"/products/"+url.PathEscape(slug), slug)
+		return stale, err
+	})
+	return p, err
+}
+
+// Category is every product the store lists in a category family: the page for
+// any one category also carries its sibling categories.
+type Category struct {
+	// Subcategories are the ids of the categories on the page, in page order.
+	Subcategories []string
+	// Products are all the products on the page, each with Category set to the
+	// subcategory that lists it.
+	Products []Product
+	// Skipped counts products left out because their data was incomplete (no
+	// variants, or a variant missing its id or status).
+	Skipped int
+}
+
+// FetchCategory returns every product on the page for the given category id,
+// which must be a leaf category (the store redirects parent categories home).
+// One request covers the whole family, so it replaces a request per product.
+func (c *Client) FetchCategory(ctx context.Context, region config.Region, categoryID string) (cat *Category, err error) {
+	err = c.withBuildID(ctx, region, func(id string) (bool, error) {
+		var stale bool
+		cat, stale, err = c.fetchCategory(ctx, region, id, categoryID)
+		return stale, err
+	})
+	return cat, err
+}
+
+func (c *Client) fetchCategory(ctx context.Context, region config.Region, buildID, categoryID string) (*Category, bool, error) {
+	u := fmt.Sprintf("%s/_next/data/%s/%s/category/%s.json", region.BaseURL, buildID, region.Path, url.PathEscape(categoryID))
+	body, stale, err := c.fetchData(ctx, u)
+	if err != nil {
+		return nil, stale, err
+	}
+
+	var page struct {
+		PageProps struct {
+			Redirect      string `json:"__N_REDIRECT"`
+			SubCategories []struct {
+				ID       string       `json:"id"`
+				Products []rawProduct `json:"products"`
+			} `json:"subCategories"`
+		} `json:"pageProps"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, false, fmt.Errorf("%w: %v", ErrSchema, err)
+	}
+	if r := page.PageProps.Redirect; r != "" {
+		return nil, false, fmt.Errorf("%w: category %q redirects to %s", ErrNotFound, categoryID, r)
+	}
+	if len(page.PageProps.SubCategories) == 0 {
+		return nil, false, fmt.Errorf("%w: category %q has no subcategories", ErrSchema, categoryID)
+	}
+
+	cat := &Category{}
+	seen := make(map[string]bool)
+	for _, sc := range page.PageProps.SubCategories {
+		cat.Subcategories = append(cat.Subcategories, sc.ID)
+		for i := range sc.Products {
+			raw := &sc.Products[i]
+			if seen[raw.ID] {
+				continue
+			}
+			seen[raw.ID] = true
+			p, err := convertProduct(raw)
+			if err != nil {
+				cat.Skipped++
+				continue
+			}
+			p.Category = sc.ID
+			cat.Products = append(cat.Products, *p)
+		}
+	}
+	return cat, false, nil
+}
+
+// withBuildID runs fn with the region's buildId. If fn reports the buildId as
+// stale (the store deployed since it was cached), it refreshes it and tries once more.
+func (c *Client) withBuildID(ctx context.Context, region config.Region, fn func(buildID string) (stale bool, err error)) error {
+	for refreshed := false; ; refreshed = true {
 		id, err := c.buildID(ctx, region, refreshed)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		p, stale, err := c.fetchProduct(ctx, region, id, "/"+region.Path+"/products/"+url.PathEscape(slug), slug)
+		stale, err := fn(id)
 		if stale && !refreshed {
-			// The store deployed since we cached the buildId.
-			refreshed = true
 			continue
 		}
-		return p, err
+		return err
+	}
+}
+
+// fetchData GETs one Next.js data URL. stale is true when a 404 without the
+// store's notFound marker suggests the buildId is outdated.
+func (c *Client) fetchData(ctx context.Context, u string) (body []byte, stale bool, err error) {
+	body, status, err := c.get(ctx, u, "application/json")
+	if err != nil {
+		return nil, false, err
+	}
+	switch status {
+	case http.StatusOK:
+		return body, false, nil
+	case http.StatusNotFound:
+		var nf struct {
+			NotFound bool `json:"notFound"`
+		}
+		if json.Unmarshal(body, &nf) == nil && nf.NotFound {
+			return nil, false, ErrNotFound
+		}
+		return nil, true, &HTTPError{Status: status, URL: u}
+	default:
+		return nil, false, &HTTPError{Status: status, URL: u}
 	}
 }
 
@@ -120,21 +233,9 @@ func (c *Client) FetchProduct(ctx context.Context, region config.Region, slug st
 func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID, path, slug string) (p *Product, stale bool, err error) {
 	for hop := 0; hop <= maxRedirects; hop++ {
 		u := fmt.Sprintf("%s/_next/data/%s%s.json", region.BaseURL, buildID, path)
-		body, status, err := c.get(ctx, u, "application/json")
+		body, stale, err := c.fetchData(ctx, u)
 		if err != nil {
-			return nil, false, err
-		}
-		if status == http.StatusNotFound {
-			var nf struct {
-				NotFound bool `json:"notFound"`
-			}
-			if json.Unmarshal(body, &nf) == nil && nf.NotFound {
-				return nil, false, ErrNotFound
-			}
-			return nil, true, &HTTPError{Status: status, URL: u}
-		}
-		if status != http.StatusOK {
-			return nil, false, &HTTPError{Status: status, URL: u}
+			return nil, stale, err
 		}
 
 		var page struct {
@@ -176,10 +277,13 @@ type rawMoney struct {
 }
 
 type rawProduct struct {
-	ID       string `json:"id"`
-	Slug     string `json:"slug"`
-	Name     string `json:"name"`
-	Title    string `json:"title"`
+	ID    string `json:"id"`
+	Slug  string `json:"slug"`
+	Name  string `json:"name"`
+	Title string `json:"title"`
+	Tags  []struct {
+		Name string `json:"name"`
+	} `json:"tags"`
 	Variants []struct {
 		ID           string    `json:"id"`
 		SKU          string    `json:"sku"`
@@ -202,14 +306,33 @@ func parseProduct(currentID string, products []rawProduct, slug string) (*Produc
 	if raw == nil {
 		return nil, false, fmt.Errorf("%w: no product %q in response", ErrSchema, slug)
 	}
+	p, err := convertProduct(raw)
+	return p, false, err
+}
+
+// convertProduct turns the store's JSON for one product into a Product,
+// rejecting data too incomplete to track.
+func convertProduct(raw *rawProduct) (*Product, error) {
 	if len(raw.Variants) == 0 {
-		return nil, false, fmt.Errorf("%w: product %q has no variants", ErrSchema, slug)
+		return nil, fmt.Errorf("%w: product %q has no variants", ErrSchema, raw.Slug)
 	}
 
 	p := &Product{ID: raw.ID, Slug: raw.Slug, Name: raw.Name, Title: raw.Title}
+	if raw.Tags != nil {
+		p.Tags = []string{}
+		for _, t := range raw.Tags {
+			// Sort weights are per-product numbers the store orders its pages by,
+			// not labels anyone would filter on.
+			if t.Name == "" || strings.Contains(t.Name, "-sort-weight:") || slices.Contains(p.Tags, t.Name) {
+				continue
+			}
+			p.Tags = append(p.Tags, t.Name)
+		}
+		slices.Sort(p.Tags)
+	}
 	for _, v := range raw.Variants {
 		if v.ID == "" || v.Status == "" {
-			return nil, false, fmt.Errorf("%w: variant of %q missing id or status", ErrSchema, slug)
+			return nil, fmt.Errorf("%w: variant of %q missing id or status", ErrSchema, raw.Slug)
 		}
 		pv := Variant{ID: v.ID, SKU: v.SKU, Title: v.Title, Status: v.Status}
 		pv.Price = money(v.Price)
@@ -219,7 +342,7 @@ func parseProduct(currentID string, products []rawProduct, slug string) (*Produc
 		}
 		p.Variants = append(p.Variants, pv)
 	}
-	return p, false, nil
+	return p, nil
 }
 
 func money(m *rawMoney) *Money {
@@ -269,6 +392,9 @@ func (c *Client) get(ctx context.Context, u, accept string) ([]byte, int, error)
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", accept)
+	// Setting this ourselves turns off net/http's transparent gzip, so decode
+	// the response by hand. The store's JSON shrinks about 9x.
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -284,9 +410,33 @@ func (c *Client) get(ctx context.Context, u, accept string) ([]byte, int, error)
 		return nil, resp.StatusCode, he
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	r, err := decodedBody(resp)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	// The limit applies after decompression, so a tiny compressed body can't balloon.
+	body, err := io.ReadAll(io.LimitReader(r, maxBody))
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
 	return body, resp.StatusCode, nil
+}
+
+// decodedBody undoes the response's Content-Encoding. "deflate" is zlib-wrapped
+// per the HTTP spec, but some servers send a bare deflate stream, so check.
+func decodedBody(resp *http.Response) (io.Reader, error) {
+	switch enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding"))); enc {
+	case "", "identity":
+		return resp.Body, nil
+	case "gzip", "x-gzip":
+		return gzip.NewReader(resp.Body)
+	case "deflate":
+		br := bufio.NewReader(resp.Body)
+		if h, err := br.Peek(2); err == nil && h[0]&0x0f == 8 && (int(h[0])<<8|int(h[1]))%31 == 0 {
+			return zlib.NewReader(br)
+		}
+		return flate.NewReader(br), nil
+	default:
+		return nil, fmt.Errorf("unsupported Content-Encoding %q from %s", enc, resp.Request.URL)
+	}
 }

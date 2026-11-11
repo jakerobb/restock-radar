@@ -34,9 +34,23 @@ export function matchesQuery(p: Product, query: string): boolean {
   return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
 }
 
-/** Products matching the search text and (when non-empty) the chosen type. */
-export function filterProducts(products: Product[], query: string, type: string): Product[] {
-  return products.filter((p) => matchesQuery(p, query) && (!type || typeOf(p) === type))
+/** Products matching the search text, the chosen type (when non-empty), and every chosen tag. */
+export function filterProducts(products: Product[], query: string, type: string, tags: string[] = []): Product[] {
+  return products.filter(
+    (p) => matchesQuery(p, query) && (!type || typeOf(p) === type) && tags.every((t) => p.tags.includes(t)),
+  )
+}
+
+export interface TagCount {
+  tag: string
+  count: number
+}
+
+/** Every tag on any of `products`, with how many carry it: most common first, then alphabetical. */
+export function tagCounts(products: Product[]): TagCount[] {
+  const counts = new Map<string, number>()
+  for (const p of products) for (const tag of p.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
 }
 
 export interface TypeCount {

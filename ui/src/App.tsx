@@ -8,9 +8,10 @@ import { ProductList } from './components/ProductList'
 import { SearchBox } from './components/SearchBox'
 import { SortPicker } from './components/SortPicker'
 import { SyncStatus } from './components/SyncStatus'
+import { TagFilter } from './components/TagFilter'
 import { TypeFilter } from './components/TypeFilter'
 import { Notice } from './components/ui/Notice'
-import { filterProducts, typeCounts } from './lib/filter'
+import { filterProducts, tagCounts, typeCounts } from './lib/filter'
 
 export default function App() {
   const { data, isPending, isError, refetch } = useProducts()
@@ -18,11 +19,19 @@ export default function App() {
   const [sort, setSort] = useSort()
   const [query, setQuery] = useState('')
   const [type, setType] = useState('')
+  const [chosenTags, setChosenTags] = useState<string[]>([])
 
   const types = useMemo(() => typeCounts(data?.products ?? []), [data?.products])
   // A chosen type that no longer has any products (e.g. after a refetch) shouldn't hide everything.
   const activeType = types.some((t) => t.type === type) ? type : ''
-  const shown = useMemo(() => filterProducts(data?.products ?? [], query, activeType), [data?.products, query, activeType])
+  const tags = useMemo(() => tagCounts(data?.products ?? []), [data?.products])
+  // Likewise for tags: one the store dropped (a sale ending) mustn't keep filtering.
+  const activeTags = useMemo(() => chosenTags.filter((t) => tags.some((c) => c.tag === t)), [chosenTags, tags])
+  const toggleTag = (tag: string) => setChosenTags(activeTags.includes(tag) ? activeTags.filter((t) => t !== tag) : [...activeTags, tag])
+  const shown = useMemo(
+    () => filterProducts(data?.products ?? [], query, activeType, activeTags),
+    [data?.products, query, activeType, activeTags],
+  )
 
   return (
     <main className="mx-auto max-w-3xl px-4 pt-6 pb-12">
@@ -40,6 +49,7 @@ export default function App() {
       </div>
 
       {data && <TypeFilter types={types} selected={activeType} total={data.products.length} onChange={setType} />}
+      {data && <TagFilter tags={tags} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
 
       {isPending && <p className="py-8 text-center text-muted">Loading…</p>}
       {isError && !data && (
@@ -51,7 +61,7 @@ export default function App() {
         </Notice>
       )}
       {data && (
-        <ProductList data={data} products={shown} filtered={query.trim() !== '' || activeType !== ''} historyDays={historyDays} sort={sort} />
+        <ProductList data={data} products={shown} filtered={query.trim() !== '' || activeType !== '' || activeTags.length > 0} historyDays={historyDays} sort={sort} />
       )}
     </main>
   )

@@ -128,6 +128,24 @@ func statusBody(e store.Event, alwaysPrice bool) string {
 	return strings.TrimSpace(previousState(e) + " " + priceChange(e, alwaysPrice))
 }
 
+// newProductBody says whether the new product can be bought and what it costs,
+// e.g. "In stock, $199.00." Events carry only one variant, so a product with
+// several gets a count instead of a price that might not represent it.
+func newProductBody(e store.Event) string {
+	if e.VariantCount > 1 {
+		return plural(e.VariantCount, "variant") + "."
+	}
+	status := humanStatus(e.NewStatus)
+	if e.NewStatus == "Available" {
+		status = "in stock"
+	}
+	body := strings.ToUpper(status[:1]) + status[1:]
+	if e.NewPriceCents != nil {
+		body += ", " + money(e.NewPriceCents, e.Currency)
+	}
+	return body + "."
+}
+
 // FromEvent renders an event. storeURL is the product page for the event's region.
 func FromEvent(e store.Event, storeURL string) Message {
 	m := Message{Click: storeURL}
@@ -149,6 +167,10 @@ func FromEvent(e store.Event, storeURL string) Message {
 			m.Body = statusBody(e, false)
 			m.Tags = []string{"eyes"}
 		}
+	case store.KindNew:
+		m.Title = "New product! " + e.ProductTitle
+		m.Body = newProductBody(e)
+		m.Tags = []string{"new"}
 	case store.KindPrice:
 		m.Title = name(e) + " price changed"
 		m.Body = fmt.Sprintf("%s → %s", money(e.OldPriceCents, e.Currency), money(e.NewPriceCents, e.Currency))
