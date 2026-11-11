@@ -14,8 +14,6 @@ interface TagFilterProps {
   onClear: () => void
 }
 
-/** Up to this many tags the list starts open; beyond it, it starts collapsed. */
-const OPEN_BY_DEFAULT = 20
 /** From this many tags on, the list gets its own search box. */
 const SEARCHABLE = 12
 
@@ -23,10 +21,10 @@ const SEARCHABLE = 12
  * One chip per tag the store puts on any product (black-friday, feature:4k, ...).
  * Tags written `prefix:name` are grouped behind one chip per prefix that pops up checkboxes.
  * Chips combine: choosing several narrows to products that have all of them.
- * The list can be long, so it collapses (chosen tags stay visible) and can be searched.
+ * The list can be long, so it scrolls, can be collapsed (chosen tags stay visible) and can be searched.
  */
 export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: TagFilterProps) {
-  const [open, setOpen] = useState(tags.length <= OPEN_BY_DEFAULT)
+  const [open, setOpen] = useState(true)
   const [search, setSearch] = useState('')
   if (tags.length === 0) return null
 
@@ -38,7 +36,7 @@ export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: Ta
   const visibleGroups = open ? groups : groups.filter((g) => g.options.some((o) => selected.includes(o.tag)))
 
   return (
-    <div className="mb-4" role="group" aria-label="Filter by tag">
+    <div className="mb-4 flex flex-col lg:min-h-0 lg:flex-1" role="group" aria-label="Filter by tag">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <button
           type="button"
@@ -65,7 +63,7 @@ export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: Ta
           />
         )}
       </div>
-      <div className={cn('flex flex-wrap gap-2', open && 'max-h-44 overflow-y-auto')}>
+      <div className={cn('flex flex-wrap gap-2', open && 'max-h-80 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1')}>
         {visible.map(({ tag, count }) => {
           const active = selected.includes(tag)
           return (

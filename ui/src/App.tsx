@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useProducts } from './api/queries'
 import { useHistoryDays } from './hooks/useHistoryDays'
+import { useFillViewport } from './hooks/useFillViewport'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { useSidebarOpen } from './hooks/useSidebarOpen'
 import { useSort } from './hooks/useSort'
 import { AddProductDialog } from './components/AddProductDialog'
@@ -11,6 +13,7 @@ import { SortPicker } from './components/SortPicker'
 import { SyncStatus } from './components/SyncStatus'
 import { TagFilter } from './components/TagFilter'
 import { TypeFilter } from './components/TypeFilter'
+import { Button } from './components/ui/Button'
 import { Notice } from './components/ui/Notice'
 import { cn } from './lib/cn'
 import { groupProducts } from './lib/group'
@@ -24,6 +27,10 @@ export default function App() {
   const [type, setType] = useState('')
   const [chosenTags, setChosenTags] = useState<string[]>([])
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
+  const wide = useMediaQuery('(min-width: 1024px)')
+  const asideRef = useRef<HTMLElement>(null)
+  // On wide screens the filter column fills the window, so the tag list can use all the room there is.
+  const asideHeight = useFillViewport(asideRef, wide && sidebarOpen)
   const [inStockOnly, setInStockOnly] = useState(false)
 
   // Products the store files in one collection are a single product to it, so they are here too.
@@ -58,14 +65,15 @@ export default function App() {
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Restock Radar</h1>
         <div className="flex items-center gap-2">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             aria-expanded={sidebarOpen}
             onClick={toggleSidebar}
-            className="hidden cursor-pointer rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:inline-flex"
+            className="hidden px-3 text-sm lg:inline-flex"
           >
             {sidebarOpen ? '◂ Hide filters' : '▸ Show filters'}
-          </button>
+          </Button>
           <AddProductDialog regions={data?.regions ?? []} />
         </div>
       </div>
@@ -74,9 +82,11 @@ export default function App() {
 
       <div className={cn('mt-3', sidebarOpen && 'lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6')}>
         <aside
+          ref={asideRef}
           aria-label="Search and filters"
+          style={{ height: asideHeight }}
           className={cn(
-            sidebarOpen && 'lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto',
+            sidebarOpen && 'lg:sticky lg:top-4 lg:flex lg:flex-col lg:overflow-y-auto',
             !sidebarOpen && 'lg:hidden',
           )}
         >

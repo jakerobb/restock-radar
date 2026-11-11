@@ -9,7 +9,7 @@ interface TypeFilterProps {
   onChange: (type: string) => void
 }
 
-/** Underlined tabs narrowing the list to one product type; they scroll sideways when there are too many to fit. */
+/** Underlined tabs narrowing the list to one product type, wrapping onto further lines when there are too many to fit. */
 export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps) {
   if (types.length < 2) return null
   const tab = (type: string, label: string, count: number) => {
@@ -21,7 +21,7 @@ export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps
         aria-pressed={active}
         onClick={() => onChange(active ? '' : type)}
         className={cn(
-          '-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-0.5 pt-1 pb-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+          '-mb-px cursor-pointer whitespace-nowrap border-b-2 px-0.5 pt-1 pb-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
           active ? 'border-accent font-semibold text-ink' : 'border-transparent text-muted hover:border-line hover:text-ink',
           count === 0 && !active && 'opacity-50',
         )}
@@ -31,7 +31,7 @@ export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps
     )
   }
   return (
-    <div className="mt-3 mb-4 flex gap-5 overflow-x-auto border-b border-line [scrollbar-width:thin]" role="group" aria-label="Filter by product type">
+    <div className="mt-3 mb-4 flex flex-wrap gap-x-5 border-b border-line" role="group" aria-label="Filter by product type">
       {tab('', 'All', total)}
       {types.map((t) => tab(t.type, t.type, t.count))}
     </div>

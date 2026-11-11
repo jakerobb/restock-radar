@@ -139,9 +139,11 @@ describe('App', () => {
     await screen.findByRole('heading', { name: /Gadget/ })
 
     const toggle = screen.getByRole('button', { name: /Tags/ })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('button', { name: /^black-friday/ })).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /^black-friday/ })).toBeInTheDocument()
 
+    await user.click(toggle) // collapse: nothing chosen, so no chips
+    expect(screen.queryByRole('button', { name: /^black-friday/ })).not.toBeInTheDocument()
     await user.click(toggle)
     await user.type(screen.getByRole('searchbox', { name: 'Search tags' }), 'black')
     await user.click(screen.getByRole('button', { name: /^black-friday/ }))

@@ -8,7 +8,7 @@ export function AddProductDialog({ regions }: { regions: string[] }) {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)}>
+      <Button type="button" variant="secondary" className="px-3 text-sm" onClick={() => setOpen(true)}>
         Add product
       </Button>
       {open && (
