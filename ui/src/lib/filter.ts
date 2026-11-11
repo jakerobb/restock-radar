@@ -34,10 +34,25 @@ export function matchesQuery(p: Product, query: string): boolean {
   return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
 }
 
-/** Products matching the search text, the chosen type (when non-empty), and every chosen tag. */
-export function filterProducts(products: Product[], query: string, type: string, tags: string[] = []): Product[] {
+/** True when at least one variant of the product is available. */
+export function isInStock(p: Product): boolean {
+  return p.variants.some((v) => v.status === 'Available')
+}
+
+/** Products matching the search text, the chosen type (when non-empty), every chosen tag, and (optionally) being in stock. */
+export function filterProducts(
+  products: Product[],
+  query: string,
+  type: string,
+  tags: string[] = [],
+  inStockOnly = false,
+): Product[] {
   return products.filter(
-    (p) => matchesQuery(p, query) && (!type || typeOf(p) === type) && tags.every((t) => p.tags.includes(t)),
+    (p) =>
+      matchesQuery(p, query) &&
+      (!type || typeOf(p) === type) &&
+      tags.every((t) => p.tags.includes(t)) &&
+      (!inStockOnly || isInStock(p)),
   )
 }
 
@@ -46,11 +61,41 @@ export interface TagCount {
   count: number
 }
 
-/** Every tag on any of `products`, with how many carry it: most common first, then alphabetical. */
-export function tagCounts(products: Product[]): TagCount[] {
+/**
+ * Every tag on any of `products`, with how many carry it: most common first, then alphabetical.
+ * Pass `counted` (e.g. the products left after filtering) to count only those; tags with none stay listed at 0.
+ */
+export function tagCounts(products: Product[], counted: Product[] = products): TagCount[] {
   const counts = new Map<string, number>()
-  for (const p of products) for (const tag of p.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  for (const p of products) for (const tag of p.tags) counts.set(tag, 0)
+  for (const p of counted) for (const tag of p.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+}
+
+export interface TagGroupCounts {
+  prefix: string
+  options: TagCount[]
+}
+
+/** The prefix of a `prefix:name` tag (feature:4k -> feature); null for plain tags. */
+export function tagPrefix(tag: string): string | null {
+  const i = tag.indexOf(':')
+  return i > 0 && i < tag.length - 1 ? tag.slice(0, i) : null
+}
+
+/** Splits tags into plain ones and `prefix:` groups (alphabetical by prefix); each keeps its incoming order. */
+export function groupTags(tags: TagCount[]): { plain: TagCount[]; groups: TagGroupCounts[] } {
+  const plain: TagCount[] = []
+  const byPrefix = new Map<string, TagCount[]>()
+  for (const t of tags) {
+    const prefix = tagPrefix(t.tag)
+    if (prefix === null) plain.push(t)
+    else byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), t])
+  }
+  const groups = [...byPrefix]
+    .map(([prefix, options]) => ({ prefix, options }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix))
+  return { plain, groups }
 }
 
 export interface TypeCount {

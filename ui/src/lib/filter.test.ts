@@ -1,4 +1,4 @@
-import { filterProducts, matchesQuery, tagCounts, typeCounts } from './filter'
+import { filterProducts, groupTags, isInStock, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -75,5 +75,52 @@ describe('tags', () => {
     expect(filterProducts(all, '', '', ['feature:color-black', 'black-friday'])).toEqual([sale])
     expect(filterProducts(all, '', '', ['nope'])).toEqual([])
     expect(filterProducts(all, 'dome', '', ['feature:color-black'])).toEqual([black])
+  })
+})
+
+describe('in stock filter', () => {
+  const inStock = product({ id: 'x', variants: [variant({ status: 'SoldOut' }), variant({ status: 'Available' })] })
+  const soldOut = product({ id: 'y', variants: [variant({ status: 'SoldOut' })] })
+  it('keeps products with any available variant', () => {
+    expect(isInStock(inStock)).toBe(true)
+    expect(isInStock(soldOut)).toBe(false)
+    expect(filterProducts([inStock, soldOut], '', '', [], true)).toEqual([inStock])
+    expect(filterProducts([inStock, soldOut], '', '')).toEqual([inStock, soldOut])
+  })
+})
+
+describe('tagCounts with a filtered subset', () => {
+  const a = product({ id: 'a', tags: ['x', 'y'] })
+  const b = product({ id: 'b', tags: ['x'] })
+  const c = product({ id: 'c', tags: ['z'] })
+  it('counts only the subset but keeps every tag', () => {
+    expect(tagCounts([a, b, c], [a, c])).toEqual([
+      { tag: 'x', count: 1 },
+      { tag: 'y', count: 1 },
+      { tag: 'z', count: 1 },
+    ])
+    expect(tagCounts([a, b, c], [c])).toEqual([
+      { tag: 'z', count: 1 },
+      { tag: 'x', count: 0 },
+      { tag: 'y', count: 0 },
+    ])
+  })
+})
+
+describe('groupTags', () => {
+  it('splits on the first colon and sorts groups by prefix', () => {
+    expect(tagPrefix('feature:4k')).toBe('feature')
+    expect(tagPrefix('a:b:c')).toBe('a')
+    expect(tagPrefix('plain')).toBeNull()
+    expect(tagPrefix(':odd')).toBeNull()
+    expect(tagPrefix('odd:')).toBeNull()
+    const t = (tag: string, count = 1) => ({ tag, count })
+    expect(groupTags([t('sale', 3), t('feature:poe', 2), t('color:red'), t('feature:4k')])).toEqual({
+      plain: [t('sale', 3)],
+      groups: [
+        { prefix: 'color', options: [t('color:red')] },
+        { prefix: 'feature', options: [t('feature:poe', 2), t('feature:4k')] },
+      ],
+    })
   })
 })

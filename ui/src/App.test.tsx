@@ -97,6 +97,7 @@ describe('App', () => {
             product({ id: 'p1', title: 'AI Port', tags: ['black-friday', 'feature:color-black'] }),
             product({ id: 'p2', title: 'Dome Camera', tags: ['feature:color-black'] }),
             product({ id: 'p3', title: 'Plain Switch', tags: [] }),
+            product({ id: 'p4', title: 'Sale Hub', tags: ['black-friday'] }),
           ],
         }),
       },
@@ -107,15 +108,21 @@ describe('App', () => {
 
     const tags = screen.getByRole('group', { name: 'Filter by tag' })
     expect(tags).toHaveTextContent('black-friday')
-    expect(tags).toHaveTextContent('feature:color-black')
+    expect(tags).toHaveTextContent('feature')
 
-    await user.click(screen.getByRole('button', { name: /^feature:color-black/ }))
+    // Prefixed tags sit behind one chip per prefix, which pops up checkboxes.
+    expect(screen.queryByRole('checkbox', { name: /color-black/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^feature/ }))
+    await user.click(screen.getByRole('checkbox', { name: /^color-black/ }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('checkbox', { name: /color-black/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Dome Camera/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Plain Switch/ })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /^black-friday/ }))
     expect(screen.getByRole('heading', { name: /AI Port/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Dome Camera/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Sale Hub/ })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /^Clear 2 tags/ }))
     expect(screen.getByRole('heading', { name: /Plain Switch/ })).toBeInTheDocument()
@@ -125,7 +132,7 @@ describe('App', () => {
     const many = Array.from({ length: 30 }, (_, i) => `tag-${String(i).padStart(2, '0')}`)
     stubFetch({
       'GET /v1/history?days=90': { body: historyResponse() },
-      'GET /v1/products': { body: productsResponse({ products: [product({ id: 'p1', title: 'Gadget', tags: [...many, 'black-friday'] })] }) },
+      'GET /v1/products': { body: productsResponse({ products: [product({ id: 'p1', title: 'Gadget', tags: [...many, 'black-friday'] }), product({ id: 'p2', title: 'Gizmo', tags: [...many, 'black-friday'] })] }) },
     })
     const user = userEvent.setup()
     renderWithClient(<App />)
@@ -142,5 +149,44 @@ describe('App', () => {
 
     await user.click(toggle) // collapse again: the chosen tag stays
     expect(screen.getByRole('button', { name: /^black-friday/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('single-product tags', () => {
+  it('are hidden from the tag filter', async () => {
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': {
+        body: productsResponse({
+          products: [
+            product({ id: 'p1', title: 'AI Port', tags: ['shared', 'lonely'] }),
+            product({ id: 'p2', title: 'Dome Camera', tags: ['shared'] }),
+          ],
+        }),
+      },
+    })
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /AI Port/ })
+    const tags = screen.getByRole('group', { name: 'Filter by tag' })
+    expect(tags).toHaveTextContent('shared')
+    expect(tags).not.toHaveTextContent('lonely')
+  })
+})
+
+describe('filter column toggle', () => {
+  it('shows and hides the filter column', async () => {
+    localStorage.clear()
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': { body: productsResponse({ products: [product({ id: 'p1', title: 'AI Port' })] }) },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /AI Port/ })
+    const toggle = screen.getByRole('button', { name: /Hide filters/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: /Show filters/ })).toHaveAttribute('aria-expanded', 'false')
+    localStorage.clear()
   })
 })

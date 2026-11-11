@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { cn } from '../lib/cn'
-import type { TagCount } from '../lib/filter'
+import { groupTags, type TagCount } from '../lib/filter'
+import { TagGroup } from './TagGroup'
 import { TextInput } from './ui/TextInput'
 
 interface TagFilterProps {
@@ -18,6 +19,7 @@ const SEARCHABLE = 12
 
 /**
  * One chip per tag the store puts on any product (black-friday, feature:4k, ...).
+ * Tags written `prefix:name` are grouped behind one chip per prefix that pops up checkboxes.
  * Chips combine: choosing several narrows to products that have all of them.
  * The list can be long, so it collapses (chosen tags stay visible) and can be searched.
  */
@@ -27,7 +29,11 @@ export function TagFilter({ tags, selected, onToggle, onClear }: TagFilterProps)
   if (tags.length === 0) return null
 
   const needle = search.trim().toLowerCase()
-  const visible = open ? tags.filter((t) => !needle || t.tag.toLowerCase().includes(needle)) : tags.filter((t) => selected.includes(t.tag))
+  const matching = open ? tags.filter((t) => !needle || t.tag.toLowerCase().includes(needle)) : tags
+  const { plain, groups } = groupTags(matching)
+  // Collapsed, only what's chosen stays visible: plain chips, and the groups holding a chosen option.
+  const visible = open ? plain : plain.filter((t) => selected.includes(t.tag))
+  const visibleGroups = open ? groups : groups.filter((g) => g.options.some((o) => selected.includes(o.tag)))
 
   return (
     <div className="mb-4" role="group" aria-label="Filter by tag">
@@ -69,13 +75,17 @@ export function TagFilter({ tags, selected, onToggle, onClear }: TagFilterProps)
               className={cn(
                 'cursor-pointer rounded-full border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                 active ? 'border-accent bg-accent text-on-accent' : 'border-line bg-surface text-ink hover:border-accent',
+                count === 0 && !active && 'opacity-50',
               )}
             >
               {tag} <span className={active ? 'opacity-80' : 'text-muted'}>{count}</span>
             </button>
           )
         })}
-        {open && visible.length === 0 && <p className="text-sm text-muted">No tags match “{search}”.</p>}
+        {visibleGroups.map((g) => (
+          <TagGroup key={g.prefix} prefix={g.prefix} options={g.options} selected={selected} onToggle={onToggle} />
+        ))}
+        {open && visible.length === 0 && visibleGroups.length === 0 && <p className="text-sm text-muted">No tags match “{search}”.</p>}
       </div>
     </div>
   )
