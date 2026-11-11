@@ -20,6 +20,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [type, setType] = useState('')
   const [chosenTags, setChosenTags] = useState<string[]>([])
+  const [inStockOnly, setInStockOnly] = useState(false)
 
   const types = useMemo(() => typeCounts(data?.products ?? []), [data?.products])
   // A chosen type that no longer has any products (e.g. after a refetch) shouldn't hide everything.
@@ -29,8 +30,8 @@ export default function App() {
   const activeTags = useMemo(() => chosenTags.filter((t) => tags.some((c) => c.tag === t)), [chosenTags, tags])
   const toggleTag = (tag: string) => setChosenTags(activeTags.includes(tag) ? activeTags.filter((t) => t !== tag) : [...activeTags, tag])
   const shown = useMemo(
-    () => filterProducts(data?.products ?? [], query, activeType, activeTags),
-    [data?.products, query, activeType, activeTags],
+    () => filterProducts(data?.products ?? [], query, activeType, activeTags, inStockOnly),
+    [data?.products, query, activeType, activeTags, inStockOnly],
   )
 
   return (
@@ -43,6 +44,10 @@ export default function App() {
       <div className="mt-3 mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div>{data && <SyncStatus lastSync={data.last_sync} productCount={data.products.length} />}</div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm">
+            <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+            In stock only
+          </label>
           <SortPicker sort={sort} onChange={setSort} />
           <HistoryRangePicker days={historyDays} onChange={setHistoryDays} />
         </div>
@@ -61,7 +66,7 @@ export default function App() {
         </Notice>
       )}
       {data && (
-        <ProductList data={data} products={shown} filtered={query.trim() !== '' || activeType !== '' || activeTags.length > 0} historyDays={historyDays} sort={sort} />
+        <ProductList data={data} products={shown} filtered={query.trim() !== '' || activeType !== '' || activeTags.length > 0 || inStockOnly} historyDays={historyDays} sort={sort} />
       )}
     </main>
   )

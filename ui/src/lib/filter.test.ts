@@ -1,4 +1,4 @@
-import { filterProducts, matchesQuery, tagCounts, typeCounts } from './filter'
+import { filterProducts, isInStock, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -75,5 +75,16 @@ describe('tags', () => {
     expect(filterProducts(all, '', '', ['feature:color-black', 'black-friday'])).toEqual([sale])
     expect(filterProducts(all, '', '', ['nope'])).toEqual([])
     expect(filterProducts(all, 'dome', '', ['feature:color-black'])).toEqual([black])
+  })
+})
+
+describe('in stock filter', () => {
+  const inStock = product({ id: 'x', variants: [variant({ status: 'SoldOut' }), variant({ status: 'Available' })] })
+  const soldOut = product({ id: 'y', variants: [variant({ status: 'SoldOut' })] })
+  it('keeps products with any available variant', () => {
+    expect(isInStock(inStock)).toBe(true)
+    expect(isInStock(soldOut)).toBe(false)
+    expect(filterProducts([inStock, soldOut], '', '', [], true)).toEqual([inStock])
+    expect(filterProducts([inStock, soldOut], '', '')).toEqual([inStock, soldOut])
   })
 })

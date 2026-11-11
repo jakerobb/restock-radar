@@ -34,10 +34,25 @@ export function matchesQuery(p: Product, query: string): boolean {
   return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
 }
 
-/** Products matching the search text, the chosen type (when non-empty), and every chosen tag. */
-export function filterProducts(products: Product[], query: string, type: string, tags: string[] = []): Product[] {
+/** True when at least one variant of the product is available. */
+export function isInStock(p: Product): boolean {
+  return p.variants.some((v) => v.status === 'Available')
+}
+
+/** Products matching the search text, the chosen type (when non-empty), every chosen tag, and (optionally) being in stock. */
+export function filterProducts(
+  products: Product[],
+  query: string,
+  type: string,
+  tags: string[] = [],
+  inStockOnly = false,
+): Product[] {
   return products.filter(
-    (p) => matchesQuery(p, query) && (!type || typeOf(p) === type) && tags.every((t) => p.tags.includes(t)),
+    (p) =>
+      matchesQuery(p, query) &&
+      (!type || typeOf(p) === type) &&
+      tags.every((t) => p.tags.includes(t)) &&
+      (!inStockOnly || isInStock(p)),
   )
 }
 
