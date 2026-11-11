@@ -88,3 +88,21 @@ describe('in stock filter', () => {
     expect(filterProducts([inStock, soldOut], '', '')).toEqual([inStock, soldOut])
   })
 })
+
+describe('tagCounts with a filtered subset', () => {
+  const a = product({ id: 'a', tags: ['x', 'y'] })
+  const b = product({ id: 'b', tags: ['x'] })
+  const c = product({ id: 'c', tags: ['z'] })
+  it('counts only the subset but keeps every tag', () => {
+    expect(tagCounts([a, b, c], [a, c])).toEqual([
+      { tag: 'x', count: 1 },
+      { tag: 'y', count: 1 },
+      { tag: 'z', count: 1 },
+    ])
+    expect(tagCounts([a, b, c], [c])).toEqual([
+      { tag: 'z', count: 1 },
+      { tag: 'x', count: 0 },
+      { tag: 'y', count: 0 },
+    ])
+  })
+})

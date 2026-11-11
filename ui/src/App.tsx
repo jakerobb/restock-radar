@@ -33,6 +33,8 @@ export default function App() {
     () => filterProducts(data?.products ?? [], query, activeType, activeTags, inStockOnly),
     [data?.products, query, activeType, activeTags, inStockOnly],
   )
+  // Chip counts reflect the search and every other filter, not the whole catalog.
+  const shownTags = useMemo(() => tagCounts(data?.products ?? [], shown), [data?.products, shown])
 
   return (
     <main className="mx-auto max-w-3xl px-4 pt-6 pb-12">
@@ -54,7 +56,7 @@ export default function App() {
       </div>
 
       {data && <TypeFilter types={types} selected={activeType} total={data.products.length} onChange={setType} />}
-      {data && <TagFilter tags={tags} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
+      {data && <TagFilter tags={shownTags} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
 
       {isPending && <p className="py-8 text-center text-muted">Loading…</p>}
       {isError && !data && (

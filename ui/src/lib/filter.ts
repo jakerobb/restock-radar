@@ -61,10 +61,14 @@ export interface TagCount {
   count: number
 }
 
-/** Every tag on any of `products`, with how many carry it: most common first, then alphabetical. */
-export function tagCounts(products: Product[]): TagCount[] {
+/**
+ * Every tag on any of `products`, with how many carry it: most common first, then alphabetical.
+ * Pass `counted` (e.g. the products left after filtering) to count only those; tags with none stay listed at 0.
+ */
+export function tagCounts(products: Product[], counted: Product[] = products): TagCount[] {
   const counts = new Map<string, number>()
-  for (const p of products) for (const tag of p.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  for (const p of products) for (const tag of p.tags) counts.set(tag, 0)
+  for (const p of counted) for (const tag of p.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
 }
 

@@ -69,6 +69,7 @@ export function TagFilter({ tags, selected, onToggle, onClear }: TagFilterProps)
               className={cn(
                 'cursor-pointer rounded-full border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                 active ? 'border-accent bg-accent text-on-accent' : 'border-line bg-surface text-ink hover:border-accent',
+                count === 0 && !active && 'opacity-50',
               )}
             >
               {tag} <span className={active ? 'opacity-80' : 'text-muted'}>{count}</span>
