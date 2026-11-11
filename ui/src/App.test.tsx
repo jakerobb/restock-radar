@@ -87,4 +87,60 @@ describe('App', () => {
       expect(historyCalls(calls)).toEqual(['GET /v1/history?days=365'])
     })
   })
+
+  it('filters by tag, combining tags and clearing them', async () => {
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': {
+        body: productsResponse({
+          products: [
+            product({ id: 'p1', title: 'AI Port', tags: ['black-friday', 'feature:color-black'] }),
+            product({ id: 'p2', title: 'Dome Camera', tags: ['feature:color-black'] }),
+            product({ id: 'p3', title: 'Plain Switch', tags: [] }),
+          ],
+        }),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /AI Port/ })
+
+    const tags = screen.getByRole('group', { name: 'Filter by tag' })
+    expect(tags).toHaveTextContent('black-friday')
+    expect(tags).toHaveTextContent('feature:color-black')
+
+    await user.click(screen.getByRole('button', { name: /^feature:color-black/ }))
+    expect(screen.getByRole('heading', { name: /Dome Camera/ })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Plain Switch/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^black-friday/ }))
+    expect(screen.getByRole('heading', { name: /AI Port/ })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Dome Camera/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^Clear 2 tags/ }))
+    expect(screen.getByRole('heading', { name: /Plain Switch/ })).toBeInTheDocument()
+  })
+
+  it('collapses a long tag list but keeps chosen tags visible, and searches it', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => `tag-${String(i).padStart(2, '0')}`)
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': { body: productsResponse({ products: [product({ id: 'p1', title: 'Gadget', tags: [...many, 'black-friday'] })] }) },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /Gadget/ })
+
+    const toggle = screen.getByRole('button', { name: /Tags/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: /^black-friday/ })).not.toBeInTheDocument()
+
+    await user.click(toggle)
+    await user.type(screen.getByRole('searchbox', { name: 'Search tags' }), 'black')
+    await user.click(screen.getByRole('button', { name: /^black-friday/ }))
+    expect(screen.queryByRole('button', { name: /^tag-01/ })).not.toBeInTheDocument()
+
+    await user.click(toggle) // collapse again: the chosen tag stays
+    expect(screen.getByRole('button', { name: /^black-friday/ })).toHaveAttribute('aria-pressed', 'true')
+  })
 })

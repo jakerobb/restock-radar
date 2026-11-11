@@ -11,8 +11,8 @@ headless browser in front of a webhook receiver.
 
 The store is a Next.js app. Alongside every page it serves the JSON the page
 renders from, at `/_next/data/{buildId}/{region path}/...json`. We read that
-directly instead of loading pages, so there is no browser, no HTML parsing, and
-one small request per product.
+directly instead of loading pages, so there is no browser and no HTML parsing.
+Requests ask for gzip or deflate (`Accept-Encoding`), which shrinks the JSON about 9x.
 
 - **buildId.** Changes whenever the store deploys. Scraped from the storefront
   HTML (`"buildId":"..."`) and cached. A 404 with a body other than
@@ -22,6 +22,12 @@ one small request per product.
   Each variant carries `status` (`Available`, `SoldOut`, `ComingSoon`, ...),
   `displayPrice`, `displayRegularPrice` (set when discounted), and
   `restockEtaAt`. Prices are in minor units.
+- **Category endpoint.** `/_next/data/{buildId}/us/en/category/{id}.json`, where
+  `id` is a leaf category (the one in `pageProps.category.currentCategory.id` of
+  a product page; parent categories redirect home). `pageProps.subCategories[]`
+  lists the whole family of sibling categories, each with `products[]` carrying
+  the same variant fields as the product endpoint. It is unpaginated, so one
+  request (~0.4-0.7 MB uncompressed) covers every product in the family.
 - **Redirects.** Old slugs answer HTTP 200 with `pageProps.__N_REDIRECT`
   rather than a 3xx. We follow it, if it targets a product page, up to three hops.
 - **Unknown slug.** 404 with `{"notFound":true}`.
@@ -31,8 +37,19 @@ the design assumes failure is normal and loud (see Failure handling).
 
 ## Behaviour
 
-- Every `poll_interval` (default 20m, +/- jitter) the poller walks the watch
-  list sequentially with a short randomized delay between requests.
+- Every `poll_interval` (default 20m, +/- jitter) the poller refreshes the
+  watch list, sequentially, with a short randomized delay between requests.
+  Items whose category is known are grouped, and one category request covers
+  every item in the group (and in sibling categories already covered). Items
+  with no known category, or that their category page doesn't list, get a
+  product request of their own. Products found only through category pages
+  (`discovered`) are never requested individually.
+- **Discovery.** Every product on a category page that we haven't seen is added
+  to the watch list (`source = discovered`) and baselined. If the category was
+  already ingested (the `categories` table), the product is new to the store and
+  a `new` event is queued, so it is announced like any other change; otherwise
+  it is adopted silently, so the first look at a category doesn't announce the
+  catalogue. Discovered products don't count toward `max_items`.
 - Each observation is applied to SQLite in one transaction. A variant seen
   for the first time sets a baseline silently. After that, a change in
   `status` yields a `status` event, and a change in price or regular price
@@ -84,7 +101,8 @@ state), `events` (history, with `notified_at`). Schema is versioned with
 The watch list is the `items` table, not the config. Each row has a `source`:
 `config` rows are reconciled with the config's `items` at startup (added, or
 removed if no longer listed) and `ui` rows are added through the web UI and
-never touched by the reconcile. Once a poll resolves an item, its row records
+never touched by the reconcile; `discovered` rows come from category pages and
+are likewise left alone. Once a poll resolves an item, its row records
 the product ID, which is how the UI tells "tracked, waiting for first check"
 from "tracked and seen".
 

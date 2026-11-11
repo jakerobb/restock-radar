@@ -20,6 +20,13 @@ item list. Items are product slugs from store URLs
 The first poll records a baseline and sends nothing. After that you get a
 notification for each stock status change and each price change.
 
+Products in the same store category as an item you watch are discovered
+automatically: they're tracked from then on, and you're notified ("New
+product!") when one first appears. Products already listed the first time a
+category is read are tracked silently. Discovered products don't count toward `max_items`.
+
+The web UI can filter by any of the store's product tags (`black-friday`, `feature:color-black`, ...). Choosing several shows products that have all of them.
+
 ## Container
 
 ```sh

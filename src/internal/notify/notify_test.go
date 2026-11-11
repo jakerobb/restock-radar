@@ -50,3 +50,22 @@ func TestFromEventStatusBody(t *testing.T) {
 		}
 	}
 }
+
+func TestFromEventNewProduct(t *testing.T) {
+	price := int64(19900)
+	e := store.Event{Kind: store.KindNew, ProductTitle: "G6 180", NewStatus: "Available", NewPriceCents: &price, Currency: "USD", VariantCount: 1}
+	m := FromEvent(e, "https://store.example/p")
+	if m.Title != "New product! G6 180" || m.Body != "In stock, $199.00." || m.Click != "https://store.example/p" {
+		t.Errorf("single variant: %+v", m)
+	}
+
+	e.NewStatus, e.VariantCount = "ComingSoon", 3
+	if m := FromEvent(e, ""); m.Body != "3 variants." {
+		t.Errorf("several variants: %+v", m)
+	}
+
+	e.NewStatus, e.VariantCount, e.NewPriceCents = "SoldOut", 1, nil
+	if m := FromEvent(e, ""); m.Body != "Sold out." {
+		t.Errorf("no price: %+v", m)
+	}
+}

@@ -27,6 +27,8 @@ export interface Product {
   type: string
   /** The store's category id (e.g. "physical-security-nvr"); empty when not yet known. */
   category: string
+  /** The store's labels for the product ("black-friday", "feature:4k", ...); empty when none. */
+  tags: string[]
   url: string
   variants: Variant[]
 }

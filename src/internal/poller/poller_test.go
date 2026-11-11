@@ -19,17 +19,40 @@ import (
 type fakeFetcher struct {
 	status string
 	err    error
-	price  int64 // cents; 0 means the default
+	price  int64  // cents; 0 means the default
+	cat    string // category reported for the widget; empty means unknown
+
+	// category is what the category page returns; categoryErr makes it fail.
+	category    *unistore.Category
+	categoryErr error
+	// Request counts.
+	productCalls, categoryCalls int
 }
 
 func (f *fakeFetcher) FetchProduct(context.Context, config.Region, string) (*unistore.Product, error) {
+	f.productCalls++
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Variants: []unistore.Variant{{
+	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Category: f.cat, Variants: []unistore.Variant{{
 		ID: "v1", SKU: "W-1", Title: "US", Status: f.status,
 		Price: &unistore.Money{Amount: cmp.Or(f.price, 10900), Currency: "USD"},
 	}}}, nil
+}
+
+func (f *fakeFetcher) FetchCategory(context.Context, config.Region, string) (*unistore.Category, error) {
+	f.categoryCalls++
+	if f.categoryErr != nil {
+		return nil, f.categoryErr
+	}
+	return f.category, nil
+}
+
+// listing builds a product as it appears on a category page.
+func listing(id, slug, cat, status string) unistore.Product {
+	return unistore.Product{ID: id, Slug: slug, Name: slug, Title: strings.ToUpper(slug[:1]) + slug[1:], Category: cat,
+		Variants: []unistore.Variant{{ID: "v-" + id, SKU: "S-" + id, Title: "US", Status: status,
+			Price: &unistore.Money{Amount: 5000, Currency: "USD"}}}}
 }
 
 type fakeNotifier struct {
@@ -269,5 +292,112 @@ func TestAddRefusesWhenTheWatchListIsFull(t *testing.T) {
 	var ue *UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "full") {
 		t.Fatalf("want a 'full' UserError, got %v", err)
+	}
+}
+
+func TestCategoryPageReplacesPerItemRequests(t *testing.T) {
+	p, f, n := setup(t)
+	ctx := context.Background()
+	f.status = "SoldOut"
+	f.cat = "c1"
+	page := func(products ...unistore.Product) {
+		f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: products}
+	}
+
+	// The first pass doesn't know the widget's category, so it asks for the widget itself.
+	p.cycle(ctx)
+	if f.productCalls != 1 || f.categoryCalls != 0 {
+		t.Fatalf("first cycle: %d product / %d category requests", f.productCalls, f.categoryCalls)
+	}
+
+	// From then on one category request covers it. The page's other products are
+	// adopted silently, because this is the first look at the category.
+	page(listing("p1", "widget", "c1", "SoldOut"), listing("p2", "gadget", "c1", "Available"))
+	p.cycle(ctx)
+	if f.productCalls != 1 || f.categoryCalls != 1 {
+		t.Fatalf("second cycle: %d product / %d category requests", f.productCalls, f.categoryCalls)
+	}
+	if len(n.sent) != 0 {
+		t.Fatalf("the first look at a category must not announce its products: %+v", n.sent)
+	}
+	var gadget *store.Item
+	items, _ := p.store.Items(ctx)
+	for i := range items {
+		if items[i].Slug == "gadget" {
+			gadget = &items[i]
+		}
+	}
+	if gadget == nil || gadget.Source != store.SourceDiscovered || gadget.ProductID != "p2" || gadget.Category != "c1" {
+		t.Fatalf("gadget should be tracked as discovered: %+v", items)
+	}
+
+	// A product that appears later is announced, and tracked from then on.
+	page(listing("p1", "widget", "c1", "Available"), listing("p2", "gadget", "c1", "Available"), listing("p3", "gizmo", "c1", "SoldOut"))
+	p.cycle(ctx)
+	if f.productCalls != 1 || f.categoryCalls != 2 {
+		t.Fatalf("third cycle: %d product / %d category requests", f.productCalls, f.categoryCalls)
+	}
+	if len(n.sent) != 2 {
+		t.Fatalf("want a restock and a new-product notification, got %+v", n.sent)
+	}
+	var announced notify.Message
+	for _, m := range n.sent {
+		if strings.HasPrefix(m.Title, "New product!") {
+			announced = m
+		}
+	}
+	if announced.Title != "New product! Gizmo" || announced.Click != "https://store.example/us/en/products/gizmo" || announced.Body != "Sold out, $50.00." {
+		t.Fatalf("unexpected announcement: %+v", announced)
+	}
+	// The announcement fires once.
+	p.cycle(ctx)
+	if len(n.sent) != 2 {
+		t.Fatalf("no repeat notifications expected, got %d", len(n.sent))
+	}
+
+	// When the page stops listing a discovered product we leave it alone, but a
+	// product someone chose to watch is checked directly.
+	page(listing("p2", "gadget", "c1", "Available"))
+	p.cycle(ctx)
+	if f.productCalls != 2 {
+		t.Fatalf("only the widget should be fetched individually, got %d product requests", f.productCalls)
+	}
+}
+
+func TestCategoryFailureFallsBackToWatchedItems(t *testing.T) {
+	p, f, _ := setup(t)
+	ctx := context.Background()
+	f.status = "SoldOut"
+	f.cat = "c1"
+	p.cycle(ctx) // learns the category
+
+	f.categoryErr = unistore.ErrSchema
+	p.cycle(ctx)
+	if f.categoryCalls != 1 || f.productCalls != 2 {
+		t.Fatalf("a failed category page should fall back to the widget: %d category / %d product", f.categoryCalls, f.productCalls)
+	}
+
+	f.categoryErr = &unistore.HTTPError{Status: 429}
+	if !p.cycle(ctx) {
+		t.Fatal("a blocked category page should report blocked")
+	}
+	if f.productCalls != 2 {
+		t.Fatalf("a blocked cycle must stop asking: %d product requests", f.productCalls)
+	}
+}
+
+func TestMaxItemsIgnoresDiscoveredProducts(t *testing.T) {
+	p, f, _ := setup(t)
+	ctx := context.Background()
+	f.status = "SoldOut"
+	f.cat = "c1"
+	p.cycle(ctx)
+	f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: []unistore.Product{
+		listing("p1", "widget", "c1", "SoldOut"), listing("p2", "gadget", "c1", "SoldOut"), listing("p3", "gizmo", "c1", "SoldOut")}}
+	p.cycle(ctx)
+
+	p.cfg.MaxItems = 2 // one listed item (the widget), two discovered
+	if _, err := p.Add(ctx, "other", ""); err != nil {
+		t.Fatalf("discovered products must not fill the watch list: %v", err)
 	}
 }

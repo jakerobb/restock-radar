@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -17,6 +18,8 @@ import (
 const (
 	KindStatus = "status"
 	KindPrice  = "price"
+	// KindNew marks a product we hadn't seen before, found on a category page.
+	KindNew = "new"
 )
 
 // migrations are applied in order; PRAGMA user_version records how many ran.
@@ -80,6 +83,16 @@ var migrations = []string{
 	CREATE INDEX events_pending ON events (id) WHERE notified_at IS NULL AND failed_at IS NULL;`,
 	// The store's category id, which the UI groups products by.
 	`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT '';`,
+	// Categories whose product lists we have ingested. A product that turns up in
+	// one of these is new to the store; in any other it is just new to us.
+	`CREATE TABLE categories (
+		region     TEXT NOT NULL,
+		id         TEXT NOT NULL,
+		first_seen TEXT NOT NULL,
+		PRIMARY KEY (region, id)
+	);`,
+	// The store's tags for a product, as a JSON array; empty until first seen.
+	`ALTER TABLE products ADD COLUMN tags TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -132,25 +145,27 @@ func (s *Store) migrate() error {
 
 // Event is one detected change, joined with enough product detail to render.
 type Event struct {
-	ID                   int64      `json:"id"`
-	Timestamp            time.Time  `json:"timestamp"`
-	Region               string     `json:"region"`
-	ProductID            string     `json:"product_id"`
-	ProductSlug          string     `json:"product_slug"`
-	ProductTitle         string     `json:"product_title"`
-	VariantID            string     `json:"variant_id"`
-	VariantSKU           string     `json:"variant_sku"`
-	VariantTitle         string     `json:"variant_title"`
-	Kind                 string     `json:"kind"`
-	OldStatus            string     `json:"old_status,omitempty"`
-	NewStatus            string     `json:"new_status,omitempty"`
-	OldPriceCents        *int64     `json:"old_price_cents,omitempty"`
-	NewPriceCents        *int64     `json:"new_price_cents,omitempty"`
-	OldRegularPriceCents *int64     `json:"old_regular_price_cents,omitempty"`
-	NewRegularPriceCents *int64     `json:"new_regular_price_cents,omitempty"`
-	Currency             string     `json:"currency,omitempty"`
-	NotifiedAt           *time.Time `json:"notified_at,omitempty"`
-	FailedAt             *time.Time `json:"failed_at,omitempty"`
+	ID                   int64     `json:"id"`
+	Timestamp            time.Time `json:"timestamp"`
+	Region               string    `json:"region"`
+	ProductID            string    `json:"product_id"`
+	ProductSlug          string    `json:"product_slug"`
+	ProductTitle         string    `json:"product_title"`
+	VariantID            string    `json:"variant_id"`
+	VariantSKU           string    `json:"variant_sku"`
+	VariantTitle         string    `json:"variant_title"`
+	Kind                 string    `json:"kind"`
+	OldStatus            string    `json:"old_status,omitempty"`
+	NewStatus            string    `json:"new_status,omitempty"`
+	OldPriceCents        *int64    `json:"old_price_cents,omitempty"`
+	NewPriceCents        *int64    `json:"new_price_cents,omitempty"`
+	OldRegularPriceCents *int64    `json:"old_regular_price_cents,omitempty"`
+	NewRegularPriceCents *int64    `json:"new_regular_price_cents,omitempty"`
+	Currency             string    `json:"currency,omitempty"`
+	// VariantCount is how many variants the product has now.
+	VariantCount int        `json:"variant_count"`
+	NotifiedAt   *time.Time `json:"notified_at,omitempty"`
+	FailedAt     *time.Time `json:"failed_at,omitempty"`
 	// PreviousStateSince is when the variant entered OldStatus: the preceding
 	// status change, or when we first saw the variant if there was none. It is
 	// zero if unknown. PreviousStateSinceFirstSeen marks the latter case, where
@@ -166,6 +181,7 @@ type VariantState struct {
 	ProductSlug       string    `json:"product_slug"`
 	ProductTitle      string    `json:"product_title"`
 	ProductCategory   string    `json:"product_category"`
+	ProductTags       []string  `json:"product_tags"`
 	VariantID         string    `json:"variant_id"`
 	SKU               string    `json:"sku"`
 	VariantTitle      string    `json:"variant_title"`
@@ -215,11 +231,78 @@ func (s *Store) Apply(ctx context.Context, region string, p *unistore.Product, n
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO products (region, id, slug, name, title, category) VALUES (?, ?, ?, ?, ?, ?)
+	events, err := applyTx(ctx, tx, region, p, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.hydrate(ctx, events)
+}
+
+// Discover starts tracking a product we have never seen: it joins the watch
+// list, its current state becomes the baseline, and, if announce is set, a
+// "new" event is queued for notification. All of it happens in one transaction,
+// so a product is never tracked without its announcement. It returns the event,
+// or nil when announce is false.
+func (s *Store) Discover(ctx context.Context, region string, p *unistore.Product, announce bool, now time.Time) (*Event, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO items (region, slug, source, product_id, added_at) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (region, slug) DO UPDATE SET product_id = excluded.product_id WHERE product_id IS NULL`,
+		region, p.Slug, SourceDiscovered, p.ID, ts(now)); err != nil {
+		return nil, fmt.Errorf("adding discovered item: %w", err)
+	}
+	if _, err := applyTx(ctx, tx, region, p, now); err != nil {
+		return nil, err
+	}
+	if !announce {
+		return nil, tx.Commit()
+	}
+
+	// Events hang off a variant, so the product's first one stands in.
+	v := p.Variants[0]
+	e, err := insertEvent(ctx, tx, Event{
+		Timestamp: now, Region: region, ProductID: p.ID, VariantID: v.ID, Kind: KindNew,
+		NewStatus: v.Status, Currency: currency(v), NewPriceCents: cents(v.Price), NewRegularPriceCents: cents(v.RegularPrice),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	got, err := s.hydrate(ctx, []Event{e})
+	if err != nil || len(got) == 0 {
+		return nil, err
+	}
+	return &got[0], nil
+}
+
+// applyTx upserts a product and its variants, returning the (unhydrated)
+// events the observation produced.
+func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product, now time.Time) ([]Event, error) {
+	// An observation that doesn't mention tags leaves the stored ones alone.
+	tags := ""
+	if p.Tags != nil {
+		b, err := json.Marshal(p.Tags)
+		if err != nil {
+			return nil, err
+		}
+		tags = string(b)
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO products (region, id, slug, name, title, category, tags) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
-			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END`,
-		region, p.ID, p.Slug, p.Name, p.Title, p.Category)
+			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END,
+			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END`,
+		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}
@@ -294,10 +377,7 @@ func (s *Store) Apply(ctx context.Context, region string, p *unistore.Product, n
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return s.hydrate(ctx, events)
+	return events, nil
 }
 
 func insertEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
@@ -318,6 +398,7 @@ const eventSelect = `
 	SELECT e.id, e.ts, e.region, e.product_id, p.slug, p.title, e.variant_id, v.sku, v.title, e.kind,
 		e.old_status, e.new_status, e.old_price_cents, e.new_price_cents,
 		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at,
+		(SELECT COUNT(*) FROM variants c WHERE c.region = e.region AND c.product_id = e.product_id),
 		(SELECT MAX(x.ts) FROM events x WHERE x.region = e.region AND x.variant_id = e.variant_id
 			AND x.kind = 'status' AND x.id < e.id),
 		v.first_seen
@@ -336,7 +417,7 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 		if err := rows.Scan(&e.ID, &when, &e.Region, &e.ProductID, &e.ProductSlug, &e.ProductTitle,
 			&e.VariantID, &e.VariantSKU, &e.VariantTitle, &e.Kind, &e.OldStatus, &e.NewStatus,
 			&e.OldPriceCents, &e.NewPriceCents, &e.OldRegularPriceCents, &e.NewRegularPriceCents,
-			&e.Currency, &notified, &failed, &prevStatusTS, &firstSeen); err != nil {
+			&e.Currency, &notified, &failed, &e.VariantCount, &prevStatusTS, &firstSeen); err != nil {
 			return nil, err
 		}
 		e.Timestamp, _ = time.Parse(time.RFC3339, when)
@@ -410,7 +491,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, p.category, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.category, p.tags, v.id, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
@@ -424,11 +505,15 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	var out []VariantState
 	for rows.Next() {
 		var v VariantState
-		var checked, changed, first string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &v.VariantID, &v.SKU,
+		var checked, changed, first, tags string
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &tags, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
+		}
+		v.ProductTags = []string{}
+		if tags != "" {
+			_ = json.Unmarshal([]byte(tags), &v.ProductTags) // a bad value just means no tags
 		}
 		v.LastChecked, _ = time.Parse(time.RFC3339, checked)
 		v.LastChanged, _ = time.Parse(time.RFC3339, changed)
@@ -441,6 +526,8 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 const (
 	SourceConfig = "config"
 	SourceUI     = "ui"
+	// SourceDiscovered marks products found on a category page rather than listed by the user.
+	SourceDiscovered = "discovered"
 )
 
 // Item is one entry in the watch list.
@@ -451,6 +538,8 @@ type Item struct {
 	AddedAt time.Time
 	// ProductID is set once a poll has resolved the slug to a product.
 	ProductID string
+	// Category is the product's store category id; empty until a poll has seen it.
+	Category string
 }
 
 // ItemKey identifies a watch list entry.
@@ -530,7 +619,11 @@ func (s *Store) LinkItem(ctx context.Context, region, slug, productID string) er
 
 // Items lists the watch list.
 func (s *Store) Items(ctx context.Context) ([]Item, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT region, slug, source, COALESCE(product_id, ''), added_at FROM items ORDER BY region, slug`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT i.region, i.slug, i.source, COALESCE(i.product_id, ''), COALESCE(p.category, ''), i.added_at
+		FROM items i
+		LEFT JOIN products p ON p.region = i.region AND p.id = i.product_id
+		ORDER BY i.region, i.slug`)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +632,7 @@ func (s *Store) Items(ctx context.Context) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		var added string
-		if err := rows.Scan(&it.Region, &it.Slug, &it.Source, &it.ProductID, &added); err != nil {
+		if err := rows.Scan(&it.Region, &it.Slug, &it.Source, &it.ProductID, &it.Category, &added); err != nil {
 			return nil, err
 		}
 		it.AddedAt, _ = time.Parse(time.RFC3339, added)
@@ -553,6 +646,46 @@ func (s *Store) HasProduct(ctx context.Context, region, id string) (bool, error)
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE region = ? AND id = ?`, region, id).Scan(&n)
 	return n > 0, err
+}
+
+// KnownProducts returns the ids of every product observed in a region.
+func (s *Store) KnownProducts(ctx context.Context, region string) (map[string]bool, error) {
+	return s.idSet(ctx, `SELECT id FROM products WHERE region = ?`, region)
+}
+
+// SeenCategories returns the ids of the categories whose product lists have
+// been ingested in a region.
+func (s *Store) SeenCategories(ctx context.Context, region string) (map[string]bool, error) {
+	return s.idSet(ctx, `SELECT id FROM categories WHERE region = ?`, region)
+}
+
+// MarkCategoriesSeen records that these categories' product lists were ingested.
+func (s *Store) MarkCategoriesSeen(ctx context.Context, region string, ids []string, now time.Time) error {
+	for _, id := range ids {
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO categories (region, id, first_seen) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+			region, id, ts(now)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) idSet(ctx context.Context, query string, args ...any) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 // Stats are counts for the metrics endpoint.

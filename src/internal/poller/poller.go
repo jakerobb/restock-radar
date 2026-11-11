@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ const maxBackoffFactor = 8
 // Fetcher is the part of unistore.Client the poller needs.
 type Fetcher interface {
 	FetchProduct(ctx context.Context, region config.Region, slug string) (*unistore.Product, error)
+	FetchCategory(ctx context.Context, region config.Region, categoryID string) (*unistore.Category, error)
 }
 
 type Poller struct {
@@ -94,7 +96,11 @@ func jitter(max time.Duration) time.Duration {
 
 func itemKey(it store.Item) string { return it.Region + "/" + it.Slug }
 
-// cycle polls every item once and reports whether the store blocked us.
+// cycle refreshes every watched item and reports whether the store blocked us.
+// Items whose category is known are refreshed together: one category page lists
+// every product in its family, so a single request covers them all. Items
+// without a known category, or missing from their category's page, get their
+// own request.
 func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 	p.flush(ctx) // retry anything a previous cycle failed to deliver
 
@@ -103,32 +109,169 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		slog.Error("failed to load watch list", "err", err)
 		return false
 	}
-	for i, it := range items {
-		if i > 0 && p.cfg.RequestDelay > 0 {
+
+	type group struct {
+		region   config.Region
+		category string
+		items    []store.Item
+	}
+	var groups []*group
+	byKey := map[string]*group{}
+	var singles []store.Item
+	for _, it := range items {
+		region, ok := p.cfg.RegionByID(it.Region)
+		if !ok {
+			slog.Warn("skipping item from a region no longer in config", "item", itemKey(it))
+			continue
+		}
+		if it.Category == "" {
+			singles = append(singles, it)
+			continue
+		}
+		key := it.Region + "/" + it.Category
+		g := byKey[key]
+		if g == nil {
+			g = &group{region: region, category: it.Category}
+			byKey[key] = g
+			groups = append(groups, g)
+		}
+		g.items = append(g.items, it)
+	}
+
+	requests := 0
+	// pace sleeps between requests, and reports false if we should stop.
+	pace := func() bool {
+		if requests > 0 && p.cfg.RequestDelay > 0 {
 			select {
 			case <-ctx.Done():
 				return false
 			case <-time.After(p.cfg.RequestDelay/2 + time.Duration(rand.Int64N(int64(p.cfg.RequestDelay)))):
 			}
 		}
-		if ctx.Err() != nil {
-			return false
-		}
-
-		region, ok := p.cfg.RegionByID(it.Region)
-		if !ok {
-			slog.Warn("skipping item from a region no longer in config", "item", itemKey(it))
-			continue
-		}
-		err := p.pollItem(ctx, region, it)
+		requests++
+		return ctx.Err() == nil
+	}
+	blockedBy := func(item string, err error) bool {
 		var he *unistore.HTTPError
 		if errors.As(err, &he) && he.Blocked() {
 			// Hammering a store that's pushing back only makes it worse.
-			slog.Warn("blocked by store; abandoning cycle", "item", itemKey(it), "status", he.Status)
+			slog.Warn("blocked by store; abandoning cycle", "item", item, "status", he.Status)
+			return true
+		}
+		return false
+	}
+
+	covered := map[string]bool{} // region/productID refreshed by a category page this cycle
+	isCovered := func(it store.Item) bool { return it.ProductID != "" && covered[it.Region+"/"+it.ProductID] }
+	for _, g := range groups {
+		// An earlier page may already have listed this group's products, since
+		// a page covers the whole family of sibling categories.
+		if !slices.ContainsFunc(g.items, func(it store.Item) bool { return !isCovered(it) }) {
+			continue
+		}
+		if !pace() {
+			return false
+		}
+		if err := p.pollCategory(ctx, g.region, g.category, covered); blockedBy(g.region.ID+"/"+g.category, err) {
+			return true
+		}
+	}
+
+	var fallback []store.Item
+	for _, g := range groups {
+		for _, it := range g.items {
+			if isCovered(it) {
+				p.recordSuccess(ctx, it)
+			} else if it.Source != store.SourceDiscovered {
+				// Discovered products exist only because of a category page, so when
+				// the page no longer lists one (or can't be fetched) we don't chase
+				// it individually: that could mean hundreds of requests.
+				fallback = append(fallback, it)
+			}
+		}
+	}
+	fallback = append(fallback, singles...)
+
+	for _, it := range fallback {
+		if !pace() {
+			return false
+		}
+		region, _ := p.cfg.RegionByID(it.Region)
+		if blockedBy(itemKey(it), p.pollItem(ctx, region, it)) {
 			return true
 		}
 	}
 	return false
+}
+
+// pollCategory refreshes every product on a category page, marking each in
+// covered. Products we've never seen start being tracked right away, and are
+// announced if the page's category was already known to us (otherwise we'd
+// announce the whole catalog the first time we looked at it).
+func (p *Poller) pollCategory(ctx context.Context, region config.Region, categoryID string, covered map[string]bool) error {
+	cat, err := p.fetcher.FetchCategory(ctx, region, categoryID)
+	if ctx.Err() == nil {
+		p.metrics.Fetch(fetchResult(err), time.Now())
+	}
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("category fetch failed", "region", region.ID, "category", categoryID, "err", err)
+		}
+		return err
+	}
+	if cat.Skipped > 0 {
+		slog.Warn("category page has products with incomplete data; skipping them", "category", categoryID, "skipped", cat.Skipped)
+	}
+
+	known, err := p.store.KnownProducts(ctx, region.ID)
+	if err != nil {
+		slog.Error("failed to load known products", "err", err)
+		return err
+	}
+	seen, err := p.store.SeenCategories(ctx, region.ID)
+	if err != nil {
+		slog.Error("failed to load seen categories", "err", err)
+		return err
+	}
+
+	now := time.Now()
+	for i := range cat.Products {
+		prod := &cat.Products[i]
+		key := region.ID + "/" + prod.Slug
+		if known[prod.ID] {
+			events, err := p.store.Apply(ctx, region.ID, prod, now)
+			if err != nil {
+				slog.Error("failed to record observation", "item", key, "err", err)
+				return err
+			}
+			p.logEvents(key, events)
+		} else {
+			announce := seen[prod.Category]
+			ev, err := p.store.Discover(ctx, region.ID, prod, announce, now)
+			if err != nil {
+				slog.Error("failed to record new product", "item", key, "err", err)
+				return err
+			}
+			slog.Info("new product", "item", key, "title", prod.Title, "variants", len(prod.Variants), "announced", announce)
+			if ev != nil {
+				p.metrics.Event(ev.Kind)
+			}
+		}
+		covered[region.ID+"/"+prod.ID] = true
+	}
+	if err := p.store.MarkCategoriesSeen(ctx, region.ID, cat.Subcategories, now); err != nil {
+		slog.Warn("failed to record ingested categories", "err", err)
+	}
+	p.flush(ctx)
+	return nil
+}
+
+func (p *Poller) logEvents(key string, events []store.Event) {
+	for _, e := range events {
+		p.metrics.Event(e.Kind)
+		slog.Info("change detected", "item", key, "kind", e.Kind, "variant", e.VariantSKU,
+			"old_status", e.OldStatus, "new_status", e.NewStatus)
+	}
 }
 
 func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.Item) error {
@@ -144,7 +287,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 		}
 		return err
 	}
-	p.recordSuccess(ctx, region, it)
+	p.recordSuccess(ctx, it)
 
 	events, err := p.store.Apply(ctx, it.Region, prod, time.Now())
 	if err != nil {
@@ -154,11 +297,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 	if err := p.store.LinkItem(ctx, it.Region, it.Slug, prod.ID); err != nil {
 		slog.Warn("failed to link item to product", "item", key, "err", err)
 	}
-	for _, e := range events {
-		p.metrics.Event(e.Kind)
-		slog.Info("change detected", "item", key, "kind", e.Kind, "variant", e.VariantSKU,
-			"old_status", e.OldStatus, "new_status", e.NewStatus)
-	}
+	p.logEvents(key, events)
 	p.flush(ctx)
 	return nil
 }
@@ -181,7 +320,7 @@ func (p *Poller) recordFailure(ctx context.Context, region config.Region, it sto
 	})
 }
 
-func (p *Poller) recordSuccess(ctx context.Context, region config.Region, it store.Item) {
+func (p *Poller) recordSuccess(ctx context.Context, it store.Item) {
 	key := itemKey(it)
 	if p.alerted[key] {
 		p.sendAlert(ctx, notify.Message{
@@ -285,7 +424,9 @@ func (p *Poller) Add(ctx context.Context, input, regionID string) (*AddResult, e
 		if err != nil {
 			return nil, err
 		}
-		if len(items) >= p.cfg.MaxItems {
+		// Discovered products don't count: they come from category pages, not from anyone's choice.
+		listed := len(items) - countDiscovered(items)
+		if listed >= p.cfg.MaxItems {
 			return nil, &UserError{fmt.Sprintf("the watch list is full (%d products); remove one from the config first", p.cfg.MaxItems)}
 		}
 	}
@@ -320,6 +461,16 @@ func (p *Poller) Add(ctx context.Context, input, regionID string) (*AddResult, e
 	}
 	slog.Info("item added", "item", region.ID+"/"+prod.Slug, "variants", len(prod.Variants))
 	return res, nil
+}
+
+func countDiscovered(items []store.Item) int {
+	n := 0
+	for _, it := range items {
+		if it.Source == store.SourceDiscovered {
+			n++
+		}
+	}
+	return n
 }
 
 // UserError is an error whose message is meant to be shown to the user.
