@@ -42,9 +42,11 @@ type productJSON struct {
 	// Category is the store's category id (e.g. "physical-security-nvr"); the UI searches its words.
 	Category string `json:"category"`
 	// Tags are the store's labels for the product ("black-friday", "feature:4k", ...); the UI filters on them.
-	Tags     []string      `json:"tags"`
-	URL      string        `json:"url"`
-	Variants []variantJSON `json:"variants"`
+	Tags []string `json:"tags"`
+	// Collection is the store collection slug; products sharing one are a single product to the store, and the UI merges them.
+	Collection string        `json:"collection"`
+	URL        string        `json:"url"`
+	Variants   []variantJSON `json:"variants"`
 }
 
 type pendingJSON struct {
@@ -89,7 +91,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		key := [2]string{v.Region, v.ProductID}
 		i, ok := index[key]
 		if !ok {
-			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Variants: []variantJSON{}}
+			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, Variants: []variantJSON{}}
 			if reg, ok := srv.cfg.RegionByID(v.Region); ok {
 				p.URL = fmt.Sprintf("%s/%s/products/%s", reg.BaseURL, reg.Path, url.PathEscape(v.ProductSlug))
 			}

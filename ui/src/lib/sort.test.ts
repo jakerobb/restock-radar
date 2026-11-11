@@ -10,6 +10,7 @@ function product(title: string, price: number | null, seen: string, changed: str
     title,
     type: '',
     category: '',
+    collection: '',
     tags: [],
     url: '',
     variants: [

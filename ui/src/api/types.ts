@@ -29,6 +29,8 @@ export interface Product {
   category: string
   /** The store's labels for the product ("black-friday", "feature:4k", ...); empty when none. */
   tags: string[]
+  /** The store collection slug; products sharing one are a single product to the store. Empty when standalone. */
+  collection: string
   url: string
   variants: Variant[]
 }

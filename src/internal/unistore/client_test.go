@@ -269,3 +269,28 @@ func TestConvertProductTags(t *testing.T) {
 		t.Errorf("a missing list means unknown, got %#v", p.Tags)
 	}
 }
+
+func TestConvertProductCollection(t *testing.T) {
+	parse := func(js string) *Product {
+		t.Helper()
+		var raw rawProduct
+		if err := json.Unmarshal([]byte(js), &raw); err != nil {
+			t.Fatal(err)
+		}
+		p, err := convertProduct(&raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	const variants = `"variants":[{"id":"v","status":"Available"}]`
+	if p := parse(`{"id":"p","slug":"s","proCollectionSlug":"pro-c","organizationalCollectionSlug":"org-c",` + variants + `}`); p.Collection != "pro-c" {
+		t.Errorf("pro collection slug should win, got %q", p.Collection)
+	}
+	if p := parse(`{"id":"p","slug":"s","organizationalCollectionSlug":"org-c",` + variants + `}`); p.Collection != "org-c" {
+		t.Errorf("organizational slug is the fallback, got %q", p.Collection)
+	}
+	if p := parse(`{"id":"p","slug":"s",` + variants + `}`); p.Collection != "" {
+		t.Errorf("no slug means standalone, got %q", p.Collection)
+	}
+}

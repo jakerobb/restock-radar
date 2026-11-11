@@ -6,6 +6,8 @@ import { TextInput } from './ui/TextInput'
 
 interface TagFilterProps {
   tags: TagCount[]
+  /** For each tag prefix, how many of the products currently shown carry one of its tags. */
+  groupTotals: Map<string, number>
   /** The chosen tags; a product must carry all of them. */
   selected: string[]
   onToggle: (tag: string) => void
@@ -23,7 +25,7 @@ const SEARCHABLE = 12
  * Chips combine: choosing several narrows to products that have all of them.
  * The list can be long, so it collapses (chosen tags stay visible) and can be searched.
  */
-export function TagFilter({ tags, selected, onToggle, onClear }: TagFilterProps) {
+export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: TagFilterProps) {
   const [open, setOpen] = useState(tags.length <= OPEN_BY_DEFAULT)
   const [search, setSearch] = useState('')
   if (tags.length === 0) return null
@@ -83,7 +85,7 @@ export function TagFilter({ tags, selected, onToggle, onClear }: TagFilterProps)
           )
         })}
         {visibleGroups.map((g) => (
-          <TagGroup key={g.prefix} prefix={g.prefix} options={g.options} selected={selected} onToggle={onToggle} />
+          <TagGroup key={g.prefix} prefix={g.prefix} options={g.options} total={groupTotals.get(g.prefix) ?? 0} selected={selected} onToggle={onToggle} />
         ))}
         {open && visible.length === 0 && visibleGroups.length === 0 && <p className="text-sm text-muted">No tags match “{search}”.</p>}
       </div>

@@ -13,7 +13,8 @@ import { TagFilter } from './components/TagFilter'
 import { TypeFilter } from './components/TypeFilter'
 import { Notice } from './components/ui/Notice'
 import { cn } from './lib/cn'
-import { filterProducts, tagCounts, typeCounts } from './lib/filter'
+import { groupProducts } from './lib/group'
+import { filterProducts, prefixCounts, tagCounts, typeCounts } from './lib/filter'
 
 export default function App() {
   const { data, isPending, isError, refetch } = useProducts()
@@ -25,23 +26,32 @@ export default function App() {
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
   const [inStockOnly, setInStockOnly] = useState(false)
 
-  const types = useMemo(() => typeCounts(data?.products ?? []), [data?.products])
+  // Products the store files in one collection are a single product to it, so they are here too.
+  const products = useMemo(() => groupProducts(data?.products ?? []), [data?.products])
+  const allTypes = useMemo(() => typeCounts(products), [products])
   // A chosen type that no longer has any products (e.g. after a refetch) shouldn't hide everything.
-  const activeType = types.some((t) => t.type === type) ? type : ''
+  const activeType = allTypes.some((t) => t.type === type) ? type : ''
   // Tags carried by a single product are just clutter, so they're left out of the filter.
-  const tags = useMemo(() => tagCounts(data?.products ?? []).filter((t) => t.count > 1), [data?.products])
+  const tags = useMemo(() => tagCounts(products).filter((t) => t.count > 1), [products])
   // Likewise for tags: one the store dropped (a sale ending) mustn't keep filtering.
   const activeTags = useMemo(() => chosenTags.filter((t) => tags.some((c) => c.tag === t)), [chosenTags, tags])
   const toggleTag = (tag: string) => setChosenTags(activeTags.includes(tag) ? activeTags.filter((t) => t !== tag) : [...activeTags, tag])
   const shown = useMemo(
-    () => filterProducts(data?.products ?? [], query, activeType, activeTags, inStockOnly),
-    [data?.products, query, activeType, activeTags, inStockOnly],
+    () => filterProducts(products, query, activeType, activeTags, inStockOnly),
+    [products, query, activeType, activeTags, inStockOnly],
   )
-  // Chip counts reflect the search and every other filter, not the whole catalog.
+  // Type counts reflect everything but the type itself, so the other types show what choosing them would give.
+  const withoutType = useMemo(
+    () => filterProducts(products, query, '', activeTags, inStockOnly),
+    [products, query, activeTags, inStockOnly],
+  )
+  const types = useMemo(() => typeCounts(products, withoutType), [products, withoutType])
+  // Tag chip counts reflect the search and every other filter, not the whole catalog.
   const shownTags = useMemo(
-    () => tagCounts(data?.products ?? [], shown).filter((t) => tags.some((c) => c.tag === t.tag)),
-    [data?.products, shown, tags],
+    () => tagCounts(products, shown).filter((t) => tags.some((c) => c.tag === t.tag)),
+    [products, shown, tags],
   )
+  const groupTotals = useMemo(() => prefixCounts(shown), [shown])
 
   return (
     <main className={cn('mx-auto max-w-3xl px-4 pt-6 pb-12', sidebarOpen && 'lg:max-w-6xl')}>
@@ -60,6 +70,8 @@ export default function App() {
         </div>
       </div>
 
+      {data && <TypeFilter types={types} selected={activeType} total={withoutType.length} onChange={setType} />}
+
       <div className={cn('mt-3', sidebarOpen && 'lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6')}>
         <aside
           aria-label="Search and filters"
@@ -75,13 +87,12 @@ export default function App() {
             <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
             In stock only
           </label>
-          {data && <TypeFilter types={types} selected={activeType} total={data.products.length} onChange={setType} />}
-          {data && <TagFilter tags={shownTags} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
+          {data && <TagFilter tags={shownTags} groupTotals={groupTotals} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
         </aside>
 
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <div>{data && <SyncStatus lastSync={data.last_sync} productCount={data.products.length} />}</div>
+            <div>{data && <SyncStatus lastSync={data.last_sync} productCount={products.length} />}</div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <SortPicker sort={sort} onChange={setSort} />
               <HistoryRangePicker days={historyDays} onChange={setHistoryDays} />

@@ -93,6 +93,9 @@ var migrations = []string{
 	);`,
 	// The store's tags for a product, as a JSON array; empty until first seen.
 	`ALTER TABLE products ADD COLUMN tags TEXT NOT NULL DEFAULT '';`,
+	// The store collection a product belongs to; the UI shows products sharing
+	// one as a single product. Empty when standalone or not yet seen.
+	`ALTER TABLE products ADD COLUMN collection TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -182,6 +185,7 @@ type VariantState struct {
 	ProductTitle      string    `json:"product_title"`
 	ProductCategory   string    `json:"product_category"`
 	ProductTags       []string  `json:"product_tags"`
+	ProductCollection string    `json:"product_collection"`
 	VariantID         string    `json:"variant_id"`
 	SKU               string    `json:"sku"`
 	VariantTitle      string    `json:"variant_title"`
@@ -298,11 +302,12 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		tags = string(b)
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO products (region, id, slug, name, title, category, tags) VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO products (region, id, slug, name, title, category, tags, collection) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
 			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END,
-			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END`,
-		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags)
+			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END,
+			collection = CASE WHEN excluded.collection = '' THEN products.collection ELSE excluded.collection END`,
+		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}
@@ -491,7 +496,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, p.category, p.tags, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
@@ -506,7 +511,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	for rows.Next() {
 		var v VariantState
 		var checked, changed, first, tags string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &tags, &v.VariantID, &v.SKU,
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err

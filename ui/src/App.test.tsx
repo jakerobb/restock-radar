@@ -190,3 +190,64 @@ describe('filter column toggle', () => {
     localStorage.clear()
   })
 })
+
+describe('tag counts', () => {
+  it('follow the search, type and in-stock filters', async () => {
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': {
+        body: productsResponse({
+          products: [
+            product({ id: 'p1', title: 'Alpha', tags: ['sale', 'feature:4k', 'feature:poe'] }),
+            product({ id: 'p2', title: 'Alpha Two', tags: ['sale', 'feature:4k'] }),
+            product({ id: 'p3', title: 'Beta', tags: ['sale', 'feature:poe'] }),
+          ],
+        }),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /Alpha Two/ })
+    expect(screen.getByRole('button', { name: /^sale 3/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^feature 3/ })).toBeInTheDocument()
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search products and variants' }), 'beta')
+    expect(screen.getByRole('button', { name: /^sale 1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^feature 1/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^feature/ }))
+    expect(screen.getByRole('checkbox', { name: /^poe\s*1/ })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /^4k\s*0/ })).toBeInTheDocument()
+  })
+})
+
+describe('type counts', () => {
+  it('follow the search and other filters', async () => {
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': {
+        body: productsResponse({
+          products: [
+            product({ id: 'p1', title: 'Alpha Cam', type: 'Cameras' }),
+            product({ id: 'p2', title: 'Alpha Hub', type: 'Gateways' }),
+            product({ id: 'p3', title: 'Beta Hub', type: 'Gateways' }),
+          ],
+        }),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /Alpha Cam/ })
+    expect(screen.getByRole('button', { name: /^All\s*3/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Gateways\s*2/ })).toBeInTheDocument()
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search products and variants' }), 'alpha')
+    expect(screen.getByRole('button', { name: /^All\s*2/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Gateways\s*1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Cameras\s*1/ })).toBeInTheDocument()
+
+    // Choosing a type doesn't change the counts of the others.
+    await user.click(screen.getByRole('button', { name: /^Gateways/ }))
+    expect(screen.getByRole('button', { name: /^Cameras\s*1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^All\s*2/ })).toBeInTheDocument()
+  })
+})

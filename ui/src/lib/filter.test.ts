@@ -1,4 +1,4 @@
-import { filterProducts, groupTags, isInStock, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
+import { filterProducts, groupTags, isInStock, prefixCounts, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -122,5 +122,24 @@ describe('groupTags', () => {
         { prefix: 'feature', options: [t('feature:poe', 2), t('feature:4k')] },
       ],
     })
+  })
+})
+
+describe('prefixCounts', () => {
+  it('counts products once per prefix', () => {
+    const a = product({ id: 'a', tags: ['feature:4k', 'feature:poe', 'color:red'] })
+    const b = product({ id: 'b', tags: ['feature:4k', 'sale'] })
+    expect([...prefixCounts([a, b])]).toEqual([['feature', 2], ['color', 1]])
+    expect([...prefixCounts([b])]).toEqual([['feature', 1]])
+  })
+})
+
+describe('typeCounts with a filtered subset', () => {
+  it('counts only the subset but keeps every type', () => {
+    expect(typeCounts([camera, gateway, mystery], [gateway])).toEqual([
+      { type: 'Cameras & Security', count: 0 },
+      { type: 'Gateways', count: 1 },
+      { type: 'Other', count: 0 },
+    ])
   })
 })
