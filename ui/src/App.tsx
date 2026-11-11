@@ -25,7 +25,8 @@ export default function App() {
   const types = useMemo(() => typeCounts(data?.products ?? []), [data?.products])
   // A chosen type that no longer has any products (e.g. after a refetch) shouldn't hide everything.
   const activeType = types.some((t) => t.type === type) ? type : ''
-  const tags = useMemo(() => tagCounts(data?.products ?? []), [data?.products])
+  // Tags carried by a single product are just clutter, so they're left out of the filter.
+  const tags = useMemo(() => tagCounts(data?.products ?? []).filter((t) => t.count > 1), [data?.products])
   // Likewise for tags: one the store dropped (a sale ending) mustn't keep filtering.
   const activeTags = useMemo(() => chosenTags.filter((t) => tags.some((c) => c.tag === t)), [chosenTags, tags])
   const toggleTag = (tag: string) => setChosenTags(activeTags.includes(tag) ? activeTags.filter((t) => t !== tag) : [...activeTags, tag])
@@ -34,7 +35,10 @@ export default function App() {
     [data?.products, query, activeType, activeTags, inStockOnly],
   )
   // Chip counts reflect the search and every other filter, not the whole catalog.
-  const shownTags = useMemo(() => tagCounts(data?.products ?? [], shown), [data?.products, shown])
+  const shownTags = useMemo(
+    () => tagCounts(data?.products ?? [], shown).filter((t) => tags.some((c) => c.tag === t.tag)),
+    [data?.products, shown, tags],
+  )
 
   return (
     <main className="mx-auto max-w-3xl px-4 pt-6 pb-12">
