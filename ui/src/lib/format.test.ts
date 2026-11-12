@@ -1,4 +1,4 @@
-import { formatMoney, formatRelative } from './format'
+import { formatMoney, formatRelative, surchargeBreakdown, totalCents } from './format'
 
 describe('formatMoney', () => {
   it('formats minor units as currency', () => {
@@ -29,5 +29,28 @@ describe('formatRelative', () => {
   })
   it('returns nothing for garbage', () => {
     expect(formatRelative('not a date', now)).toBe('')
+  })
+})
+
+describe('surcharges', () => {
+  const base = { price_cents: 129900, regular_price_cents: null, price_with_surcharges_cents: 143100, surcharge_types: ['Memory'], currency: 'USD' }
+
+  it('uses the price with surcharges as the total', () => {
+    expect(totalCents(base)).toBe(143100)
+    expect(totalCents({ ...base, price_with_surcharges_cents: null })).toBe(129900)
+    expect(totalCents({ ...base, price_cents: null })).toBeNull()
+  })
+
+  it('breaks down a single surcharge', () => {
+    expect(surchargeBreakdown(base)).toBe('$1,299.00 base price\n+ $132.00 memory surcharge')
+  })
+
+  it('names every type when only the combined amount is known', () => {
+    expect(surchargeBreakdown({ ...base, surcharge_types: ['Memory', 'Tariff'] })).toBe('$1,299.00 base price\n+ $132.00 surcharges (memory, tariff)')
+  })
+
+  it('is empty without a surcharge', () => {
+    expect(surchargeBreakdown({ ...base, price_with_surcharges_cents: 129900, surcharge_types: [] })).toBe('')
+    expect(surchargeBreakdown({ ...base, price_with_surcharges_cents: null })).toBe('')
   })
 })

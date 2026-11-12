@@ -31,7 +31,7 @@ export function TypeFilter({ types, selected, total, onChange }: TypeFilterProps
     )
   }
   return (
-    <div className="mt-3 mb-4 flex flex-wrap gap-x-5 border-b border-line" role="group" aria-label="Filter by product type">
+    <div className="mt-3 mb-4 flex shrink-0 flex-wrap gap-x-5 border-b border-line" role="group" aria-label="Filter by product type">
       {tab('', 'All', total)}
       {types.map((t) => tab(t.type, t.type, t.count))}
     </div>

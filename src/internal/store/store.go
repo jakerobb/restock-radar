@@ -96,6 +96,12 @@ var migrations = []string{
 	// The store collection a product belongs to; the UI shows products sharing
 	// one as a single product. Empty when standalone or not yet seen.
 	`ALTER TABLE products ADD COLUMN collection TEXT NOT NULL DEFAULT '';`,
+	// Surcharges (memory, tariffs, ...) the store adds to the base price. The
+	// variant's price including them is its latest state only: a change in it
+	// raises no event. surcharge_types is a JSON array of the product's
+	// surcharge kinds, empty until first seen.
+	`ALTER TABLE variants ADD COLUMN surcharge_price_cents INTEGER;
+	ALTER TABLE products ADD COLUMN surcharge_types TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -179,24 +185,28 @@ type Event struct {
 
 // VariantState is the latest observed state of a variant.
 type VariantState struct {
-	Region            string    `json:"region"`
-	ProductID         string    `json:"product_id"`
-	ProductSlug       string    `json:"product_slug"`
-	ProductTitle      string    `json:"product_title"`
-	ProductCategory   string    `json:"product_category"`
-	ProductTags       []string  `json:"product_tags"`
-	ProductCollection string    `json:"product_collection"`
-	VariantID         string    `json:"variant_id"`
-	SKU               string    `json:"sku"`
-	VariantTitle      string    `json:"variant_title"`
-	Status            string    `json:"status"`
-	PriceCents        *int64    `json:"price_cents"`
-	RegularPriceCents *int64    `json:"regular_price_cents"`
-	Currency          string    `json:"currency"`
-	RestockETA        string    `json:"restock_eta,omitempty"`
-	LastChecked       time.Time `json:"last_checked"`
-	LastChanged       time.Time `json:"last_changed"`
-	FirstSeen         time.Time `json:"first_seen"`
+	Region            string   `json:"region"`
+	ProductID         string   `json:"product_id"`
+	ProductSlug       string   `json:"product_slug"`
+	ProductTitle      string   `json:"product_title"`
+	ProductCategory   string   `json:"product_category"`
+	ProductTags       []string `json:"product_tags"`
+	ProductCollection string   `json:"product_collection"`
+	VariantID         string   `json:"variant_id"`
+	SKU               string   `json:"sku"`
+	VariantTitle      string   `json:"variant_title"`
+	Status            string   `json:"status"`
+	PriceCents        *int64   `json:"price_cents"`
+	RegularPriceCents *int64   `json:"regular_price_cents"`
+	// PriceWithSurchargesCents is PriceCents plus surcharges; null until a poll has seen it.
+	PriceWithSurchargesCents *int64 `json:"price_with_surcharges_cents"`
+	// SurchargeTypes are the kinds of surcharge on the product ("Memory", ...); empty when none.
+	SurchargeTypes []string  `json:"surcharge_types"`
+	Currency       string    `json:"currency"`
+	RestockETA     string    `json:"restock_eta,omitempty"`
+	LastChecked    time.Time `json:"last_checked"`
+	LastChanged    time.Time `json:"last_changed"`
+	FirstSeen      time.Time `json:"first_seen"`
 }
 
 func cents(m *unistore.Money) *int64 {
@@ -301,13 +311,22 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		}
 		tags = string(b)
 	}
+	surcharges := ""
+	if p.SurchargeTypes != nil {
+		b, err := json.Marshal(p.SurchargeTypes)
+		if err != nil {
+			return nil, err
+		}
+		surcharges = string(b)
+	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO products (region, id, slug, name, title, category, tags, collection) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO products (region, id, slug, name, title, category, tags, collection, surcharge_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
 			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END,
 			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END,
-			collection = CASE WHEN excluded.collection = '' THEN products.collection ELSE excluded.collection END`,
-		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection)
+			collection = CASE WHEN excluded.collection = '' THEN products.collection ELSE excluded.collection END,
+			surcharge_types = CASE WHEN excluded.surcharge_types = '' THEN products.surcharge_types ELSE excluded.surcharge_types END`,
+		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection, surcharges)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}
@@ -315,6 +334,7 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 	var events []Event
 	for _, v := range p.Variants {
 		newPrice, newRegular, cur := cents(v.Price), cents(v.RegularPrice), currency(v)
+		newTotal := cents(v.PriceWithSurcharges)
 
 		var oldStatus string
 		var oldPrice, oldRegular *int64
@@ -325,9 +345,9 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		if err == sql.ErrNoRows {
 			_, err = tx.ExecContext(ctx, `
 				INSERT INTO variants (region, id, product_id, sku, title, status, price_cents, regular_price_cents,
-					currency, restock_eta, first_seen, last_checked, last_changed)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				region, v.ID, p.ID, v.SKU, v.Title, v.Status, newPrice, newRegular, cur, v.RestockETA,
+					surcharge_price_cents, currency, restock_eta, first_seen, last_checked, last_changed)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				region, v.ID, p.ID, v.SKU, v.Title, v.Status, newPrice, newRegular, newTotal, cur, v.RestockETA,
 				ts(now), ts(now), ts(now))
 			if err != nil {
 				return nil, fmt.Errorf("inserting variant: %w", err)
@@ -369,13 +389,13 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		if changed {
 			lastChanged = "?"
 		}
-		args := []any{v.SKU, v.Title, v.Status, newPrice, newRegular, cur, v.RestockETA, ts(now)}
+		args := []any{v.SKU, v.Title, v.Status, newPrice, newRegular, newTotal, cur, v.RestockETA, ts(now)}
 		if changed {
 			args = append(args, ts(now))
 		}
 		args = append(args, region, v.ID)
 		_, err = tx.ExecContext(ctx, `UPDATE variants SET sku = ?, title = ?, status = ?, price_cents = ?,
-			regular_price_cents = ?, currency = ?, restock_eta = ?, last_checked = ?, last_changed = `+lastChanged+`
+			regular_price_cents = ?, surcharge_price_cents = ?, currency = ?, restock_eta = ?, last_checked = ?, last_changed = `+lastChanged+`
 			WHERE region = ? AND id = ?`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("updating variant: %w", err)
@@ -497,7 +517,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.region, v.product_id, p.slug, p.title, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
-			v.regular_price_cents, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
+			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
 		WHERE ? = '' OR v.region = ?
@@ -510,15 +530,19 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	var out []VariantState
 	for rows.Next() {
 		var v VariantState
-		var checked, changed, first, tags string
+		var checked, changed, first, tags, surcharges string
 		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
-			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.Currency, &v.RestockETA,
+			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.PriceWithSurchargesCents, &surcharges, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
 		}
 		v.ProductTags = []string{}
 		if tags != "" {
 			_ = json.Unmarshal([]byte(tags), &v.ProductTags) // a bad value just means no tags
+		}
+		v.SurchargeTypes = []string{}
+		if surcharges != "" {
+			_ = json.Unmarshal([]byte(surcharges), &v.SurchargeTypes) // likewise
 		}
 		v.LastChecked, _ = time.Parse(time.RFC3339, checked)
 		v.LastChanged, _ = time.Parse(time.RFC3339, changed)

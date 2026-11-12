@@ -1,8 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useProducts } from './api/queries'
 import { useHistoryDays } from './hooks/useHistoryDays'
-import { useFillViewport } from './hooks/useFillViewport'
-import { useMediaQuery } from './hooks/useMediaQuery'
 import { useSidebarOpen } from './hooks/useSidebarOpen'
 import { useSort } from './hooks/useSort'
 import { AddProductDialog } from './components/AddProductDialog'
@@ -27,10 +25,6 @@ export default function App() {
   const [type, setType] = useState('')
   const [chosenTags, setChosenTags] = useState<string[]>([])
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
-  const wide = useMediaQuery('(min-width: 1024px)')
-  const asideRef = useRef<HTMLElement>(null)
-  // On wide screens the filter column fills the window, so the tag list can use all the room there is.
-  const asideHeight = useFillViewport(asideRef, wide && sidebarOpen)
   const [inStockOnly, setInStockOnly] = useState(false)
 
   // Products the store files in one collection are a single product to it, so they are here too.
@@ -61,8 +55,9 @@ export default function App() {
   const groupTotals = useMemo(() => prefixCounts(shown), [shown])
 
   return (
-    <main className={cn('mx-auto max-w-3xl px-4 pt-6 pb-12', sidebarOpen && 'lg:max-w-6xl')}>
-      <div className="flex items-center justify-between gap-2">
+    // On wide screens the page itself never scrolls: the filter column and the results each scroll on their own.
+    <main className={cn('mx-auto flex max-w-3xl flex-col px-4 pt-6 pb-12 lg:h-dvh lg:pb-4', sidebarOpen && 'lg:max-w-[96rem]')}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Restock Radar</h1>
         <div className="flex items-center gap-2">
           <Button
@@ -80,16 +75,13 @@ export default function App() {
 
       {data && <TypeFilter types={types} selected={activeType} total={withoutType.length} onChange={setType} />}
 
-      <div className={cn('mt-3', sidebarOpen && 'lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6')}>
-        <aside
-          ref={asideRef}
-          aria-label="Search and filters"
-          style={{ height: asideHeight }}
-          className={cn(
-            sidebarOpen && 'lg:sticky lg:top-4 lg:flex lg:flex-col lg:overflow-y-auto',
-            !sidebarOpen && 'lg:hidden',
-          )}
-        >
+      <div
+        className={cn(
+          'mt-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] lg:gap-6',
+          sidebarOpen ? 'lg:grid-cols-[18rem_minmax(0,1fr)]' : 'lg:grid-cols-[minmax(0,1fr)]',
+        )}
+      >
+        <aside aria-label="Search and filters" className={cn('lg:min-h-0', sidebarOpen ? 'lg:flex lg:flex-col lg:overflow-y-auto' : 'lg:hidden')}>
           <div className="flex">
             <SearchBox value={query} onChange={setQuery} />
           </div>
@@ -100,7 +92,7 @@ export default function App() {
           {data && <TagFilter tags={shownTags} groupTotals={groupTotals} selected={activeTags} onToggle={toggleTag} onClear={() => setChosenTags([])} />}
         </aside>
 
-        <div className="min-w-0">
+        <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <div>{data && <SyncStatus lastSync={data.last_sync} productCount={products.length} />}</div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

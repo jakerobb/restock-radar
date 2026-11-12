@@ -25,7 +25,7 @@ export function VariantRow({ variant, chart }: VariantRowProps) {
           {variant.restock_eta && <span className="ml-1.5 text-xs text-muted">restock {variant.restock_eta}</span>}
         </td>
         <td className="py-1.5 text-right">
-          <PriceTag cents={variant.price_cents} regularCents={variant.regular_price_cents} currency={variant.currency} />
+          <PriceTag variant={variant} />
         </td>
         <td className="hidden py-1.5 pl-2 text-right text-muted sm:table-cell">
           <RelativeTime iso={variant.last_changed} />

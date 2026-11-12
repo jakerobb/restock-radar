@@ -10,6 +10,10 @@ export interface Variant {
   price_cents: number | null
   /** The pre-discount price, when different from price_cents. */
   regular_price_cents: number | null
+  /** The out-the-door price: price_cents plus the store's surcharges; null until seen. */
+  price_with_surcharges_cents: number | null
+  /** The kinds of surcharge included in it ("Memory", "Tariff", ...); empty when none. Only the total is known, not each amount. */
+  surcharge_types: string[]
   currency: string
   restock_eta?: string
   last_checked: string

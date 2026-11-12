@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -293,4 +294,27 @@ func TestConvertProductCollection(t *testing.T) {
 	if p := parse(`{"id":"p","slug":"s",` + variants + `}`); p.Collection != "" {
 		t.Errorf("no slug means standalone, got %q", p.Collection)
 	}
+}
+
+func TestConvertProductSurcharges(t *testing.T) {
+	var raw rawProduct
+	err := json.Unmarshal([]byte(`{"id":"p1","slug":"s","name":"S","title":"S",
+		"productSurchargeTypes":["Memory","Tariff","Memory",""],
+		"variants":[{"id":"v1","sku":"S-1","title":"US","status":"Available",
+			"displayPrice":{"amount":129900,"currency":"USD"},
+			"displayPriceWithSurcharges":{"amount":143100,"currency":"USD"}}]}`), &raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := convertProduct(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.SurchargeTypes, []string{"Memory", "Tariff"}) {
+		t.Errorf("surcharge types = %v, want every distinct type kept", p.SurchargeTypes)
+	}
+	if v := p.Variants[0]; v.PriceWithSurcharges == nil || v.PriceWithSurcharges.Amount != 143100 {
+		t.Errorf("price with surcharges = %+v", v.PriceWithSurcharges)
+	}
+
 }

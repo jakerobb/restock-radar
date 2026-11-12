@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { cn } from '../lib/cn'
-import { groupTags, type TagCount } from '../lib/filter'
+import { groupTags, type TagCount, type TagGroupCounts } from '../lib/filter'
 import { TagGroup } from './TagGroup'
 import { TextInput } from './ui/TextInput'
 
@@ -16,6 +16,9 @@ interface TagFilterProps {
 
 /** From this many tags on, the list gets its own search box. */
 const SEARCHABLE = 12
+
+/** A chip in the list: a plain tag or a prefix group. */
+type Entry = { key: string; name: string; tag?: TagCount; group?: TagGroupCounts }
 
 /**
  * One chip per tag the store puts on any product (black-friday, feature:4k, ...).
@@ -34,6 +37,11 @@ export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: Ta
   // Collapsed, only what's chosen stays visible: plain chips, and the groups holding a chosen option.
   const visible = open ? plain : plain.filter((t) => selected.includes(t.tag))
   const visibleGroups = open ? groups : groups.filter((g) => g.options.some((o) => selected.includes(o.tag)))
+  // Plain chips and group chips share one alphabetical order (a group sorts by its prefix).
+  const entries: Entry[] = [
+    ...visible.map((t) => ({ key: t.tag, name: t.tag, tag: t })),
+    ...visibleGroups.map((g) => ({ key: `${g.prefix}:`, name: g.prefix, group: g })),
+  ].sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <div className="mb-4 flex flex-col lg:min-h-0 lg:flex-1" role="group" aria-label="Filter by tag">
@@ -63,12 +71,18 @@ export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: Ta
           />
         )}
       </div>
-      <div className={cn('flex flex-wrap gap-2', open && 'max-h-80 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1')}>
-        {visible.map(({ tag, count }) => {
+      <div className={cn('flex flex-wrap content-start gap-2', open && 'max-h-80 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1')}>
+        {entries.map((e) => {
+          if (e.group) {
+            const g = e.group
+            return <TagGroup key={e.key} prefix={g.prefix} options={g.options} total={groupTotals.get(g.prefix) ?? 0} selected={selected} onToggle={onToggle} />
+          }
+          if (!e.tag) return null
+          const { tag, count } = e.tag
           const active = selected.includes(tag)
           return (
             <button
-              key={tag}
+              key={e.key}
               type="button"
               aria-pressed={active}
               onClick={() => onToggle(tag)}
@@ -82,9 +96,6 @@ export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: Ta
             </button>
           )
         })}
-        {visibleGroups.map((g) => (
-          <TagGroup key={g.prefix} prefix={g.prefix} options={g.options} total={groupTotals.get(g.prefix) ?? 0} selected={selected} onToggle={onToggle} />
-        ))}
         {open && visible.length === 0 && visibleGroups.length === 0 && <p className="text-sm text-muted">No tags match “{search}”.</p>}
       </div>
     </div>

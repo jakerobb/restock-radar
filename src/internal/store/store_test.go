@@ -381,3 +381,44 @@ func TestProductCollection(t *testing.T) {
 		t.Fatalf("unknown collection must not erase a known one: %q", got)
 	}
 }
+
+func TestSurcharges(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+
+	p := product("Available", 129900)
+	p.SurchargeTypes = []string{"Memory", "Tariff"}
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 143100, Currency: "USD"}
+	if _, err := s.Apply(ctx, "us", p, now); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ := s.Variants(ctx, "")
+	if len(vs) != 1 || vs[0].PriceWithSurchargesCents == nil || *vs[0].PriceWithSurchargesCents != 143100 ||
+		len(vs[0].SurchargeTypes) != 2 || vs[0].SurchargeTypes[1] != "Tariff" {
+		t.Fatalf("surcharges not stored: %+v", vs)
+	}
+
+	// A surcharge change alone is kept as latest state without raising an event.
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 150000, Currency: "USD"}
+	events, err := s.Apply(ctx, "us", p, now)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("want no events, got %v err=%v", events, err)
+	}
+	vs, _ = s.Variants(ctx, "")
+	if *vs[0].PriceWithSurchargesCents != 150000 {
+		t.Errorf("latest surcharge price not updated: %v", *vs[0].PriceWithSurchargesCents)
+	}
+
+	// An observation that doesn't say keeps the stored types; one that says "none" clears them.
+	p.SurchargeTypes = nil
+	_, _ = s.Apply(ctx, "us", p, now)
+	if vs, _ = s.Variants(ctx, ""); len(vs[0].SurchargeTypes) != 2 {
+		t.Errorf("types = %v, want kept", vs[0].SurchargeTypes)
+	}
+	p.SurchargeTypes = []string{}
+	_, _ = s.Apply(ctx, "us", p, now)
+	if vs, _ = s.Variants(ctx, ""); len(vs[0].SurchargeTypes) != 0 {
+		t.Errorf("types = %v, want cleared", vs[0].SurchargeTypes)
+	}
+}
