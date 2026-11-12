@@ -1,7 +1,7 @@
 # Compile the web UI to static files. Runs natively on the build host (the
 # output is platform-independent), and the Go build below embeds the result.
 # Base images are pinned by digest as well as tag; Renovate bumps both together.
-FROM --platform=$BUILDPLATFORM node:26.13.0@sha256:438603bbb5cda404b9416f0b5c8026f61501ab911760d861ec28c36b5d675725 AS ui
+FROM --platform=$BUILDPLATFORM node:26.13.1@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac AS ui
 
 WORKDIR /ui
 
