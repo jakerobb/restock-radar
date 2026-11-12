@@ -399,26 +399,62 @@ func TestSurcharges(t *testing.T) {
 		t.Fatalf("surcharges not stored: %+v", vs)
 	}
 
-	// A surcharge change alone is kept as latest state without raising an event.
+	// A surcharge change alone is a price event, carrying the totals and types around it.
+	p.SurchargeTypes = []string{"Memory"}
 	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 150000, Currency: "USD"}
 	events, err := s.Apply(ctx, "us", p, now)
-	if err != nil || len(events) != 0 {
-		t.Fatalf("want no events, got %v err=%v", events, err)
+	if err != nil || len(events) != 1 || events[0].Kind != KindPrice {
+		t.Fatalf("want one price event, got %v err=%v", events, err)
+	}
+	e := events[0]
+	if *e.OldTotalCents != 143100 || *e.NewTotalCents != 150000 || *e.OldPriceCents != 129900 || *e.NewPriceCents != 129900 ||
+		len(e.OldSurchargeTypes) != 2 || len(e.NewSurchargeTypes) != 1 {
+		t.Errorf("event details wrong: %+v", e)
 	}
 	vs, _ = s.Variants(ctx, "")
 	if *vs[0].PriceWithSurchargesCents != 150000 {
 		t.Errorf("latest surcharge price not updated: %v", *vs[0].PriceWithSurchargesCents)
 	}
 
+	// Unchanged: nothing to report.
+	if events, _ = s.Apply(ctx, "us", p, now); len(events) != 0 {
+		t.Fatalf("no change, want no events, got %v", events)
+	}
+
 	// An observation that doesn't say keeps the stored types; one that says "none" clears them.
 	p.SurchargeTypes = nil
 	_, _ = s.Apply(ctx, "us", p, now)
-	if vs, _ = s.Variants(ctx, ""); len(vs[0].SurchargeTypes) != 2 {
+	if vs, _ = s.Variants(ctx, ""); len(vs[0].SurchargeTypes) != 1 {
 		t.Errorf("types = %v, want kept", vs[0].SurchargeTypes)
 	}
 	p.SurchargeTypes = []string{}
 	_, _ = s.Apply(ctx, "us", p, now)
 	if vs, _ = s.Variants(ctx, ""); len(vs[0].SurchargeTypes) != 0 {
 		t.Errorf("types = %v, want cleared", vs[0].SurchargeTypes)
+	}
+}
+
+func TestSurchargeUnknownIsNotAChange(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+
+	// Baseline recorded before surcharges were tracked: nothing known about them.
+	if _, err := s.Apply(ctx, "us", product("Available", 129900), now); err != nil {
+		t.Fatal(err)
+	}
+	p := product("Available", 129900)
+	p.SurchargeTypes = []string{"Memory"}
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 143100, Currency: "USD"}
+	if events, err := s.Apply(ctx, "us", p, now); err != nil || len(events) != 0 {
+		t.Fatalf("first sight of surcharges must not be an event: %v err=%v", events, err)
+	}
+
+	// A new surcharge type with a higher total is one.
+	p.SurchargeTypes = []string{"Memory", "Tariff"}
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 148100, Currency: "USD"}
+	events, _ := s.Apply(ctx, "us", p, now)
+	if len(events) != 1 || len(events[0].NewSurchargeTypes) != 2 {
+		t.Fatalf("want a price event with the added type, got %+v", events)
 	}
 }

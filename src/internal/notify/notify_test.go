@@ -69,3 +69,60 @@ func TestFromEventNewProduct(t *testing.T) {
 		t.Errorf("no price: %+v", m)
 	}
 }
+
+func TestFromEventPriceChange(t *testing.T) {
+	p := func(c int64) *int64 { return &c }
+	base := store.Event{
+		Kind: store.KindPrice, Currency: "USD", ProductTitle: "Pro Max 48 PoE",
+		OldPriceCents: p(129900), NewPriceCents: p(129900),
+		OldTotalCents: p(143100), NewTotalCents: p(143100),
+		OldSurchargeTypes: []string{"Memory"}, NewSurchargeTypes: []string{"Memory"},
+	}
+	tests := []struct {
+		name      string
+		mutate    func(*store.Event)
+		wantTitle string
+		wantBody  string
+	}{
+		{"base price only", func(e *store.Event) {
+			e.NewPriceCents, e.NewTotalCents = p(119900), p(133100)
+		}, "Pro Max 48 PoE price changed", "$1431.00 → $1331.00\nBase price: $1299.00 → $1199.00"},
+		{"surcharge amount only", func(e *store.Event) {
+			e.NewTotalCents = p(150000)
+		}, "Pro Max 48 PoE surcharge changed", "$1431.00 → $1500.00\nSurcharges: $132.00 → $201.00"},
+		{"surcharge added", func(e *store.Event) {
+			e.NewSurchargeTypes = []string{"Memory", "Tariff"}
+			e.NewTotalCents = p(148100)
+		}, "Pro Max 48 PoE surcharge added", "$1431.00 → $1481.00\nAdded: tariff surcharge\nSurcharges: $132.00 → $182.00"},
+		{"surcharge removed", func(e *store.Event) {
+			e.NewSurchargeTypes = []string{}
+			e.NewTotalCents = p(129900)
+		}, "Pro Max 48 PoE surcharge removed", "$1431.00 → $1299.00\nRemoved: memory surcharge\nSurcharges: $132.00 → $0.00"},
+		{"price and surcharge", func(e *store.Event) {
+			e.NewPriceCents, e.NewTotalCents = p(139900), p(158100)
+			e.NewSurchargeTypes = []string{"Memory", "Tariff"}
+		}, "Pro Max 48 PoE price and surcharges changed", "$1431.00 → $1581.00\nBase price: $1299.00 → $1399.00\nAdded: tariff surcharge\nSurcharges: $132.00 → $182.00"},
+		{"recorded before surcharges were tracked", func(e *store.Event) {
+			e.OldTotalCents, e.NewTotalCents = nil, nil
+			e.OldSurchargeTypes, e.NewSurchargeTypes = nil, nil
+			e.NewPriceCents = p(119900)
+		}, "Pro Max 48 PoE price changed", "$1299.00 → $1199.00\nBase price: $1299.00 → $1199.00"},
+	}
+	for _, tt := range tests {
+		e := base
+		tt.mutate(&e)
+		m := FromEvent(e, "")
+		if m.Title != tt.wantTitle || m.Body != tt.wantBody {
+			t.Errorf("%s:\n got %q / %q\nwant %q / %q", tt.name, m.Title, m.Body, tt.wantTitle, tt.wantBody)
+		}
+	}
+}
+
+func TestStatusBodyUsesSurchargePrice(t *testing.T) {
+	p := func(c int64) *int64 { return &c }
+	e := store.Event{Kind: store.KindStatus, Currency: "USD", ProductTitle: "Switch", OldStatus: "SoldOut", NewStatus: "Available",
+		OldPriceCents: p(129900), NewPriceCents: p(129900), OldTotalCents: p(143100), NewTotalCents: p(143100)}
+	if got := FromEvent(e, "").Body; got != "Was sold out. Still $1431.00." {
+		t.Errorf("got %q", got)
+	}
+}

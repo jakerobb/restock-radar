@@ -5,6 +5,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -104,19 +105,21 @@ func previousState(e store.Event) string {
 	return fmt.Sprintf("Was %s for %s%s.", state, atLeast, humanDuration(e.Timestamp.Sub(e.PreviousStateSince)))
 }
 
-// priceChange describes the new price relative to the old one. It returns ""
-// when there is no new price, or when the price is unchanged and always is false.
+// priceChange describes the new price, including surcharges, relative to the
+// old one. It returns "" when there is no new price, or when the price is
+// unchanged and always is false.
 func priceChange(e store.Event, always bool) string {
-	if e.NewPriceCents == nil {
+	oldP, newP := e.TotalOld(), e.TotalNew()
+	if newP == nil {
 		return ""
 	}
-	now := money(e.NewPriceCents, e.Currency)
+	now := money(newP, e.Currency)
 	switch {
-	case e.OldPriceCents == nil:
+	case oldP == nil:
 		return fmt.Sprintf("Now %s.", now)
-	case *e.NewPriceCents > *e.OldPriceCents:
+	case *newP > *oldP:
 		return fmt.Sprintf("Price increased to %s.", now)
-	case *e.NewPriceCents < *e.OldPriceCents:
+	case *newP < *oldP:
 		return fmt.Sprintf("Price decreased to %s.", now)
 	case always:
 		return fmt.Sprintf("Still %s.", now)
@@ -140,8 +143,8 @@ func newProductBody(e store.Event) string {
 		status = "in stock"
 	}
 	body := strings.ToUpper(status[:1]) + status[1:]
-	if e.NewPriceCents != nil {
-		body += ", " + money(e.NewPriceCents, e.Currency)
+	if p := e.TotalNew(); p != nil {
+		body += ", " + money(p, e.Currency)
 	}
 	return body + "."
 }
@@ -172,12 +175,82 @@ func FromEvent(e store.Event, storeURL string) Message {
 		m.Body = newProductBody(e)
 		m.Tags = []string{"new"}
 	case store.KindPrice:
-		m.Title = name(e) + " price changed"
-		m.Body = fmt.Sprintf("%s → %s", money(e.OldPriceCents, e.Currency), money(e.NewPriceCents, e.Currency))
+		m.Title, m.Body = priceEvent(e)
 		m.Tags = []string{"moneybag"}
-		if e.OldPriceCents != nil && e.NewPriceCents != nil && *e.NewPriceCents < *e.OldPriceCents {
+		if oldP, newP := e.TotalOld(), e.TotalNew(); oldP != nil && newP != nil && *newP < *oldP {
 			m.Tags = []string{"chart_with_downwards_trend"}
 		}
 	}
 	return m
+}
+
+// surchargeName renders a surcharge type the way the store names it, e.g.
+// "Memory" -> "memory surcharge".
+func surchargeName(t string) string { return strings.ToLower(t) + " surcharge" }
+
+// diffTypes returns the surcharge types in b but not in a.
+func diffTypes(a, b []string) []string {
+	var out []string
+	for _, t := range b {
+		if !slices.Contains(a, t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// surchargeAmount is the total less the base price: what the surcharges come to.
+func surchargeAmount(base, total *int64) *int64 {
+	if base == nil || total == nil {
+		return nil
+	}
+	d := *total - *base
+	return &d
+}
+
+// priceEvent renders a price event: a title saying whether the price, the
+// surcharges, or both changed, and a body with the total before and after
+// and what moved.
+func priceEvent(e store.Event) (title, body string) {
+	baseChanged := !equalPtr(e.OldPriceCents, e.NewPriceCents) || !equalPtr(e.OldRegularPriceCents, e.NewRegularPriceCents)
+	added, removed := diffTypes(e.OldSurchargeTypes, e.NewSurchargeTypes), diffTypes(e.NewSurchargeTypes, e.OldSurchargeTypes)
+	oldSur, newSur := surchargeAmount(e.OldPriceCents, e.OldTotalCents), surchargeAmount(e.NewPriceCents, e.NewTotalCents)
+	amountChanged := oldSur != nil && newSur != nil && *oldSur != *newSur
+	surchargeChanged := len(added)+len(removed) > 0 || amountChanged
+
+	title = name(e)
+	switch {
+	case baseChanged && surchargeChanged:
+		title += " price and surcharges changed"
+	case surchargeChanged && len(added) > 0 && len(removed) == 0:
+		title += " surcharge added"
+	case surchargeChanged && len(removed) > 0 && len(added) == 0:
+		title += " surcharge removed"
+	case surchargeChanged:
+		title += " surcharge changed"
+	default:
+		title += " price changed"
+	}
+
+	lines := []string{fmt.Sprintf("%s → %s", money(e.TotalOld(), e.Currency), money(e.TotalNew(), e.Currency))}
+	if baseChanged {
+		lines = append(lines, fmt.Sprintf("Base price: %s → %s", money(e.OldPriceCents, e.Currency), money(e.NewPriceCents, e.Currency)))
+	}
+	for _, t := range added {
+		lines = append(lines, "Added: "+surchargeName(t))
+	}
+	for _, t := range removed {
+		lines = append(lines, "Removed: "+surchargeName(t))
+	}
+	if amountChanged {
+		lines = append(lines, fmt.Sprintf("Surcharges: %s → %s", money(oldSur, e.Currency), money(newSur, e.Currency)))
+	}
+	return title, strings.Join(lines, "\n")
+}
+
+func equalPtr(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
