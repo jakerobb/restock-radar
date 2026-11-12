@@ -52,8 +52,13 @@ the design assumes failure is normal and loud (see Failure handling).
   catalogue. Discovered products don't count toward `max_items`.
 - Each observation is applied to SQLite in one transaction. A variant seen
   for the first time sets a baseline silently. After that, a change in
-  `status` yields a `status` event, and a change in price or regular price
-  yields a `price` event.
+  `status` yields a `status` event, and a change in price, regular price, or
+  surcharges yields a `price` event. Surcharges (memory, tariffs, ...) are the
+  store's add-ons to the base price: events record the price including them and
+  the surcharge types before and after, and notifications say which moved and
+  whether a type was added or removed. The store gives only the total, so a
+  surcharge's own amount isn't known when a product has several types. Values
+  not yet known (rows from before surcharges were tracked) never count as a change.
 - Events are the system's source of truth. Notification is a separate step:
   an event is marked `notified_at` only after a successful send, and unsent
   events are retried at the start of each cycle and after each product.

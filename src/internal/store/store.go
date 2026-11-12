@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -102,6 +103,13 @@ var migrations = []string{
 	// surcharge kinds, empty until first seen.
 	`ALTER TABLE variants ADD COLUMN surcharge_price_cents INTEGER;
 	ALTER TABLE products ADD COLUMN surcharge_types TEXT NOT NULL DEFAULT '';`,
+	// Events carry the price including surcharges and the surcharge types before
+	// and after, so a notification can say which of them changed. NULL / empty
+	// means unknown (events recorded before this, or a response that didn't say).
+	`ALTER TABLE events ADD COLUMN old_total_cents INTEGER;
+	ALTER TABLE events ADD COLUMN new_total_cents INTEGER;
+	ALTER TABLE events ADD COLUMN old_surcharge_types TEXT NOT NULL DEFAULT '';
+	ALTER TABLE events ADD COLUMN new_surcharge_types TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -170,7 +178,13 @@ type Event struct {
 	NewPriceCents        *int64    `json:"new_price_cents,omitempty"`
 	OldRegularPriceCents *int64    `json:"old_regular_price_cents,omitempty"`
 	NewRegularPriceCents *int64    `json:"new_regular_price_cents,omitempty"`
-	Currency             string    `json:"currency,omitempty"`
+	// Old/NewTotalCents are the prices including surcharges; nil when not known (see TotalOld, TotalNew).
+	OldTotalCents *int64 `json:"old_total_cents,omitempty"`
+	NewTotalCents *int64 `json:"new_total_cents,omitempty"`
+	// Old/NewSurchargeTypes are the product's surcharge kinds around the event; nil when not known.
+	OldSurchargeTypes []string `json:"old_surcharge_types,omitempty"`
+	NewSurchargeTypes []string `json:"new_surcharge_types,omitempty"`
+	Currency          string   `json:"currency,omitempty"`
 	// VariantCount is how many variants the product has now.
 	VariantCount int        `json:"variant_count"`
 	NotifiedAt   *time.Time `json:"notified_at,omitempty"`
@@ -181,6 +195,20 @@ type Event struct {
 	// the true duration may be longer than we can tell.
 	PreviousStateSince          time.Time `json:"previous_state_since,omitzero"`
 	PreviousStateSinceFirstSeen bool      `json:"previous_state_since_first_seen,omitempty"`
+}
+
+// TotalOld is the price including surcharges before the event, falling back to
+// the base price when the surcharge-inclusive one wasn't recorded.
+func (e Event) TotalOld() *int64 { return firstNonNil(e.OldTotalCents, e.OldPriceCents) }
+
+// TotalNew is the price including surcharges after the event, with the same fallback.
+func (e Event) TotalNew() *int64 { return firstNonNil(e.NewTotalCents, e.NewPriceCents) }
+
+func firstNonNil(a, b *int64) *int64 {
+	if a != nil {
+		return a
+	}
+	return b
 }
 
 // VariantState is the latest observed state of a variant.
@@ -231,6 +259,40 @@ func equalCents(a, b *int64) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+// typesJSON encodes surcharge types for storage; nil (unknown) is "".
+func typesJSON(types []string) string {
+	if types == nil {
+		return ""
+	}
+	b, _ := json.Marshal(types) // a string slice always encodes
+	return string(b)
+}
+
+// parseTypes is the inverse of typesJSON; anything unreadable is unknown.
+func parseTypes(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var types []string
+	if json.Unmarshal([]byte(s), &types) != nil {
+		return nil
+	}
+	return types
+}
+
+// sameTypes reports whether two lists name the same set of surcharge types.
+func sameTypes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, t := range a {
+		if !slices.Contains(b, t) {
+			return false
+		}
+	}
+	return true
 }
 
 func ts(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -285,6 +347,7 @@ func (s *Store) Discover(ctx context.Context, region string, p *unistore.Product
 	e, err := insertEvent(ctx, tx, Event{
 		Timestamp: now, Region: region, ProductID: p.ID, VariantID: v.ID, Kind: KindNew,
 		NewStatus: v.Status, Currency: currency(v), NewPriceCents: cents(v.Price), NewRegularPriceCents: cents(v.RegularPrice),
+		NewTotalCents: cents(v.PriceWithSurcharges),
 	})
 	if err != nil {
 		return nil, err
@@ -311,14 +374,13 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		}
 		tags = string(b)
 	}
-	surcharges := ""
-	if p.SurchargeTypes != nil {
-		b, err := json.Marshal(p.SurchargeTypes)
-		if err != nil {
-			return nil, err
-		}
-		surcharges = string(b)
+	surcharges := typesJSON(p.SurchargeTypes)
+	var storedTypes string
+	if err := tx.QueryRowContext(ctx, `SELECT surcharge_types FROM products WHERE region = ? AND id = ?`, region, p.ID).Scan(&storedTypes); err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("reading product: %w", err)
 	}
+	// Unknown (nil) on either side means there's nothing to compare.
+	oldTypes, newTypes := parseTypes(storedTypes), p.SurchargeTypes
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO products (region, id, slug, name, title, category, tags, collection, surcharge_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
@@ -337,10 +399,10 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		newTotal := cents(v.PriceWithSurcharges)
 
 		var oldStatus string
-		var oldPrice, oldRegular *int64
+		var oldPrice, oldRegular, oldTotal *int64
 		err := tx.QueryRowContext(ctx,
-			`SELECT status, price_cents, regular_price_cents FROM variants WHERE region = ? AND id = ?`,
-			region, v.ID).Scan(&oldStatus, &oldPrice, &oldRegular)
+			`SELECT status, price_cents, regular_price_cents, surcharge_price_cents FROM variants WHERE region = ? AND id = ?`,
+			region, v.ID).Scan(&oldStatus, &oldPrice, &oldRegular, &oldTotal)
 
 		if err == sql.ErrNoRows {
 			_, err = tx.ExecContext(ctx, `
@@ -365,19 +427,26 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 				Timestamp: now, Region: region, ProductID: p.ID, VariantID: v.ID, Kind: KindStatus,
 				OldStatus: oldStatus, NewStatus: v.Status, Currency: cur,
 				OldPriceCents: oldPrice, NewPriceCents: newPrice, NewRegularPriceCents: newRegular,
+				OldTotalCents: oldTotal, NewTotalCents: newTotal,
 			})
 			if err != nil {
 				return nil, err
 			}
 			events = append(events, e)
 		}
-		if !equalCents(oldPrice, newPrice) || !equalCents(oldRegular, newRegular) {
+		// A change in the surcharges counts as a price change: the amount, or a
+		// type added or removed. Nothing is compared against an unknown.
+		surchargeChanged := (oldTotal != nil && newTotal != nil && *oldTotal != *newTotal) ||
+			(oldTypes != nil && newTypes != nil && !sameTypes(oldTypes, newTypes))
+		if !equalCents(oldPrice, newPrice) || !equalCents(oldRegular, newRegular) || surchargeChanged {
 			changed = true
 			e, err := insertEvent(ctx, tx, Event{
 				Timestamp: now, Region: region, ProductID: p.ID, VariantID: v.ID, Kind: KindPrice,
 				NewStatus: v.Status, Currency: cur,
 				OldPriceCents: oldPrice, NewPriceCents: newPrice,
 				OldRegularPriceCents: oldRegular, NewRegularPriceCents: newRegular,
+				OldTotalCents: oldTotal, NewTotalCents: newTotal,
+				OldSurchargeTypes: oldTypes, NewSurchargeTypes: newTypes,
 			})
 			if err != nil {
 				return nil, err
@@ -408,10 +477,12 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 func insertEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO events (ts, region, product_id, variant_id, kind, old_status, new_status,
-			old_price_cents, new_price_cents, old_regular_price_cents, new_regular_price_cents, currency)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			old_price_cents, new_price_cents, old_regular_price_cents, new_regular_price_cents, currency,
+			old_total_cents, new_total_cents, old_surcharge_types, new_surcharge_types)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts(e.Timestamp), e.Region, e.ProductID, e.VariantID, e.Kind, e.OldStatus, e.NewStatus,
-		e.OldPriceCents, e.NewPriceCents, e.OldRegularPriceCents, e.NewRegularPriceCents, e.Currency)
+		e.OldPriceCents, e.NewPriceCents, e.OldRegularPriceCents, e.NewRegularPriceCents, e.Currency,
+		e.OldTotalCents, e.NewTotalCents, typesJSON(e.OldSurchargeTypes), typesJSON(e.NewSurchargeTypes))
 	if err != nil {
 		return e, fmt.Errorf("inserting event: %w", err)
 	}
@@ -423,6 +494,7 @@ const eventSelect = `
 	SELECT e.id, e.ts, e.region, e.product_id, p.slug, p.title, e.variant_id, v.sku, v.title, e.kind,
 		e.old_status, e.new_status, e.old_price_cents, e.new_price_cents,
 		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at,
+		e.old_total_cents, e.new_total_cents, e.old_surcharge_types, e.new_surcharge_types,
 		(SELECT COUNT(*) FROM variants c WHERE c.region = e.region AND c.product_id = e.product_id),
 		(SELECT MAX(x.ts) FROM events x WHERE x.region = e.region AND x.variant_id = e.variant_id
 			AND x.kind = 'status' AND x.id < e.id),
@@ -438,13 +510,15 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 		var e Event
 		var when string
 		var notified, failed, prevStatusTS sql.NullString
-		var firstSeen string
+		var firstSeen, oldTypes, newTypes string
 		if err := rows.Scan(&e.ID, &when, &e.Region, &e.ProductID, &e.ProductSlug, &e.ProductTitle,
 			&e.VariantID, &e.VariantSKU, &e.VariantTitle, &e.Kind, &e.OldStatus, &e.NewStatus,
 			&e.OldPriceCents, &e.NewPriceCents, &e.OldRegularPriceCents, &e.NewRegularPriceCents,
-			&e.Currency, &notified, &failed, &e.VariantCount, &prevStatusTS, &firstSeen); err != nil {
+			&e.Currency, &notified, &failed, &e.OldTotalCents, &e.NewTotalCents, &oldTypes, &newTypes,
+			&e.VariantCount, &prevStatusTS, &firstSeen); err != nil {
 			return nil, err
 		}
+		e.OldSurchargeTypes, e.NewSurchargeTypes = parseTypes(oldTypes), parseTypes(newTypes)
 		e.Timestamp, _ = time.Parse(time.RFC3339, when)
 		if prevStatusTS.Valid {
 			e.PreviousStateSince, _ = time.Parse(time.RFC3339, prevStatusTS.String)
