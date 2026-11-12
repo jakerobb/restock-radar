@@ -19,17 +19,22 @@ import (
 
 // variantJSON is one variant's latest state, as the UI sees it.
 type variantJSON struct {
-	ID                string    `json:"id"`
-	SKU               string    `json:"sku"`
-	Title             string    `json:"title"`
-	Status            string    `json:"status"`
-	PriceCents        *int64    `json:"price_cents"`
-	RegularPriceCents *int64    `json:"regular_price_cents"`
-	Currency          string    `json:"currency"`
-	RestockETA        string    `json:"restock_eta,omitempty"`
-	LastChecked       time.Time `json:"last_checked"`
-	LastChanged       time.Time `json:"last_changed"`
-	FirstSeen         time.Time `json:"first_seen"`
+	ID                string `json:"id"`
+	SKU               string `json:"sku"`
+	Title             string `json:"title"`
+	Status            string `json:"status"`
+	PriceCents        *int64 `json:"price_cents"`
+	RegularPriceCents *int64 `json:"regular_price_cents"`
+	// PriceWithSurchargesCents is the out-the-door price: PriceCents plus the store's surcharges. Null until seen.
+	PriceWithSurchargesCents *int64 `json:"price_with_surcharges_cents"`
+	// SurchargeTypes names each kind of surcharge included in it ("Memory", ...). The store gives
+	// only the total, so per-type amounts aren't known.
+	SurchargeTypes []string  `json:"surcharge_types"`
+	Currency       string    `json:"currency"`
+	RestockETA     string    `json:"restock_eta,omitempty"`
+	LastChecked    time.Time `json:"last_checked"`
+	LastChanged    time.Time `json:"last_changed"`
+	FirstSeen      time.Time `json:"first_seen"`
 }
 
 type productJSON struct {
@@ -101,7 +106,8 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Products[i].Variants = append(resp.Products[i].Variants, variantJSON{
 			ID: v.VariantID, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,
-			PriceCents: v.PriceCents, RegularPriceCents: v.RegularPriceCents, Currency: v.Currency,
+			PriceCents: v.PriceCents, RegularPriceCents: v.RegularPriceCents,
+			PriceWithSurchargesCents: v.PriceWithSurchargesCents, SurchargeTypes: v.SurchargeTypes, Currency: v.Currency,
 			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, FirstSeen: v.FirstSeen,
 		})
 	}

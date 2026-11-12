@@ -1,4 +1,5 @@
 import type { Product } from '../api/types'
+import { totalCents } from './format'
 
 export const SORT_OPTIONS = [
   { value: 'updated', label: 'Recently updated' },
@@ -52,7 +53,7 @@ function updated(p: Product): number {
 
 /** The lowest variant price, or null when no variant shows one. */
 function lowestPrice(p: Product): number | null {
-  const prices = p.variants.flatMap((v) => (v.price_cents === null ? [] : [v.price_cents]))
+  const prices = p.variants.flatMap((v) => (totalCents(v) === null ? [] : [totalCents(v)!]))
   return prices.length ? Math.min(...prices) : null
 }
 

@@ -8,6 +8,8 @@ export function variant(overrides: Partial<Variant> = {}): Variant {
     status: 'Available',
     price_cents: 10900,
     regular_price_cents: null,
+    price_with_surcharges_cents: null,
+    surcharge_types: [],
     currency: 'USD',
     last_checked: new Date().toISOString(),
     last_changed: new Date().toISOString(),

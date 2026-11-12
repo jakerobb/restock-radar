@@ -32,6 +32,17 @@ describe('ProductCard', () => {
     expect(screen.getByRole('row', { name: /White/ })).toHaveTextContent(/249\.00/)
   })
 
+  it('shows the price with surcharges as the main price, with the breakdown beneath', () => {
+    const p = product({
+      variants: [variant({ price_cents: 129900, price_with_surcharges_cents: 143100, surcharge_types: ['Memory'] })],
+    })
+    render(<ProductCard product={p} showRegion={false} />)
+    const row = screen.getByRole('row', { name: /Black/ })
+    expect(within(row).getByText('$1,431.00')).toBeInTheDocument()
+    expect(within(row).getByText('$1,299.00 base price')).toBeInTheDocument()
+    expect(within(row).getByText('+ $132.00 memory surcharge')).toBeInTheDocument()
+  })
+
   it('shows the restock ETA of a sold-out variant', () => {
     const p = product({ variants: [variant({ status: 'SoldOut', restock_eta: '2026-11-18' })] })
     render(<ProductCard product={p} showRegion={false} />)

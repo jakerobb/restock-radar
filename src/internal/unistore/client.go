@@ -68,7 +68,11 @@ type Variant struct {
 	Status       string // Available, SoldOut, ComingSoon, ...
 	Price        *Money
 	RegularPrice *Money // set when Price is a discount
-	RestockETA   string
+	// PriceWithSurcharges is Price plus the store's add-on charges (memory,
+	// tariffs, ...). Nil when the response didn't give one; equal to Price when
+	// the product carries no surcharge.
+	PriceWithSurcharges *Money
+	RestockETA          string
 }
 
 type Product struct {
@@ -85,8 +89,12 @@ type Product struct {
 	// Tags are the store's labels for the product (e.g. "black-friday",
 	// "feature:4k"), sorted and without duplicates. Nil means the response
 	// didn't say, which is different from having no tags.
-	Tags     []string
-	Variants []Variant
+	Tags []string
+	// SurchargeTypes names every kind of surcharge the store adds on top of
+	// the base price (e.g. "Memory"), in the store's order and unfiltered, so
+	// kinds we have never seen are kept. Nil means the response didn't say.
+	SurchargeTypes []string
+	Variants       []Variant
 }
 
 type build struct {
@@ -292,14 +300,17 @@ type rawProduct struct {
 	Tags                         []struct {
 		Name string `json:"name"`
 	} `json:"tags"`
-	Variants []struct {
+	SurchargeTypes []string `json:"productSurchargeTypes"`
+	Variants       []struct {
 		ID           string    `json:"id"`
 		SKU          string    `json:"sku"`
 		Title        string    `json:"title"`
 		Status       string    `json:"status"`
 		Price        *rawMoney `json:"displayPrice"`
 		RegularPrice *rawMoney `json:"displayRegularPrice"`
-		RestockETA   *string   `json:"restockEtaAt"`
+		// The price including surcharges, which the store shows as a smaller secondary price.
+		PriceWithSurcharges *rawMoney `json:"displayPriceWithSurcharges"`
+		RestockETA          *string   `json:"restockEtaAt"`
 	} `json:"variants"`
 }
 
@@ -341,6 +352,14 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		}
 		slices.Sort(p.Tags)
 	}
+	if raw.SurchargeTypes != nil {
+		p.SurchargeTypes = []string{}
+		for _, t := range raw.SurchargeTypes {
+			if t != "" && !slices.Contains(p.SurchargeTypes, t) {
+				p.SurchargeTypes = append(p.SurchargeTypes, t)
+			}
+		}
+	}
 	for _, v := range raw.Variants {
 		if v.ID == "" || v.Status == "" {
 			return nil, fmt.Errorf("%w: variant of %q missing id or status", ErrSchema, raw.Slug)
@@ -348,6 +367,7 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		pv := Variant{ID: v.ID, SKU: v.SKU, Title: v.Title, Status: v.Status}
 		pv.Price = money(v.Price)
 		pv.RegularPrice = money(v.RegularPrice)
+		pv.PriceWithSurcharges = money(v.PriceWithSurcharges)
 		if v.RestockETA != nil {
 			pv.RestockETA = *v.RestockETA
 		}
