@@ -28,8 +28,8 @@ describe('ProductCard', () => {
 
   it('strikes through a discounted regular price', () => {
     render(<ProductCard product={multi} showRegion={false} />)
-    expect(screen.getByText(/299\.00/).tagName).toBe('S')
-    expect(screen.getByRole('row', { name: /White/ })).toHaveTextContent(/249\.00/)
+    expect(screen.getByText(/299/).tagName).toBe('S')
+    expect(screen.getByRole('row', { name: /White/ })).toHaveTextContent(/\$249/)
   })
 
   it('shows the price with surcharges as the main price, with the breakdown beneath', () => {
@@ -38,9 +38,21 @@ describe('ProductCard', () => {
     })
     render(<ProductCard product={p} showRegion={false} />)
     const row = screen.getByRole('row', { name: /Black/ })
-    expect(within(row).getByText('$1,431.00')).toBeInTheDocument()
-    expect(within(row).getByText('$1,299.00 base price')).toBeInTheDocument()
-    expect(within(row).getByText('+ $132.00 memory surcharge')).toBeInTheDocument()
+    expect(within(row).getByText('$1,431')).toBeInTheDocument()
+    expect(within(row).getByText('$1,299 base price')).toBeInTheDocument()
+    expect(within(row).getByText('+ $132 memory surcharge')).toBeInTheDocument()
+  })
+
+  it('breaks a sale price with surcharges into struck base price, sale price and surcharge', () => {
+    const p = product({
+      variants: [variant({ price_cents: 15900, regular_price_cents: 19900, price_with_surcharges_cents: 17500, surcharge_types: ['Memory'] })],
+    })
+    render(<ProductCard product={p} showRegion={false} />)
+    const row = screen.getByRole('row', { name: /Black/ })
+    expect(within(row).getByText('$175')).toBeInTheDocument()
+    expect(within(row).getByText('$199 base price').tagName).toBe('S')
+    expect(within(row).getByText('$159 sale price')).toBeInTheDocument()
+    expect(within(row).getByText('+ $16 memory surcharge')).toBeInTheDocument()
   })
 
   it('shows the restock ETA of a sold-out variant', () => {

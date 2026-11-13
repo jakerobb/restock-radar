@@ -1,5 +1,5 @@
-import { formatMoney, surchargeBreakdown, totalCents } from '../lib/format'
 import type { Variant } from '../api/types'
+import { formatPrice, onSale, priceLines, priceTitle, totalCents } from '../lib/format'
 
 interface PriceTagProps {
   variant: Pick<Variant, 'price_cents' | 'regular_price_cents' | 'price_with_surcharges_cents' | 'surcharge_types' | 'currency'>
@@ -10,23 +10,19 @@ interface PriceTagProps {
  * each surcharge broken out beneath it and in a tooltip.
  */
 export function PriceTag({ variant }: PriceTagProps) {
-  const total = totalCents(variant)
-  const breakdown = surchargeBreakdown(variant)
-  const [base, ...surcharges] = breakdown.split('\n')
-  const discounted = variant.regular_price_cents !== null && variant.price_cents !== null && variant.regular_price_cents !== variant.price_cents
+  const lines = priceLines(variant)
   return (
-    <span className="inline-flex flex-col items-end whitespace-nowrap tabular-nums" title={breakdown || undefined}>
+    <span className="inline-flex flex-col items-end whitespace-nowrap tabular-nums" title={lines.length ? priceTitle(variant) : undefined}>
       <span className="text-base font-semibold">
-        {/* Without surcharges the regular price is directly comparable; with them it's in the breakdown. */}
-        {discounted && !breakdown && <s className="mr-1.5 text-sm font-normal text-muted">{formatMoney(variant.regular_price_cents, variant.currency)}</s>}
-        {formatMoney(total, variant.currency)}
+        {/* With surcharges the regular price is in the breakdown; without, it sits right beside the price. */}
+        {onSale(variant) && lines.length === 0 && <s className="mr-1.5 text-sm font-normal text-muted">{formatPrice(variant.regular_price_cents, variant.currency)}</s>}
+        {formatPrice(totalCents(variant), variant.currency)}
       </span>
-      {breakdown && (
+      {lines.length > 0 && (
         <span className="text-xs leading-tight font-normal text-muted">
-          <span className="block">{base}</span>
-          {surcharges.map((line) => (
-            <span key={line} className="block">
-              {line}
+          {lines.map((line) => (
+            <span key={line.text} className="block">
+              {line.struck ? <s>{line.text}</s> : line.text}
             </span>
           ))}
         </span>
