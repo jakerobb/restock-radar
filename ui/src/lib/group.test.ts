@@ -50,6 +50,11 @@ describe('groupProducts', () => {
     const premium = cable('premium', 'UniFi Premium Patch Cable', 'UniFi Premium Patch Cables')
     const premiumOutdoor = cable('premium-out', 'UniFi Premium Patch Cable Outdoor', 'UniFi Premium Patch Cables')
 
+    it('names variants by their options, qualified by the product unless it is the group’s namesake', () => {
+      const a = { ...patch, variants: [variant({ id: 'a1', title: 'White / 0.2 m' })] }
+      const b = { ...outdoor, variants: [variant({ id: 'b1', title: 'White / 1 m' })] }
+      expect(groupProducts([a, b])[0]!.variants.map((v) => v.title)).toEqual(['White / 0.2 m', 'Outdoor \u2013 White / 1 m'])
+    })
     it('splits one collection into the store’s groups, naming merged ones by their short titles (a lone product keeps its own title)', () => {
       const out = groupProducts([patch, el, premium, outdoor, premiumOutdoor])
       expect(out.map((p) => p.title)).toEqual(['UniFi Patch Cable', 'UniFi Etherlighting Patch Cable (x)', 'UniFi Premium Patch Cable'])

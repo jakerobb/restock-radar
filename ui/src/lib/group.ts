@@ -16,10 +16,9 @@ function sharedPrefix(titles: string[]): string {
   return out.join(' ')
 }
 
-/** What sets a member apart from the group: its title without the shared prefix (or all of it, if nothing is left). */
+/** What sets a member apart from the group: its title without the shared prefix. Empty for the member that is the prefix. */
 function distinguishing(title: string, prefix: string): string {
-  const rest = prefix ? title.slice(prefix.length).trim() : title
-  return rest || title
+  return prefix ? title.slice(prefix.length).trim() : title
 }
 
 function isDefault(title: string): boolean {
@@ -34,8 +33,14 @@ function merge(first: Product, members: Product[], prefix: string): Product {
     tags: [...new Set(members.flatMap((m) => m.tags))].sort(),
     variants: members.flatMap((m) => {
       const name = distinguishing(nameOf(m), prefix)
-      // Members are usually single-variant ("Default"), so name each variant for its product.
-      return m.variants.map((v) => ({ ...v, tags: m.tags, title: isDefault(v.title) ? name : `${name} – ${v.title}` }))
+      // Members are often single-variant ("Default"), so name those for their product.
+      // Otherwise a variant keeps its own name ("White / 1 m"), qualified by the
+      // product unless the product is the group's namesake ("Outdoor – White / 1 m").
+      const label = (v: Product['variants'][number]) => {
+        if (isDefault(v.title)) return name || nameOf(m)
+        return name ? `${name} – ${v.title}` : v.title
+      }
+      return m.variants.map((v) => ({ ...v, tags: m.tags, title: label(v) }))
     }),
   }
 }
