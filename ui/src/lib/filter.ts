@@ -39,7 +39,10 @@ export function isInStock(p: Product): boolean {
   return p.variants.some((v) => v.status === 'Available')
 }
 
-/** Products matching the search text, the chosen type (when non-empty), every chosen tag, and (optionally) being in stock. */
+/**
+ * Products matching the search text and the chosen type (when non-empty), cut down to the variants that
+ * carry every chosen tag and (optionally) are in stock; products left with no variant are dropped.
+ */
 export function filterProducts(
   products: Product[],
   query: string,
@@ -47,13 +50,22 @@ export function filterProducts(
   tags: string[] = [],
   inStockOnly = false,
 ): Product[] {
-  return products.filter(
-    (p) =>
-      matchesQuery(p, query) &&
-      (!type || typeOf(p) === type) &&
-      tags.every((t) => p.tags.includes(t)) &&
-      (!inStockOnly || isInStock(p)),
-  )
+  const out: Product[] = []
+  for (const p of products) {
+    if (!matchesQuery(p, query) || (type && typeOf(p) !== type)) continue
+    if (tags.length === 0 && !inStockOnly) {
+      out.push(p)
+      continue
+    }
+    const variants = p.variants.filter(
+      (v) => (!inStockOnly || v.status === 'Available') && tags.every((t) => (v.tags ?? p.tags).includes(t)),
+    )
+    if (variants.length === 0) continue
+    if (variants.length === p.variants.length) out.push(p)
+    // A grouped product's tags are the union over its members; keep only those of the members still shown.
+    else out.push({ ...p, variants, tags: variants.some((v) => v.tags) ? [...new Set(variants.flatMap((v) => v.tags ?? p.tags))].sort() : p.tags })
+  }
+  return out
 }
 
 export interface TagCount {

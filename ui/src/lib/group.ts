@@ -31,7 +31,7 @@ function merge(first: Product, members: Product[]): Product {
     variants: members.flatMap((m) => {
       const name = distinguishing(m.title, prefix)
       // Members are usually single-variant ("Default"), so name each variant for its product.
-      return m.variants.map((v) => ({ ...v, title: isDefault(v.title) ? name : `${name} \u2013 ${v.title}` }))
+      return m.variants.map((v) => ({ ...v, tags: m.tags, title: isDefault(v.title) ? name : `${name} \u2013 ${v.title}` }))
     }),
   }
 }
