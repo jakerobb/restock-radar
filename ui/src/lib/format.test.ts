@@ -1,4 +1,4 @@
-import { formatMoney, formatRelative, surchargeBreakdown, totalCents } from './format'
+import { formatMoney, formatPrice, formatRelative, priceLines, priceTitle, totalCents } from './format'
 
 describe('formatMoney', () => {
   it('formats minor units as currency', () => {
@@ -42,15 +42,30 @@ describe('surcharges', () => {
   })
 
   it('breaks down a single surcharge', () => {
-    expect(surchargeBreakdown(base)).toBe('$1,299.00 base price\n+ $132.00 memory surcharge')
+    expect(priceLines(base)).toEqual([{ text: '$1,299 base price' }, { text: '+ $132 memory surcharge' }])
   })
 
   it('names every type when only the combined amount is known', () => {
-    expect(surchargeBreakdown({ ...base, surcharge_types: ['Memory', 'Tariff'] })).toBe('$1,299.00 base price\n+ $132.00 surcharges (memory, tariff)')
+    expect(priceLines({ ...base, surcharge_types: ['Memory', 'Tariff'] }).at(-1)).toEqual({ text: '+ $132 surcharges (memory, tariff)' })
+  })
+
+  it('shows the regular price struck through, then the sale price, for a sale', () => {
+    const sale = { ...base, price_cents: 15900, regular_price_cents: 19900, price_with_surcharges_cents: 17500 }
+    expect(priceLines(sale)).toEqual([{ text: '$199 base price', struck: true }, { text: '$159 sale price' }, { text: '+ $16 memory surcharge' }])
+    expect(priceTitle(sale)).toBe('$199 base price\n$159 sale price (−$40)\n+ $16 memory surcharge')
   })
 
   it('is empty without a surcharge', () => {
-    expect(surchargeBreakdown({ ...base, price_with_surcharges_cents: 129900, surcharge_types: [] })).toBe('')
-    expect(surchargeBreakdown({ ...base, price_with_surcharges_cents: null })).toBe('')
+    expect(priceLines({ ...base, price_with_surcharges_cents: 129900, surcharge_types: [] })).toEqual([])
+    expect(priceLines({ ...base, price_with_surcharges_cents: null })).toEqual([])
+  })
+})
+
+describe('formatPrice', () => {
+  it('drops .00 from whole dollars only', () => {
+    expect(formatPrice(17500, 'USD')).toBe('$175')
+    expect(formatPrice(249, 'USD')).toBe('$2.49')
+    expect(formatPrice(1050, 'USD')).toBe('$10.50')
+    expect(formatPrice(null, 'USD')).toBe('n/a')
   })
 })
