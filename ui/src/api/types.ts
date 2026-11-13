@@ -37,6 +37,10 @@ export interface Product {
   tags: string[]
   /** The store collection slug; products sharing one are a single product to the store. Empty when standalone. */
   collection: string
+  /** The store's compact product name ("UniFi Etherlighting Patch Cable"); empty until a poll has seen it. */
+  short_title: string
+  /** The title the store's breadcrumbs file the product under ("UniFi Patch Cables"); products sharing one are shown as a unit. Empty until a poll has fetched the product page. */
+  group: string
   url: string
   variants: Variant[]
 }

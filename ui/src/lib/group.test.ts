@@ -25,8 +25,8 @@ describe('groupProducts', () => {
     expect(groupProducts([pro, { ...hd, region: 'eu' }])).toHaveLength(2)
   })
   it('keeps a variant’s own name alongside its product’s', () => {
-    const a = product({ id: 'a', title: 'Gadget Mini', collection: 'g', variants: [variant({ title: 'Black' })] })
-    const b = product({ id: 'b', title: 'Gadget Max', collection: 'g', variants: [variant({ id: 'v2', title: 'White' })] })
+    const a = product({ id: 'a', title: 'Gadget Mini', collection: 'g', group: 'Gadgets', variants: [variant({ title: 'Black' })] })
+    const b = product({ id: 'b', title: 'Gadget Max', collection: 'g', group: 'Gadgets', variants: [variant({ id: 'v2', title: 'White' })] })
     expect(groupProducts([a, b])[0]!.variants.map((v) => v.title)).toEqual(['Mini – Black', 'Max – White'])
   })
   it('falls back to the first title when nothing is shared, and to full titles when a member is the prefix', () => {
@@ -35,8 +35,35 @@ describe('groupProducts', () => {
     const g = groupProducts([a, b])[0]!
     expect(g.title).toBe('UPS 2U')
     expect(g.variants.map((v) => v.title)).toEqual(['UPS 2U', 'Pro'])
-    const c = product({ id: 'c', title: 'Alpha', collection: 'x' })
-    const d = product({ id: 'd', title: 'Beta', collection: 'x', variants: [variant({ id: 'v3' })] })
-    expect(groupProducts([c, d])[0]!.title).toBe('Alpha')
+  })
+  it('uses the store’s group when the names share nothing', () => {
+    const c = product({ id: 'c', title: 'Alpha', collection: 'x', group: 'Greek' })
+    const d = product({ id: 'd', title: 'Beta', collection: 'x', group: 'Greek', variants: [variant({ id: 'v3' })] })
+    expect(groupProducts([c, d])[0]!.title).toBe('Greek')
+  })
+  describe('with the store’s groups', () => {
+    const cable = (id: string, short: string, group: string) =>
+      product({ id, slug: id, title: `${short} (x)`, short_title: short, collection: 'cables', group, variants: [variant({ id: `v-${id}`, title: 'Default', sku: `SKU-${id}` })] })
+    const patch = cable('patch', 'UniFi Patch Cable', 'UniFi Patch Cables')
+    const outdoor = cable('outdoor', 'UniFi Patch Cable Outdoor', 'UniFi Patch Cables')
+    const el = cable('el', 'UniFi Etherlighting Patch Cable', 'UniFi Etherlighting Patch Cables')
+    const premium = cable('premium', 'UniFi Premium Patch Cable', 'UniFi Premium Patch Cables')
+    const premiumOutdoor = cable('premium-out', 'UniFi Premium Patch Cable Outdoor', 'UniFi Premium Patch Cables')
+
+    it('splits one collection into the store’s groups, naming merged ones by their short titles (a lone product keeps its own title)', () => {
+      const out = groupProducts([patch, el, premium, outdoor, premiumOutdoor])
+      expect(out.map((p) => p.title)).toEqual(['UniFi Patch Cable', 'UniFi Etherlighting Patch Cable (x)', 'UniFi Premium Patch Cable'])
+      expect(out[0]!.variants.map((v) => v.title)).toEqual(['UniFi Patch Cable', 'Outdoor'])
+    })
+  })
+  it('does not merge on a bare shared brand while groups are unknown', () => {
+    const a = product({ id: 'a', title: 'UniFi Patch Cable', collection: 'c' })
+    const b = product({ id: 'b', title: 'UniFi Etherlighting Patch Cable', collection: 'c' })
+    expect(groupProducts([a, b])).toEqual([a, b])
+  })
+  it('keeps products with and without a known group apart', () => {
+    const a = product({ id: 'a', title: 'Power Distribution Pro', collection: 'c', group: 'PDUs' })
+    const b = product({ id: 'b', title: 'Power Distribution Hi-Density', collection: 'c' })
+    expect(groupProducts([a, b])).toEqual([a, b])
   })
 })

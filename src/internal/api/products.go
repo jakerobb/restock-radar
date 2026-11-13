@@ -49,7 +49,11 @@ type productJSON struct {
 	// Tags are the store's labels for the product ("black-friday", "feature:4k", ...); the UI filters on them.
 	Tags []string `json:"tags"`
 	// Collection is the store collection slug; products sharing one are a single product to the store, and the UI merges them.
-	Collection string        `json:"collection"`
+	Collection string `json:"collection"`
+	// ShortTitle is the store's compact name; Group is the title the store's breadcrumbs file the
+	// product under. Both are empty until a poll has seen them. The UI uses them to merge products.
+	ShortTitle string        `json:"short_title"`
+	Group      string        `json:"group"`
 	URL        string        `json:"url"`
 	Variants   []variantJSON `json:"variants"`
 }
@@ -96,7 +100,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		key := [2]string{v.Region, v.ProductID}
 		i, ok := index[key]
 		if !ok {
-			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, Variants: []variantJSON{}}
+			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, ShortTitle: v.ProductShortTitle, Group: v.ProductGroup, Variants: []variantJSON{}}
 			if reg, ok := srv.cfg.RegionByID(v.Region); ok {
 				p.URL = fmt.Sprintf("%s/%s/products/%s", reg.BaseURL, reg.Path, url.PathEscape(v.ProductSlug))
 			}

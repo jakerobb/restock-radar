@@ -80,6 +80,16 @@ type Product struct {
 	Slug  string
 	Name  string
 	Title string
+	// ShortTitle is the store's compact name ("UniFi Etherlighting Patch Cable",
+	// where Title may carry a qualifier like "(10 GbE)"); empty when not given.
+	ShortTitle string
+	// Group is the title the store's category breadcrumbs file the product
+	// under ("UniFi Patch Cables"). Products sharing one are presented as a unit.
+	// Only the product endpoint carries breadcrumbs, so it is empty otherwise.
+	Group string
+	// Detailed is true when the product came from the product endpoint, which
+	// has fields the category endpoint lacks.
+	Detailed bool
 	// Category is the store's category id (e.g. "switching-enterprise"); empty when unknown.
 	Category string
 	// Collection is the slug of the store collection the product belongs to;
@@ -258,6 +268,10 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 					Current struct {
 						ID string `json:"id"`
 					} `json:"currentCategory"`
+					Breadcrumbs []struct {
+						Title      string   `json:"title"`
+						ProductIDs []string `json:"productIds"`
+					} `json:"breadcrumbs"`
 				} `json:"category"`
 				Collection struct {
 					Products []rawProduct `json:"products"`
@@ -277,6 +291,13 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 		prod, stale, err := parseProduct(page.PageProps.CurrentProductID, page.PageProps.Collection.Products, slug)
 		if prod != nil {
 			prod.Category = page.PageProps.Category.Current.ID
+			prod.Detailed = true
+			for _, b := range page.PageProps.Category.Breadcrumbs {
+				if slices.Contains(b.ProductIDs, prod.ID) {
+					prod.Group = b.Title
+					break
+				}
+			}
 		}
 		return prod, stale, err
 	}
@@ -289,10 +310,11 @@ type rawMoney struct {
 }
 
 type rawProduct struct {
-	ID    string `json:"id"`
-	Slug  string `json:"slug"`
-	Name  string `json:"name"`
-	Title string `json:"title"`
+	ID         string `json:"id"`
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	Title      string `json:"title"`
+	ShortTitle string `json:"shortTitle"`
 	// The store shows products sharing a collection slug as one page with a
 	// choice between them. Either field may carry it.
 	ProCollectionSlug            string `json:"proCollectionSlug"`
@@ -336,7 +358,7 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		return nil, fmt.Errorf("%w: product %q has no variants", ErrSchema, raw.Slug)
 	}
 
-	p := &Product{ID: raw.ID, Slug: raw.Slug, Name: raw.Name, Title: raw.Title, Collection: raw.ProCollectionSlug}
+	p := &Product{ID: raw.ID, Slug: raw.Slug, Name: raw.Name, Title: raw.Title, ShortTitle: raw.ShortTitle, Collection: raw.ProCollectionSlug}
 	if p.Collection == "" {
 		p.Collection = raw.OrganizationalCollectionSlug
 	}
