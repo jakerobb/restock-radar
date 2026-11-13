@@ -81,11 +81,17 @@ describe('tags', () => {
 describe('in stock filter', () => {
   const inStock = product({ id: 'x', variants: [variant({ status: 'SoldOut' }), variant({ status: 'Available' })] })
   const soldOut = product({ id: 'y', variants: [variant({ status: 'SoldOut' })] })
-  it('keeps products with any available variant', () => {
+  it('keeps only the available variants of products that have any', () => {
     expect(isInStock(inStock)).toBe(true)
     expect(isInStock(soldOut)).toBe(false)
-    expect(filterProducts([inStock, soldOut], '', '', [], true)).toEqual([inStock])
+    expect(filterProducts([inStock, soldOut], '', '', [], true)).toEqual([{ ...inStock, variants: [inStock.variants[1]] }])
     expect(filterProducts([inStock, soldOut], '', '')).toEqual([inStock, soldOut])
+  })
+  it('keeps only the variants whose member product has the chosen tags', () => {
+    const a = variant({ id: 'a', tags: ['x'] })
+    const b = variant({ id: 'b', tags: ['y'] })
+    const group = product({ id: 'g', tags: ['x', 'y'], variants: [a, b] })
+    expect(filterProducts([group], '', '', ['x'])).toEqual([{ ...group, tags: ['x'], variants: [a] }])
   })
 })
 

@@ -20,6 +20,8 @@ export interface Variant {
   last_changed: string
   /** When the variant was first seen, i.e. when it started being tracked. */
   first_seen: string
+  /** Client-side only: the tags of the member product this variant came from, set when products are grouped by collection. */
+  tags?: string[]
 }
 
 export interface Product {
