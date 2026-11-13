@@ -72,3 +72,18 @@ jobs:
             echo "$IMAGE"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Ask the homelab repo to run Renovate now, so the deployment's image bump
+  # PR opens right away instead of at the next scheduled Renovate run. The
+  # token is a fine-grained PAT scoped to jakerobb/homelab with only
+  # "Actions: Read and write", which is enough to dispatch a workflow and
+  # nothing else.
+  notify-homelab:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Dispatch homelab's renovate-on-publish workflow
+        env:
+          GH_TOKEN: ${{ secrets.HOMELAB_DISPATCH_TOKEN }}
+        run: gh workflow run renovate-on-publish.yml --repo jakerobb/homelab --ref main
