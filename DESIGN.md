@@ -50,6 +50,11 @@ the design assumes failure is normal and loud (see Failure handling).
   a `new` event is queued, so it is announced like any other change; otherwise
   it is adopted silently, so the first look at a category doesn't announce the
   catalogue. Discovered products don't count toward `max_items`.
+- **Variant names.** A variant's title is built from the product's `options`
+  and the variant's `optionValueIds` ("White / 0.2 m / 10-Pack"), because the
+  store's own variant `title` exists only on the product endpoint and the
+  category endpoint would blank it. Where the ids resolve to nothing, the
+  store's title is used.
 - **Product details.** Only the product endpoint carries `category.breadcrumbs`,
   whose titles ("UniFi Patch Cables") are the store's own grouping of products
   within a collection; we store the one containing each product as its group,

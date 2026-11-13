@@ -322,3 +322,32 @@ func TestConvertProductSurcharges(t *testing.T) {
 	}
 
 }
+
+func TestVariantTitleFromOptions(t *testing.T) {
+	var raw rawProduct
+	// A category-page product: options and optionValueIds, but no variant titles.
+	js := `{"id":"p","slug":"s","options":[
+		{"title":"Color","values":[{"id":"w","title":"White"},{"id":"k","title":"Black"}]},
+		{"title":"Length","values":[{"id":"1","title":"1 m"},{"id":"2","title":"2 m"}]}],
+		"variants":[
+		{"id":"v1","sku":"S-K-2","status":"Available","optionValueIds":["2","k"]},
+		{"id":"v2","sku":"S-W","status":"Available","optionValueIds":["w"]},
+		{"id":"v3","sku":"S-X","title":"Own title","status":"Available","optionValueIds":["unknown"]},
+		{"id":"v4","sku":"S-Y","title":"Default","status":"Available"}]}`
+	if err := json.Unmarshal([]byte(js), &raw); err != nil {
+		t.Fatal(err)
+	}
+	p, err := convertProduct(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, v := range p.Variants {
+		got = append(got, v.Title)
+	}
+	// Option order wins over the order of the ids; unresolvable ids fall back to the store's own title.
+	want := []string{"Black / 2 m", "White", "Own title", "Default"}
+	if !slices.Equal(got, want) {
+		t.Errorf("titles = %q, want %q", got, want)
+	}
+}

@@ -5,6 +5,7 @@ package unistore
 
 import (
 	"bufio"
+	"cmp"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
@@ -323,13 +324,23 @@ type rawProduct struct {
 		Name string `json:"name"`
 	} `json:"tags"`
 	SurchargeTypes []string `json:"productSurchargeTypes"`
-	Variants       []struct {
-		ID           string    `json:"id"`
-		SKU          string    `json:"sku"`
-		Title        string    `json:"title"`
-		Status       string    `json:"status"`
-		Price        *rawMoney `json:"displayPrice"`
-		RegularPrice *rawMoney `json:"displayRegularPrice"`
+	// Options are the choices a buyer makes (Color, Length, ...) in the order the
+	// store shows them; each variant picks one value per option.
+	Options []struct {
+		Values []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"values"`
+	} `json:"options"`
+	Variants []struct {
+		ID  string `json:"id"`
+		SKU string `json:"sku"`
+		// Title is only on the product endpoint; category pages omit it.
+		Title          string    `json:"title"`
+		OptionValueIDs []string  `json:"optionValueIds"`
+		Status         string    `json:"status"`
+		Price          *rawMoney `json:"displayPrice"`
+		RegularPrice   *rawMoney `json:"displayRegularPrice"`
 		// The price including surcharges, which the store shows as a smaller secondary price.
 		PriceWithSurcharges *rawMoney `json:"displayPriceWithSurcharges"`
 		RestockETA          *string   `json:"restockEtaAt"`
@@ -386,7 +397,7 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		if v.ID == "" || v.Status == "" {
 			return nil, fmt.Errorf("%w: variant of %q missing id or status", ErrSchema, raw.Slug)
 		}
-		pv := Variant{ID: v.ID, SKU: v.SKU, Title: v.Title, Status: v.Status}
+		pv := Variant{ID: v.ID, SKU: v.SKU, Title: cmp.Or(optionLabel(raw, v.OptionValueIDs), v.Title), Status: v.Status}
 		pv.Price = money(v.Price)
 		pv.RegularPrice = money(v.RegularPrice)
 		pv.PriceWithSurcharges = money(v.PriceWithSurcharges)
@@ -396,6 +407,23 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		p.Variants = append(p.Variants, pv)
 	}
 	return p, nil
+}
+
+// optionLabel names a variant by the option values it picks, in the store's
+// option order ("White / 0.2 m / 10-Pack"). Both endpoints carry the options, so
+// unlike the variant's own title, which only the product endpoint has, this reads
+// the same whichever one we asked. It is empty when the ids resolve to nothing.
+func optionLabel(raw *rawProduct, ids []string) string {
+	var parts []string
+	for _, o := range raw.Options {
+		for _, val := range o.Values {
+			if val.Title != "" && slices.Contains(ids, val.ID) {
+				parts = append(parts, val.Title)
+				break
+			}
+		}
+	}
+	return strings.Join(parts, " / ")
 }
 
 func money(m *rawMoney) *Money {
