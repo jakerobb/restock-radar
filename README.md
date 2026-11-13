@@ -25,6 +25,8 @@ automatically: they're tracked from then on, and you're notified ("New
 product!") when one first appears. Products already listed the first time a
 category is read are tracked silently. Discovered products don't count toward `max_items`.
 
+Each cycle also fetches up to five products that have never been read from their own product page, to learn the store's grouping for them (category pages don't carry it). A large catalogue fills in over a day or two.
+
 The web UI can filter by any of the store's product tags (`black-friday`, `feature:color-black`, ...). Choosing several shows products that have all of them.
 
 ## Container

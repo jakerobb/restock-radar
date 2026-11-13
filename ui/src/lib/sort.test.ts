@@ -11,6 +11,8 @@ function product(title: string, price: number | null, seen: string, changed: str
     type: '',
     category: '',
     collection: '',
+    short_title: '',
+    group: '',
     tags: [],
     url: '',
     variants: [

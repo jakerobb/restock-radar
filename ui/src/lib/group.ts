@@ -1,5 +1,10 @@
 import type { Product } from '../api/types'
 
+/** A product's compact name, falling back to its full title while the short one is unknown. */
+function nameOf(p: Product): string {
+  return p.short_title || p.title
+}
+
 /** The leading words every title has in common ("Power Distribution Pro" + "Power Distribution Hi-Density" -> "Power Distribution"). */
 function sharedPrefix(titles: string[]): string {
   const split = titles.map((t) => t.split(/\s+/))
@@ -21,43 +26,60 @@ function isDefault(title: string): boolean {
   return title === '' || title.toLowerCase() === 'default'
 }
 
-function merge(first: Product, members: Product[]): Product {
-  const prefix = sharedPrefix(members.map((m) => m.title))
+function merge(first: Product, members: Product[], prefix: string): Product {
   return {
     ...first,
-    id: `collection:${first.collection}`,
-    title: prefix || first.title,
+    id: `collection:${first.collection}:${first.group}`,
+    title: prefix || first.group || nameOf(first),
     tags: [...new Set(members.flatMap((m) => m.tags))].sort(),
     variants: members.flatMap((m) => {
-      const name = distinguishing(m.title, prefix)
+      const name = distinguishing(nameOf(m), prefix)
       // Members are usually single-variant ("Default"), so name each variant for its product.
-      return m.variants.map((v) => ({ ...v, tags: m.tags, title: isDefault(v.title) ? name : `${name} \u2013 ${v.title}` }))
+      return m.variants.map((v) => ({ ...v, tags: m.tags, title: isDefault(v.title) ? name : `${name} – ${v.title}` }))
     }),
   }
 }
 
 /**
- * Merges products the store files in one collection (same region, same
- * non-empty `collection`) into a single product, as the store's own page does.
- * Products with no collection, or alone in theirs, come through untouched.
- * The merged product sits where its first member was.
+ * Merges products the store presents as one into a single product. Products
+ * are candidates when they share a region and a non-empty `collection`, and are
+ * then split by `group`, the title the store's breadcrumbs file them under:
+ * "UniFi Patch Cable" and "UniFi Patch Cable Outdoor" share one, but
+ * "UniFi Etherlighting Patch Cable" has its own, though all sit in one collection.
+ *
+ * Where the group isn't known yet (products not yet fetched from the product
+ * page), members merge only if their names share at least two words, so a bare
+ * brand ("UniFi") never forms a group of its own.
+ *
+ * Products that are alone in their bucket, or have no collection, come through
+ * untouched. A merged product sits where its first member was.
  */
 export function groupProducts(products: Product[]): Product[] {
-  const members = new Map<string, Product[]>()
+  const bucketKey = (p: Product) => `${p.region}/${p.collection}/${p.group}`
+  const buckets = new Map<string, Product[]>()
   for (const p of products) {
     if (!p.collection) continue
-    const key = `${p.region}/${p.collection}`
-    members.set(key, [...(members.get(key) ?? []), p])
+    buckets.set(bucketKey(p), [...(buckets.get(bucketKey(p)) ?? []), p])
   }
+
+  // Decide once per bucket whether it merges, and under what name.
+  const merged = new Map<string, { members: Product[]; prefix: string }>()
+  for (const [key, members] of buckets) {
+    if (members.length < 2) continue
+    const prefix = sharedPrefix(members.map(nameOf))
+    const known = members[0]!.group !== ''
+    if (known || prefix.split(/\s+/).filter(Boolean).length >= 2) merged.set(key, { members, prefix })
+  }
+
   const emitted = new Set<string>()
   const out: Product[] = []
   for (const p of products) {
-    const key = `${p.region}/${p.collection}`
-    const group = p.collection ? members.get(key) : undefined
-    if (!group || group.length < 2) out.push(p)
+    const key = bucketKey(p)
+    const group = p.collection ? merged.get(key) : undefined
+    if (!group) out.push(p)
     else if (!emitted.has(key)) {
       emitted.add(key)
-      out.push(merge(p, group))
+      out.push(merge(p, group.members, group.prefix))
     }
   }
   return out

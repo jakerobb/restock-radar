@@ -17,9 +17,10 @@ import (
 	"github.com/jakerobb/restock-radar/internal/config"
 )
 
-const productJSON = `{"pageProps":{"currentProductId":"p1","collection":{"products":[
+const productJSON = `{"pageProps":{"currentProductId":"p1","category":{"currentCategory":{"id":"c1"},"breadcrumbs":[
+	{"title":"Others","productIds":["other"]},{"title":"Widgets","productIds":["p1","p1"]}]},"collection":{"products":[
 	{"id":"other","slug":"other","name":"Other","title":"Other","variants":[]},
-	{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","variants":[
+	{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","shortTitle":"Widget","variants":[
 		{"id":"v1","sku":"W-1","title":"US","status":"SoldOut","displayPrice":{"amount":10900,"currency":"USD"},
 		 "displayRegularPrice":null,"restockEtaAt":null}]}]}}}`
 
@@ -63,6 +64,9 @@ func TestFetchProduct(t *testing.T) {
 	}
 	if p.ID != "p1" || len(p.Variants) != 1 {
 		t.Fatalf("unexpected product: %+v", p)
+	}
+	if p.ShortTitle != "Widget" || p.Group != "Widgets" || !p.Detailed {
+		t.Errorf("short title %q, group %q, detailed %v", p.ShortTitle, p.Group, p.Detailed)
 	}
 	v := p.Variants[0]
 	if v.Status != "SoldOut" || v.Price == nil || v.Price.Amount != 10900 || v.RegularPrice != nil {
@@ -124,7 +128,7 @@ func TestBlockedStatus(t *testing.T) {
 
 const categoryJSON = `{"pageProps":{"subCategories":[
 	{"id":"cat-a","products":[
-		{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","variants":[
+		{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","shortTitle":"Widget","variants":[
 			{"id":"v1","sku":"W-1","title":"US","status":"SoldOut","displayPrice":{"amount":10900,"currency":"USD"},
 			 "displayRegularPrice":null,"restockEtaAt":null}]},
 		{"id":"empty","slug":"empty","name":"Empty","title":"Empty","variants":[]}]},
@@ -132,7 +136,7 @@ const categoryJSON = `{"pageProps":{"subCategories":[
 		{"id":"p2","slug":"gadget","name":"Gadget","title":"Gadget","variants":[
 			{"id":"v2","sku":"G-1","title":"US","status":"Available","displayPrice":{"amount":500,"currency":"USD"},
 			 "displayRegularPrice":null,"restockEtaAt":null}]},
-		{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","variants":[]}]}]}}`
+		{"id":"p1","slug":"widget","name":"Widget","title":"Widget Title","shortTitle":"Widget","variants":[]}]}]}}`
 
 // newCategoryServer serves categoryJSON, encoding it as the request allows
 // (or as forced, to cover encodings the client didn't ask for).

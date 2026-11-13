@@ -458,3 +458,46 @@ func TestSurchargeUnknownIsNotAChange(t *testing.T) {
 		t.Fatalf("want a price event with the added type, got %+v", events)
 	}
 }
+
+func TestUndetailedItemsAndGroups(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+
+	// Found on a category page: no breadcrumbs, so no group, and its details are outstanding.
+	p := product("Available", 10900)
+	p.ShortTitle = "Widget"
+	if _, err := s.Discover(ctx, "us", p, false, now); err != nil {
+		t.Fatal(err)
+	}
+	todo, err := s.UndetailedItems(ctx)
+	if err != nil || len(todo) != 1 || todo[0].Slug != p.Slug {
+		t.Fatalf("want the discovered product awaiting details, got %+v (err %v)", todo, err)
+	}
+
+	// The product endpoint supplies the group; the product is then done.
+	d := *p
+	d.Group, d.Detailed = "Widgets", true
+	if _, err := s.Apply(ctx, "us", &d, now); err != nil {
+		t.Fatal(err)
+	}
+	if todo, _ := s.UndetailedItems(ctx); len(todo) != 0 {
+		t.Fatalf("a detailed product should not be listed: %+v", todo)
+	}
+	vs, _ := s.Variants(ctx, "us")
+	if len(vs) != 1 || vs[0].ProductGroup != "Widgets" || vs[0].ProductShortTitle != "Widget" {
+		t.Fatalf("group and short title not stored: %+v", vs)
+	}
+
+	// A later category-page observation, which knows neither, doesn't erase them.
+	if _, err := s.Apply(ctx, "us", p, now); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ = s.Variants(ctx, "us")
+	if vs[0].ProductGroup != "Widgets" {
+		t.Fatalf("group lost: %+v", vs[0])
+	}
+	if todo, _ := s.UndetailedItems(ctx); len(todo) != 0 {
+		t.Fatalf("detailed_at must survive a category observation: %+v", todo)
+	}
+}

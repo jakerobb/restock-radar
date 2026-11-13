@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,16 +26,28 @@ type fakeFetcher struct {
 	// category is what the category page returns; categoryErr makes it fail.
 	category    *unistore.Category
 	categoryErr error
+	// details are what the product endpoint returns for slugs other than the widget.
+	details map[string]unistore.Product
 	// Request counts.
 	productCalls, categoryCalls int
+	productSlugs                []string
+	productErrFor               map[string]error
 }
 
-func (f *fakeFetcher) FetchProduct(context.Context, config.Region, string) (*unistore.Product, error) {
+func (f *fakeFetcher) FetchProduct(_ context.Context, _ config.Region, slug string) (*unistore.Product, error) {
 	f.productCalls++
+	f.productSlugs = append(f.productSlugs, slug)
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Category: f.cat, Variants: []unistore.Variant{{
+	if err := f.productErrFor[slug]; err != nil {
+		return nil, err
+	}
+	if d, ok := f.details[slug]; ok {
+		d.Detailed = true
+		return &d, nil
+	}
+	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Category: f.cat, Detailed: true, Variants: []unistore.Variant{{
 		ID: "v1", SKU: "W-1", Title: "US", Status: f.status,
 		Price: &unistore.Money{Amount: cmp.Or(f.price, 10900), Currency: "USD"},
 	}}}, nil
@@ -300,8 +313,12 @@ func TestCategoryPageReplacesPerItemRequests(t *testing.T) {
 	ctx := context.Background()
 	f.status = "SoldOut"
 	f.cat = "c1"
+	f.details = map[string]unistore.Product{}
 	page := func(products ...unistore.Product) {
 		f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: products}
+		for _, pr := range products {
+			f.details[pr.Slug] = pr
+		}
 	}
 
 	// The first pass doesn't know the widget's category, so it asks for the widget itself.
@@ -314,7 +331,7 @@ func TestCategoryPageReplacesPerItemRequests(t *testing.T) {
 	// adopted silently, because this is the first look at the category.
 	page(listing("p1", "widget", "c1", "SoldOut"), listing("p2", "gadget", "c1", "Available"))
 	p.cycle(ctx)
-	if f.productCalls != 1 || f.categoryCalls != 1 {
+	if f.productCalls != 2 || f.categoryCalls != 1 { // the discovered gadget is fetched once for its details
 		t.Fatalf("second cycle: %d product / %d category requests", f.productCalls, f.categoryCalls)
 	}
 	if len(n.sent) != 0 {
@@ -334,7 +351,7 @@ func TestCategoryPageReplacesPerItemRequests(t *testing.T) {
 	// A product that appears later is announced, and tracked from then on.
 	page(listing("p1", "widget", "c1", "Available"), listing("p2", "gadget", "c1", "Available"), listing("p3", "gizmo", "c1", "SoldOut"))
 	p.cycle(ctx)
-	if f.productCalls != 1 || f.categoryCalls != 2 {
+	if f.productCalls != 3 || f.categoryCalls != 2 { // ...and so is the new gizmo
 		t.Fatalf("third cycle: %d product / %d category requests", f.productCalls, f.categoryCalls)
 	}
 	if len(n.sent) != 2 {
@@ -359,7 +376,7 @@ func TestCategoryPageReplacesPerItemRequests(t *testing.T) {
 	// product someone chose to watch is checked directly.
 	page(listing("p2", "gadget", "c1", "Available"))
 	p.cycle(ctx)
-	if f.productCalls != 2 {
+	if f.productCalls != 4 {
 		t.Fatalf("only the widget should be fetched individually, got %d product requests", f.productCalls)
 	}
 }
@@ -399,5 +416,77 @@ func TestMaxItemsIgnoresDiscoveredProducts(t *testing.T) {
 	p.cfg.MaxItems = 2 // one listed item (the widget), two discovered
 	if _, err := p.Add(ctx, "other", ""); err != nil {
 		t.Fatalf("discovered products must not fill the watch list: %v", err)
+	}
+}
+
+func TestBackfillFetchesDetailsForUndetailedProductsInBatches(t *testing.T) {
+	p, f, _ := setup(t)
+	ctx := context.Background()
+	f.status = "SoldOut"
+	f.cat = "c1"
+	f.details = map[string]unistore.Product{}
+	var page []unistore.Product
+	for _, slug := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		pr := listing("id-"+slug, slug, "c1", "Available")
+		pr.Group = "The Group"
+		f.details[slug] = pr
+		page = append(page, pr)
+	}
+	// Category pages carry no group.
+	listed := []unistore.Product{listing("p1", "widget", "c1", "SoldOut")}
+	for _, pr := range page {
+		pr.Group = ""
+		listed = append(listed, pr)
+	}
+	f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: listed}
+
+	p.cycle(ctx) // learns the widget's category
+	p.cycle(ctx) // adopts the seven discovered products, then backfills five of them
+	if got := f.productCalls - 1; got != detailBatch {
+		t.Fatalf("want %d backfill fetches, got %d (%v)", detailBatch, got, f.productSlugs)
+	}
+	p.cycle(ctx) // the remaining two
+	if got := f.productCalls - 1; got != 7 {
+		t.Fatalf("want 7 backfill fetches in all, got %d (%v)", got, f.productSlugs)
+	}
+	p.cycle(ctx) // nothing left
+	if got := f.productCalls - 1; got != 7 {
+		t.Fatalf("details are fetched once per product, got %d fetches (%v)", got, f.productSlugs)
+	}
+
+	vs, err := p.store.Variants(ctx, "us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vs {
+		if v.ProductSlug != "widget" && v.ProductGroup != "The Group" {
+			t.Fatalf("%s: group %q not recorded", v.ProductSlug, v.ProductGroup)
+		}
+	}
+}
+
+func TestBackfillSkipsProductsThatFail(t *testing.T) {
+	p, f, _ := setup(t)
+	ctx := context.Background()
+	f.status = "SoldOut"
+	f.cat = "c1"
+	f.details = map[string]unistore.Product{}
+	var page []unistore.Product
+	for _, slug := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		page = append(page, listing("id-"+slug, slug, "c1", "Available"))
+	}
+	// Only "g" has details; the rest answer "not found".
+	f.details["g"] = page[6]
+	f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: page}
+	f.productErrFor = map[string]error{}
+	for _, slug := range []string{"a", "b", "c", "d", "e", "f"} {
+		f.productErrFor[slug] = unistore.ErrNotFound
+	}
+
+	p.cycle(ctx)
+	p.cycle(ctx) // tries a-e, which fail
+	p.cycle(ctx) // skips them: f, then g
+	if !slices.Contains(f.productSlugs, "g") {
+		t.Fatalf("a failing product must not starve the others: %v", f.productSlugs)
 	}
 }

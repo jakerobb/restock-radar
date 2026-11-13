@@ -50,6 +50,14 @@ the design assumes failure is normal and loud (see Failure handling).
   a `new` event is queued, so it is announced like any other change; otherwise
   it is adopted silently, so the first look at a category doesn't announce the
   catalogue. Discovered products don't count toward `max_items`.
+- **Product details.** Only the product endpoint carries `category.breadcrumbs`,
+  whose titles ("UniFi Patch Cables") are the store's own grouping of products
+  within a collection; we store the one containing each product as its group,
+  and `shortTitle` as its short title. Products found only on category pages
+  have neither, so after the regular requests each cycle fetches up to 5
+  products (listed ones first, then oldest) that have never come from the
+  product endpoint. A failure skips that product until restart. The UI merges
+  products only when they share a collection and a group.
 - Each observation is applied to SQLite in one transaction. A variant seen
   for the first time sets a baseline silently. After that, a change in
   `status` yields a `status` event, and a change in price, regular price, or

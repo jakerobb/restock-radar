@@ -110,6 +110,13 @@ var migrations = []string{
 	ALTER TABLE events ADD COLUMN new_total_cents INTEGER;
 	ALTER TABLE events ADD COLUMN old_surcharge_types TEXT NOT NULL DEFAULT '';
 	ALTER TABLE events ADD COLUMN new_surcharge_types TEXT NOT NULL DEFAULT '';`,
+	// short_title is the store's compact product name. group_title is the title the
+	// store's breadcrumbs file the product under; products sharing one are shown
+	// as a unit. detailed_at is when the product endpoint last supplied the
+	// product, the only source of group_title; NULL until then.
+	`ALTER TABLE products ADD COLUMN short_title TEXT NOT NULL DEFAULT '';
+	ALTER TABLE products ADD COLUMN group_title TEXT NOT NULL DEFAULT '';
+	ALTER TABLE products ADD COLUMN detailed_at TEXT;`,
 }
 
 type Store struct {
@@ -220,12 +227,15 @@ type VariantState struct {
 	ProductCategory   string   `json:"product_category"`
 	ProductTags       []string `json:"product_tags"`
 	ProductCollection string   `json:"product_collection"`
-	VariantID         string   `json:"variant_id"`
-	SKU               string   `json:"sku"`
-	VariantTitle      string   `json:"variant_title"`
-	Status            string   `json:"status"`
-	PriceCents        *int64   `json:"price_cents"`
-	RegularPriceCents *int64   `json:"regular_price_cents"`
+	// ProductShortTitle and ProductGroup are empty until a poll has seen them.
+	ProductShortTitle string `json:"product_short_title"`
+	ProductGroup      string `json:"product_group"`
+	VariantID         string `json:"variant_id"`
+	SKU               string `json:"sku"`
+	VariantTitle      string `json:"variant_title"`
+	Status            string `json:"status"`
+	PriceCents        *int64 `json:"price_cents"`
+	RegularPriceCents *int64 `json:"regular_price_cents"`
 	// PriceWithSurchargesCents is PriceCents plus surcharges; null until a poll has seen it.
 	PriceWithSurchargesCents *int64 `json:"price_with_surcharges_cents"`
 	// SurchargeTypes are the kinds of surcharge on the product ("Memory", ...); empty when none.
@@ -375,6 +385,11 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		tags = string(b)
 	}
 	surcharges := typesJSON(p.SurchargeTypes)
+	var detailedAt *string
+	if p.Detailed {
+		t := ts(now)
+		detailedAt = &t
+	}
 	var storedTypes string
 	if err := tx.QueryRowContext(ctx, `SELECT surcharge_types FROM products WHERE region = ? AND id = ?`, region, p.ID).Scan(&storedTypes); err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("reading product: %w", err)
@@ -382,13 +397,17 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 	// Unknown (nil) on either side means there's nothing to compare.
 	oldTypes, newTypes := parseTypes(storedTypes), p.SurchargeTypes
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO products (region, id, slug, name, title, category, tags, collection, surcharge_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO products (region, id, slug, name, title, category, tags, collection, surcharge_types, short_title, group_title, detailed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, id) DO UPDATE SET slug = excluded.slug, name = excluded.name, title = excluded.title,
+			short_title = CASE WHEN excluded.short_title = '' THEN products.short_title ELSE excluded.short_title END,
+			group_title = CASE WHEN excluded.group_title = '' THEN products.group_title ELSE excluded.group_title END,
+			detailed_at = COALESCE(excluded.detailed_at, products.detailed_at),
 			category = CASE WHEN excluded.category = '' THEN products.category ELSE excluded.category END,
 			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END,
 			collection = CASE WHEN excluded.collection = '' THEN products.collection ELSE excluded.collection END,
 			surcharge_types = CASE WHEN excluded.surcharge_types = '' THEN products.surcharge_types ELSE excluded.surcharge_types END`,
-		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection, surcharges)
+		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection, surcharges, p.ShortTitle, p.Group, detailedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}
@@ -590,7 +609,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
@@ -605,7 +624,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	for rows.Next() {
 		var v VariantState
 		var checked, changed, first, tags, surcharges string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.PriceWithSurchargesCents, &surcharges, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
@@ -727,6 +746,33 @@ func (s *Store) Items(ctx context.Context) ([]Item, error) {
 		FROM items i
 		LEFT JOIN products p ON p.region = i.region AND p.id = i.product_id
 		ORDER BY i.region, i.slug`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Item
+	for rows.Next() {
+		var it Item
+		var added string
+		if err := rows.Scan(&it.Region, &it.Slug, &it.Source, &it.ProductID, &it.Category, &added); err != nil {
+			return nil, err
+		}
+		it.AddedAt, _ = time.Parse(time.RFC3339, added)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// UndetailedItems lists watched items whose product has never been fetched from
+// the product endpoint (including those seen only on category pages), listed
+// products first, then oldest first.
+func (s *Store) UndetailedItems(ctx context.Context) ([]Item, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT i.region, i.slug, i.source, i.product_id, COALESCE(p.category, ''), i.added_at
+		FROM items i
+		JOIN products p ON p.region = i.region AND p.id = i.product_id
+		WHERE p.detailed_at IS NULL
+		ORDER BY i.source = ?, i.added_at, i.slug`, SourceDiscovered)
 	if err != nil {
 		return nil, err
 	}

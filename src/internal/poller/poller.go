@@ -21,6 +21,10 @@ import (
 
 const maxBackoffFactor = 8
 
+// detailBatch is how many products a cycle fetches from the product endpoint
+// just to fill in what category pages lack (see backfillDetails).
+const detailBatch = 5
+
 // Fetcher is the part of unistore.Client the poller needs.
 type Fetcher interface {
 	FetchProduct(ctx context.Context, region config.Region, slug string) (*unistore.Product, error)
@@ -38,6 +42,9 @@ type Poller struct {
 	// which items have already raised a "failing" alert.
 	failures map[string]int
 	alerted  map[string]bool
+	// detailFailed holds items whose backfill fetch failed since startup, so one
+	// bad product can't use up every cycle's batch.
+	detailFailed map[string]bool
 
 	lastCycle atomic.Int64 // unix seconds of the last completed cycle
 }
@@ -48,6 +55,8 @@ func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poll
 		metrics:  metrics.New(time.Now()),
 		failures: make(map[string]int),
 		alerted:  make(map[string]bool),
+
+		detailFailed: make(map[string]bool),
 	}
 }
 
@@ -199,6 +208,43 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		region, _ := p.cfg.RegionByID(it.Region)
 		if blockedBy(itemKey(it), p.pollItem(ctx, region, it)) {
 			return true
+		}
+	}
+
+	return p.backfillDetails(ctx, pace, blockedBy)
+}
+
+// backfillDetails fetches up to detailBatch products that have never come from
+// the product endpoint. Category pages carry no breadcrumbs, so this is the only
+// way their group is learned. It reports whether the store blocked us.
+func (p *Poller) backfillDetails(ctx context.Context, pace func() bool, blockedBy func(string, error) bool) (blocked bool) {
+	todo, err := p.store.UndetailedItems(ctx)
+	if err != nil {
+		slog.Error("failed to list products awaiting details", "err", err)
+		return false
+	}
+	done := 0
+	for _, it := range todo {
+		if done >= detailBatch {
+			break
+		}
+		if p.detailFailed[itemKey(it)] {
+			continue
+		}
+		region, ok := p.cfg.RegionByID(it.Region)
+		if !ok {
+			continue
+		}
+		if !pace() {
+			return false
+		}
+		done++
+		err := p.pollItem(ctx, region, it)
+		if blockedBy(itemKey(it), err) {
+			return true
+		}
+		if err != nil {
+			p.detailFailed[itemKey(it)] = true
 		}
 	}
 	return false
