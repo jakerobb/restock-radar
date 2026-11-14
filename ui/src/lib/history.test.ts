@@ -9,13 +9,23 @@ function history(overrides: Partial<VariantHistory>): VariantHistory {
 }
 
 describe('buildHistoryModel', () => {
+  it('draws the price including surcharges', () => {
+    const model = buildHistoryModel(
+      history({ points: [{ time: t(1), status: 'Available', price_cents: 10000, price_with_surcharges_cents: 11500 }] }),
+      ms(1),
+      ms(20),
+    )
+    expect(model.runs[0]![0]!.cents).toBe(11500)
+    expect(model.priceRange).toEqual({ min: 11500, max: 11500 })
+  })
+
   it('turns change points into bands and a price line', () => {
     const m = buildHistoryModel(
       history({
         points: [
-          { time: t(1), status: 'SoldOut', price_cents: 10000 },
-          { time: t(10), status: 'Available', price_cents: 10000 },
-          { time: t(15), status: 'Available', price_cents: 9000 },
+          { time: t(1), status: 'SoldOut', price_cents: 10000, price_with_surcharges_cents: 10000 },
+          { time: t(10), status: 'Available', price_cents: 10000, price_with_surcharges_cents: 10000 },
+          { time: t(15), status: 'Available', price_cents: 9000, price_with_surcharges_cents: 9000 },
         ],
       }),
       ms(1),
@@ -34,8 +44,8 @@ describe('buildHistoryModel', () => {
     const m = buildHistoryModel(
       history({
         points: [
-          { time: t(1), status: '', price_cents: 500 },
-          { time: t(10), status: 'Available', price_cents: 500 },
+          { time: t(1), status: '', price_cents: 500, price_with_surcharges_cents: 500 },
+          { time: t(10), status: 'Available', price_cents: 500, price_with_surcharges_cents: 500 },
         ],
       }),
       ms(1),
@@ -50,7 +60,7 @@ describe('buildHistoryModel', () => {
 
   it('leaves the time before the first sighting and after the last check empty', () => {
     const m = buildHistoryModel(
-      history({ from: t(5), until: t(12), points: [{ time: t(5), status: 'Available', price_cents: 500 }] }),
+      history({ from: t(5), until: t(12), points: [{ time: t(5), status: 'Available', price_cents: 500, price_with_surcharges_cents: 500 }] }),
       ms(1),
       ms(20),
     )
@@ -60,7 +70,7 @@ describe('buildHistoryModel', () => {
 
   it('clips a state that began before the window', () => {
     const m = buildHistoryModel(
-      history({ from: t(1), points: [{ time: t(1), status: 'Available', price_cents: 500 }] }),
+      history({ from: t(1), points: [{ time: t(1), status: 'Available', price_cents: 500, price_with_surcharges_cents: 500 }] }),
       ms(10),
       ms(20),
     )
@@ -71,9 +81,9 @@ describe('buildHistoryModel', () => {
     const m = buildHistoryModel(
       history({
         points: [
-          { time: t(1), status: 'Available', price_cents: 500 },
-          { time: t(8), status: 'Available', price_cents: null },
-          { time: t(12), status: 'Available', price_cents: 600 },
+          { time: t(1), status: 'Available', price_cents: 500, price_with_surcharges_cents: 500 },
+          { time: t(8), status: 'Available', price_cents: null, price_with_surcharges_cents: null },
+          { time: t(12), status: 'Available', price_cents: 600, price_with_surcharges_cents: 600 },
         ],
       }),
       ms(1),
@@ -84,14 +94,14 @@ describe('buildHistoryModel', () => {
   })
 
   it('has no price range when no price is known', () => {
-    const m = buildHistoryModel(history({ points: [{ time: t(1), status: 'SoldOut', price_cents: null }] }), ms(1), ms(20))
+    const m = buildHistoryModel(history({ points: [{ time: t(1), status: 'SoldOut', price_cents: null, price_with_surcharges_cents: null }] }), ms(1), ms(20))
     expect(m.runs).toEqual([])
     expect(m.priceRange).toBeNull()
   })
 
   it('is empty for a variant first seen after the window', () => {
     const m = buildHistoryModel(
-      history({ from: t(25), until: t(26), points: [{ time: t(25), status: 'Available', price_cents: 1 }] }),
+      history({ from: t(25), until: t(26), points: [{ time: t(25), status: 'Available', price_cents: 1, price_with_surcharges_cents: 1 }] }),
       ms(1),
       ms(20),
     )

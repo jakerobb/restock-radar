@@ -252,6 +252,27 @@ func TestHistoryReconstructsTimeline(t *testing.T) {
 	}
 }
 
+func TestHistoryIncludesSurcharges(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	p := product("Available", 10900)
+	p.SurchargeTypes = []string{"Memory"}
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 12000, Currency: "USD"}
+	_, _ = s.Apply(ctx, "us", p, t0)
+	p.Variants[0].PriceWithSurcharges = &unistore.Money{Amount: 13000, Currency: "USD"}
+	_, _ = s.Apply(ctx, "us", p, t0.Add(24*time.Hour))
+
+	h, err := s.History(ctx, t0.Add(-time.Hour))
+	if err != nil || len(h) != 1 || len(h[0].Points) != 2 {
+		t.Fatalf("history=%+v err=%v", h, err)
+	}
+	pts := h[0].Points
+	if *pts[0].PriceCents != 10900 || *pts[0].PriceWithSurchargesCents != 12000 || *pts[1].PriceWithSurchargesCents != 13000 {
+		t.Fatalf("unexpected points: %+v", pts)
+	}
+}
+
 func TestDiscover(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
