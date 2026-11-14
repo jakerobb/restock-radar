@@ -25,6 +25,11 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
           {product.title}
         </a>
         <Badge tone={tone}>{label}</Badge>
+        {product.techspecs_url && (
+          <a className="text-sm font-normal text-muted underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
+            Tech specs
+          </a>
+        )}
         {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
       </h2>
       {history && (

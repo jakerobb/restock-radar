@@ -117,6 +117,11 @@ var migrations = []string{
 	`ALTER TABLE products ADD COLUMN short_title TEXT NOT NULL DEFAULT '';
 	ALTER TABLE products ADD COLUMN group_title TEXT NOT NULL DEFAULT '';
 	ALTER TABLE products ADD COLUMN detailed_at TEXT;`,
+	// techspecs_url is the product's page on techspecs.ui.com, empty when it has
+	// none (or hasn't been checked). techspecs_checked_at is when we last looked,
+	// so the oldest checks are the ones repeated; NULL until the first.
+	`ALTER TABLE products ADD COLUMN techspecs_url TEXT NOT NULL DEFAULT '';
+	ALTER TABLE products ADD COLUMN techspecs_checked_at TEXT;`,
 }
 
 type Store struct {
@@ -230,12 +235,14 @@ type VariantState struct {
 	// ProductShortTitle and ProductGroup are empty until a poll has seen them.
 	ProductShortTitle string `json:"product_short_title"`
 	ProductGroup      string `json:"product_group"`
-	VariantID         string `json:"variant_id"`
-	SKU               string `json:"sku"`
-	VariantTitle      string `json:"variant_title"`
-	Status            string `json:"status"`
-	PriceCents        *int64 `json:"price_cents"`
-	RegularPriceCents *int64 `json:"regular_price_cents"`
+	// ProductTechSpecsURL is the product's page on the tech specs site; empty when it has none or isn't checked yet.
+	ProductTechSpecsURL string `json:"product_techspecs_url"`
+	VariantID           string `json:"variant_id"`
+	SKU                 string `json:"sku"`
+	VariantTitle        string `json:"variant_title"`
+	Status              string `json:"status"`
+	PriceCents          *int64 `json:"price_cents"`
+	RegularPriceCents   *int64 `json:"regular_price_cents"`
 	// PriceWithSurchargesCents is PriceCents plus surcharges; null until a poll has seen it.
 	PriceWithSurchargesCents *int64 `json:"price_with_surcharges_cents"`
 	// SurchargeTypes are the kinds of surcharge on the product ("Memory", ...); empty when none.
@@ -609,7 +616,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.techspecs_url, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
@@ -624,7 +631,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	for rows.Next() {
 		var v VariantState
 		var checked, changed, first, tags, surcharges string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductTechSpecsURL, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.PriceWithSurchargesCents, &surcharges, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
@@ -788,6 +795,46 @@ func (s *Store) UndetailedItems(ctx context.Context) ([]Item, error) {
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// TechSpecsCandidate is a watched product whose tech specs page is due a check.
+type TechSpecsCandidate struct {
+	Region, ProductID, Slug, Category string
+}
+
+// TechSpecsDue lists watched products with a known category that have never been
+// checked for a tech specs page, or were last checked before olderThan: never
+// checked first, then the stalest.
+func (s *Store) TechSpecsDue(ctx context.Context, olderThan time.Time) ([]TechSpecsCandidate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.region, p.id, p.slug, p.category
+		FROM products p
+		WHERE p.category != ''
+			AND (p.techspecs_checked_at IS NULL OR p.techspecs_checked_at < ?)
+			AND EXISTS (SELECT 1 FROM items i WHERE i.region = p.region AND i.product_id = p.id)
+		ORDER BY p.techspecs_checked_at IS NOT NULL, p.techspecs_checked_at, p.region, p.slug`,
+		olderThan.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []TechSpecsCandidate
+	for rows.Next() {
+		var c TechSpecsCandidate
+		if err := rows.Scan(&c.Region, &c.ProductID, &c.Slug, &c.Category); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SetTechSpecsURL records the outcome of checking a product for a tech specs
+// page: its URL, or "" when it has none.
+func (s *Store) SetTechSpecsURL(ctx context.Context, region, productID, url string, checkedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE products SET techspecs_url = ?, techspecs_checked_at = ? WHERE region = ? AND id = ?`,
+		url, checkedAt.UTC().Format(time.RFC3339), region, productID)
+	return err
 }
 
 // HasProduct reports whether a product has ever been observed.

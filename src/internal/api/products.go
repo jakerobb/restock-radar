@@ -52,10 +52,12 @@ type productJSON struct {
 	Collection string `json:"collection"`
 	// ShortTitle is the store's compact name; Group is the title the store's breadcrumbs file the
 	// product under. Both are empty until a poll has seen them. The UI uses them to merge products.
-	ShortTitle string        `json:"short_title"`
-	Group      string        `json:"group"`
-	URL        string        `json:"url"`
-	Variants   []variantJSON `json:"variants"`
+	ShortTitle string `json:"short_title"`
+	Group      string `json:"group"`
+	URL        string `json:"url"`
+	// TechSpecsURL is the product's page on techspecs.ui.com; empty when it has none or isn't checked yet.
+	TechSpecsURL string        `json:"techspecs_url"`
+	Variants     []variantJSON `json:"variants"`
 }
 
 type pendingJSON struct {
@@ -100,7 +102,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		key := [2]string{v.Region, v.ProductID}
 		i, ok := index[key]
 		if !ok {
-			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, ShortTitle: v.ProductShortTitle, Group: v.ProductGroup, Variants: []variantJSON{}}
+			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, ShortTitle: v.ProductShortTitle, Group: v.ProductGroup, TechSpecsURL: v.ProductTechSpecsURL, Variants: []variantJSON{}}
 			if reg, ok := srv.cfg.RegionByID(v.Region); ok {
 				p.URL = fmt.Sprintf("%s/%s/products/%s", reg.BaseURL, reg.Path, url.PathEscape(v.ProductSlug))
 			}

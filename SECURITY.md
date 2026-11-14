@@ -18,8 +18,10 @@ reverse proxy:
 - **It has no login of its own.** Anything that can reach the HTTP port can
   read the watch list and add products. Don't expose it directly to the
   internet; put it behind something that authenticates users.
-- **It only talks to the stores you configure** (by default `store.ui.com`) and
-  to your ntfy server. A product slug or URL submitted through the UI can only
+- **It only talks to the stores you configure** (by default `store.ui.com`),
+  to your ntfy server, and to `techspecs.ui.com`, where it sends a `HEAD`
+  request for the product pages it links to (a few a cycle; the host is fixed
+  and not configurable). A product slug or URL submitted through the UI can only
   select a product on a configured store.
 - **Adding a product is rate limited** and the watch list is capped
   (`max_items`), because each addition makes the server call the store.

@@ -31,6 +31,7 @@ export function product(overrides: Partial<Product> = {}): Product {
     short_title: '',
     group: '',
     url: 'https://store.example/us/en/products/widget',
+    techspecs_url: 'https://techspecs.ui.com/unifi/switching/widget',
     variants: [variant()],
     ...overrides,
   }
