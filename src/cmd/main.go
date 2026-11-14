@@ -16,6 +16,7 @@ import (
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/techspecs"
 	"github.com/jakerobb/restock-radar/internal/unistore"
 	"github.com/jakerobb/restock-radar/internal/util"
 )
@@ -74,6 +75,7 @@ func main() {
 		st,
 		notify.NewNtfy(cfg.Ntfy.URL, cfg.Ntfy.Topic, cfg.Ntfy.Token),
 	)
+	p.SetTechSpecs(techspecs.New(cfg.UserAgent))
 	go p.Run(ctx)
 
 	if cfg.BackupDir != "" {

@@ -42,6 +42,8 @@ export interface Product {
   /** The title the store's breadcrumbs file the product under ("UniFi Patch Cables"); products sharing one are shown as a unit. Empty until a poll has fetched the product page. */
   group: string
   url: string
+  /** The product's page on techspecs.ui.com; empty until a poll has seen its category. */
+  techspecs_url: string
   variants: Variant[]
 }
 

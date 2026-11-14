@@ -15,6 +15,7 @@ function product(title: string, price: number | null, seen: string, changed: str
     group: '',
     tags: [],
     url: '',
+    techspecs_url: '',
     variants: [
       {
         id: title, sku: title, title: 'Default', status: 'Available', price_cents: price, regular_price_cents: null, price_with_surcharges_cents: null, surcharge_types: [],

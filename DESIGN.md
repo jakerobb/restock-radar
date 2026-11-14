@@ -63,6 +63,17 @@ the design assumes failure is normal and loud (see Failure handling).
   products (listed ones first, then oldest) that have never come from the
   product endpoint. A failure skips that product until restart. The UI merges
   products only when they share a collection and a group.
+- **Tech specs links.** Each product card links to its page on
+  `techspecs.ui.com/unifi/<category>/<slug>`. The slug is the store's. The
+  category is the store's category id mapped by prefix to one of the site's
+  seven top-level categories; the site doesn't check that it's the product's
+  own, only that it exists, and redirects unknown slugs to its home page. So a
+  `HEAD` request that isn't redirected is how we know a page exists. Each cycle
+  checks up to 5 watched products with a known category that have never been
+  checked, then those last checked more than a week ago, stalest first, and
+  stores the URL (or none) with the check time. The link is shown only when a
+  check found a page. A failed check skips that product until restart, and a
+  429/403/503 ends the cycle's checks.
 - Each observation is applied to SQLite in one transaction. A variant seen
   for the first time sets a baseline silently. After that, a change in
   `status` yields a `status` event, and a change in price, regular price, or

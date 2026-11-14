@@ -26,6 +26,13 @@ describe('ProductCard', () => {
     expect(screen.getByRole('link', { name: 'Camera G6' })).toHaveAttribute('href', multi.url)
   })
 
+  it('links to the tech specs page, when there is one', () => {
+    const { rerender } = render(<ProductCard product={multi} showRegion={false} />)
+    expect(screen.getByRole('link', { name: 'Tech specs' })).toHaveAttribute('href', multi.techspecs_url)
+    rerender(<ProductCard product={{ ...multi, techspecs_url: '' }} showRegion={false} />)
+    expect(screen.queryByRole('link', { name: 'Tech specs' })).not.toBeInTheDocument()
+  })
+
   it('strikes through a discounted regular price', () => {
     render(<ProductCard product={multi} showRegion={false} />)
     expect(screen.getByText(/299/).tagName).toBe('S')

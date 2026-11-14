@@ -501,3 +501,62 @@ func TestUndetailedItemsAndGroups(t *testing.T) {
 		t.Fatalf("detailed_at must survive a category observation: %+v", todo)
 	}
 }
+
+func TestTechSpecsDueOldestFirst(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	for _, id := range []string{"a", "b", "c"} {
+		p := product("Available", 10900)
+		p.ID, p.Slug, p.Category = id, id, "wifi-flagship"
+		if _, err := s.Discover(ctx, "us", p, false, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slugs := func(olderThan time.Time) (out []string) {
+		due, err := s.TechSpecsDue(ctx, olderThan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range due {
+			out = append(out, c.Slug)
+		}
+		return out
+	}
+	cutoff := now.Add(-time.Hour)
+	if got := slugs(cutoff); len(got) != 3 {
+		t.Fatalf("unchecked products are all due, got %v", got)
+	}
+
+	// b was checked long ago, c recently, a never: a, then b; c isn't due.
+	if err := s.SetTechSpecsURL(ctx, "us", "b", "https://t/b", now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTechSpecsURL(ctx, "us", "c", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := slugs(cutoff); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("want never-checked a, then stale b, got %v", got)
+	}
+
+	vs, err := s.Variants(ctx, "us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vs {
+		want := map[string]string{"a": "", "b": "https://t/b", "c": ""}[v.ProductSlug]
+		if v.ProductTechSpecsURL != want {
+			t.Errorf("%s: techspecs url %q, want %q", v.ProductSlug, v.ProductTechSpecsURL, want)
+		}
+	}
+
+	// Products with no known category can't be checked, so aren't offered.
+	p := product("Available", 10900)
+	p.ID, p.Slug, p.Category = "d", "d", ""
+	if _, err := s.Discover(ctx, "us", p, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := slugs(cutoff); len(got) != 2 {
+		t.Fatalf("a product without a category isn't due, got %v", got)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/techspecs"
 	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
@@ -24,6 +25,19 @@ const maxBackoffFactor = 8
 // detailBatch is how many products a cycle fetches from the product endpoint
 // just to fill in what category pages lack (see backfillDetails).
 const detailBatch = 5
+
+// techSpecsBatch is how many products a cycle checks for a tech specs page, and
+// techSpecsRecheck how long a result stands before the product is checked again
+// (UniFi moves these pages around, and some products never have one).
+const (
+	techSpecsBatch   = 5
+	techSpecsRecheck = 7 * 24 * time.Hour
+)
+
+// TechSpecs is the part of techspecs.Client the poller needs.
+type TechSpecs interface {
+	Exists(ctx context.Context, url string) (bool, error)
+}
 
 // Fetcher is the part of unistore.Client the poller needs.
 type Fetcher interface {
@@ -45,6 +59,10 @@ type Poller struct {
 	// detailFailed holds items whose backfill fetch failed since startup, so one
 	// bad product can't use up every cycle's batch.
 	detailFailed map[string]bool
+	// techSpecs checks for tech specs pages; nil disables it. techSpecsFailed is
+	// detailFailed's counterpart.
+	techSpecs       TechSpecs
+	techSpecsFailed map[string]bool
 
 	lastCycle atomic.Int64 // unix seconds of the last completed cycle
 }
@@ -57,8 +75,13 @@ func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poll
 		alerted:  make(map[string]bool),
 
 		detailFailed: make(map[string]bool),
+
+		techSpecsFailed: make(map[string]bool),
 	}
 }
+
+// SetTechSpecs turns on checking products for tech specs pages.
+func (p *Poller) SetTechSpecs(t TechSpecs) { p.techSpecs = t }
 
 // Metrics returns the counters this poller maintains.
 func (p *Poller) Metrics() *metrics.Metrics { return p.metrics }
@@ -211,7 +234,64 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		}
 	}
 
-	return p.backfillDetails(ctx, pace, blockedBy)
+	if p.backfillDetails(ctx, pace, blockedBy) {
+		return true
+	}
+	p.checkTechSpecs(ctx, pace)
+	return false
+}
+
+// checkTechSpecs looks for the tech specs page of up to techSpecsBatch watched
+// products: those never checked, then those checked longest ago, but none
+// checked within techSpecsRecheck. A product whose page is missing is recorded
+// as having none, so it isn't retried until its turn comes round. A failure
+// skips that product until restart, and a block stops the checks for this cycle.
+func (p *Poller) checkTechSpecs(ctx context.Context, pace func() bool) {
+	if p.techSpecs == nil {
+		return
+	}
+	now := time.Now()
+	due, err := p.store.TechSpecsDue(ctx, now.Add(-techSpecsRecheck))
+	if err != nil {
+		slog.Error("failed to list products due a tech specs check", "err", err)
+		return
+	}
+	done := 0
+	for _, c := range due {
+		if done >= techSpecsBatch {
+			return
+		}
+		key := c.Region + "/" + c.Slug
+		u := techspecs.URL(c.Category, c.Slug)
+		if u == "" || p.techSpecsFailed[key] {
+			continue
+		}
+		if !pace() {
+			return
+		}
+		done++
+		found, err := p.techSpecs.Exists(ctx, u)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Warn("tech specs check failed", "item", key, "err", err)
+			p.techSpecsFailed[key] = true
+			var he *techspecs.HTTPError
+			if errors.As(err, &he) && he.Blocked() {
+				slog.Warn("blocked by tech specs site; skipping its checks this cycle", "status", he.Status)
+				return
+			}
+			continue
+		}
+		if !found {
+			u = ""
+		}
+		if err := p.store.SetTechSpecsURL(ctx, c.Region, c.ProductID, u, now); err != nil {
+			slog.Error("failed to record tech specs page", "item", key, "err", err)
+			return
+		}
+	}
 }
 
 // backfillDetails fetches up to detailBatch products that have never come from

@@ -14,6 +14,7 @@ import (
 	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/notify"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/techspecs"
 	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
@@ -488,5 +489,123 @@ func TestBackfillSkipsProductsThatFail(t *testing.T) {
 	p.cycle(ctx) // skips them: f, then g
 	if !slices.Contains(f.productSlugs, "g") {
 		t.Fatalf("a failing product must not starve the others: %v", f.productSlugs)
+	}
+}
+
+type fakeTechSpecs struct {
+	missing map[string]bool  // URLs with no page
+	errFor  map[string]error // URLs that can't be checked
+	calls   []string
+}
+
+func (f *fakeTechSpecs) Exists(_ context.Context, u string) (bool, error) {
+	f.calls = append(f.calls, u)
+	if err := f.errFor[u]; err != nil {
+		return false, err
+	}
+	return !f.missing[u], nil
+}
+
+func TestTechSpecsChecksAreBatchedAndRepeatedOldestFirst(t *testing.T) {
+	p, _, _ := setup(t)
+	ctx := context.Background()
+	ts := &fakeTechSpecs{missing: map[string]bool{"https://techspecs.ui.com/unifi/wifi/c": true}}
+	p.SetTechSpecs(ts)
+	now := time.Now()
+	for _, slug := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		pr := listing("id-"+slug, slug, "wifi-flagship", "Available")
+		if _, err := p.store.Discover(ctx, "us", &pr, false, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pace := func() bool { return true }
+	urls := func() map[string]string {
+		vs, err := p.store.Variants(ctx, "us")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, v := range vs {
+			out[v.ProductSlug] = v.ProductTechSpecsURL
+		}
+		return out
+	}
+
+	p.checkTechSpecs(ctx, pace)
+	if len(ts.calls) != techSpecsBatch {
+		t.Fatalf("want %d checks, got %v", techSpecsBatch, ts.calls)
+	}
+	p.checkTechSpecs(ctx, pace) // the remaining two
+	if len(ts.calls) != 7 {
+		t.Fatalf("want 7 checks in all, got %v", ts.calls)
+	}
+	p.checkTechSpecs(ctx, pace) // everything is fresh now
+	if len(ts.calls) != 7 {
+		t.Fatalf("a fresh result must not be checked again, got %v", ts.calls)
+	}
+	got := urls()
+	if got["a"] != "https://techspecs.ui.com/unifi/wifi/a" || got["c"] != "" {
+		t.Fatalf("want a URL for a product with a page and none for c: %v", got)
+	}
+
+	// Once a result is a week old it is checked again, oldest first, a batch at a time.
+	for i, slug := range []string{"g", "f", "e", "d", "c", "b", "a"} {
+		id := "id-" + slug
+		if err := p.store.SetTechSpecsURL(ctx, "us", id, "x", now.Add(-techSpecsRecheck-time.Duration(10-i)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ts.calls = nil
+	ts.missing["https://techspecs.ui.com/unifi/wifi/g"] = true // g's page has since gone
+	p.checkTechSpecs(ctx, pace)
+	want := []string{"g", "f", "e", "d", "c"}
+	if len(ts.calls) != len(want) {
+		t.Fatalf("want %d rechecks, got %v", len(want), ts.calls)
+	}
+	for i, slug := range want {
+		if ts.calls[i] != "https://techspecs.ui.com/unifi/wifi/"+slug {
+			t.Fatalf("recheck %d: want %s, got %v", i, slug, ts.calls)
+		}
+	}
+	if got := urls(); got["g"] != "" || got["c"] != "" || got["f"] == "" {
+		t.Fatalf("g should have lost its URL and f kept it: %v", got)
+	}
+}
+
+func TestTechSpecsFailureSkipsProductAndBlockStopsCycle(t *testing.T) {
+	p, _, _ := setup(t)
+	ctx := context.Background()
+	ts := &fakeTechSpecs{errFor: map[string]error{"https://techspecs.ui.com/unifi/wifi/a": errors.New("boom")}}
+	p.SetTechSpecs(ts)
+	for _, slug := range []string{"a", "b", "c"} {
+		pr := listing("id-"+slug, slug, "wifi-flagship", "Available")
+		if _, err := p.store.Discover(ctx, "us", &pr, false, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pace := func() bool { return true }
+	p.checkTechSpecs(ctx, pace)
+	if len(ts.calls) != 3 {
+		t.Fatalf("one failure mustn't stop the others, got %v", ts.calls)
+	}
+	ts.calls = nil
+	p.checkTechSpecs(ctx, pace)
+	if len(ts.calls) != 0 {
+		t.Fatalf("a failed product waits until restart and the rest are fresh, got %v", ts.calls)
+	}
+
+	// A block ends the cycle's checks.
+	p2, _, _ := setup(t)
+	ts2 := &fakeTechSpecs{errFor: map[string]error{"https://techspecs.ui.com/unifi/wifi/a": &techspecs.HTTPError{Status: 429}}}
+	p2.SetTechSpecs(ts2)
+	for _, slug := range []string{"a", "b"} {
+		pr := listing("id-"+slug, slug, "wifi-flagship", "Available")
+		if _, err := p2.store.Discover(ctx, "us", &pr, false, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p2.checkTechSpecs(ctx, pace)
+	if len(ts2.calls) != 1 {
+		t.Fatalf("a block should stop further checks, got %v", ts2.calls)
 	}
 }
