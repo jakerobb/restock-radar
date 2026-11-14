@@ -20,18 +20,20 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
   const { label, tone } = summarizeVariants(product.variants)
   return (
     <Card aria-label={product.title}>
-      <h2 className="mb-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-lg font-semibold">
-        <a className="text-accent underline-offset-2 hover:underline" href={product.url} target="_blank" rel="noopener noreferrer">
-          {product.title}
-        </a>
-        <Badge tone={tone}>{label}</Badge>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h2 className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1 text-lg font-semibold">
+          <a className="text-accent underline-offset-2 hover:underline" href={product.url} target="_blank" rel="noopener noreferrer">
+            {product.title}
+          </a>
+          <Badge tone={tone}>{label}</Badge>
+          {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
+        </h2>
         {product.techspecs_url && (
-          <a className="text-sm font-normal text-muted underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
+          <a className="shrink-0 text-sm text-accent underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
             Tech specs
           </a>
         )}
-        {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
-      </h2>
+      </div>
       {history && (
         <div className="mb-1">
           <HistoryLegend days={history.days} />
