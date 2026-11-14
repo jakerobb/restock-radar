@@ -24,11 +24,11 @@ describe('price and stock charts on a ProductCard', () => {
           from: iso(20),
           until: response.until,
           points: [
-            { time: iso(20), status: 'SoldOut', price_cents: 10000 },
-            { time: iso(10), status: 'Available', price_cents: 9000 },
+            { time: iso(20), status: 'SoldOut', price_cents: 10000, price_with_surcharges_cents: 10000 },
+            { time: iso(10), status: 'Available', price_cents: 9000, price_with_surcharges_cents: 9000 },
           ],
         },
-        { region: 'us', variant_id: 'w', from: iso(5), until: response.until, points: [{ time: iso(5), status: 'ComingSoon', price_cents: null }] },
+        { region: 'us', variant_id: 'w', from: iso(5), until: response.until, points: [{ time: iso(5), status: 'ComingSoon', price_cents: null, price_with_surcharges_cents: null }] },
       ],
     }),
   )

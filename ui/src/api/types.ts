@@ -78,6 +78,8 @@ export interface HistoryPoint {
   time: string
   status: string
   price_cents: number | null
+  /** price_cents plus the store's surcharges; the same as price_cents when it had none. */
+  price_with_surcharges_cents: number | null
 }
 
 export interface VariantHistory {

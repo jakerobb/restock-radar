@@ -1,4 +1,5 @@
 import type { HistoryResponse, VariantHistory } from '../api/types'
+import { totalCents } from './format'
 
 const DAY_MS = 86_400_000
 
@@ -9,7 +10,7 @@ export interface StockBand {
   status: string
 }
 
-/** A stretch of time over which a variant had one price. */
+/** A stretch of time over which a variant had one price, surcharges included. */
 export interface PriceStep {
   start: number
   end: number
@@ -57,8 +58,9 @@ export function buildHistoryModel(history: VariantHistory, windowStart: number, 
       else bands.push({ start, end, status: point.status })
     }
 
-    if (point.price_cents === null) return
-    const cents = point.price_cents
+    // The line shows what the store charges: the price with surcharges.
+    const cents = totalCents(point)
+    if (cents === null) return
     min = Math.min(min, cents)
     max = Math.max(max, cents)
     const run = runs[runs.length - 1]
