@@ -61,8 +61,23 @@ the design assumes failure is normal and loud (see Failure handling).
   and `shortTitle` as its short title. Products found only on category pages
   have neither, so after the regular requests each cycle fetches up to 5
   products (listed ones first, then oldest) that have never come from the
-  product endpoint. A failure skips that product until restart. The UI merges
-  products only when they share a collection and a group.
+  product endpoint, then those that last did over a week ago. A failure skips
+  that product until restart. The UI merges products only when they share a
+  collection and a group.
+- **Technical specifications.** The product endpoint also carries the product's
+  full specification (`technicalSpecification`: sections of entries, each a
+  text value, a yes/no flag, or a group heading with entries under it). It is
+  the same data as the tech specs site, with the same feature ids and values,
+  so we read it here and not from there. Category pages carry only a six-entry
+  grid summary, which is never taken for the specification. Entries the store
+  lists for the category but leaves blank (a flag of `Empty`) are dropped, with
+  any group left with nothing under it; malformed entries are dropped and
+  logged, not treated as a failed fetch, since stock and price matter more.
+  The values are display text ("5.8 dBi", "16 (8 PoE+; 8 PoE++)\n(1G/100M/10M)"),
+  stored as they come so that anything derived from them (ports, radios,
+  numeric metrics for searching and sorting) can be rebuilt from the stored copy
+  without fetching again. A response without a specification leaves the stored
+  one alone; one with an empty specification clears it.
 - **Tech specs links.** Each product card links to its page on
   `techspecs.ui.com/unifi/<category>/<slug>`. The slug is the store's. The
   category is the store's category id mapped by prefix to one of the site's
@@ -124,6 +139,17 @@ CGO off). WAL mode lets the API read while the poller writes, and writes are
 serialized with `BEGIN IMMEDIATE`. Tables: `products`, `variants` (latest
 state), `events` (history, with `notified_at`). Schema is versioned with
 `PRAGMA user_version`. Needs a single replica and a persistent volume.
+
+`product_specs` holds each product's specification, one row per entry in the
+store's order: its section (id, label, and type, `Standard` or the grid's
+`Overview`), the feature's id and label, its parent group's feature id, the kind
+(`text`, `flag` with value `true`/`false`, or `group`), the value, and the
+store's footnote. A feature id is unique within a section but repeats across
+them (the grid summary echoes features shown elsewhere), so rows are keyed by
+position. `products.specs_hash` identifies the stored rows, so an unchanged
+specification isn't rewritten, and `products.specs_fetched_at` is when the
+product endpoint last supplied the product; it decides when the product is
+next fetched.
 
 ### Watch list and web UI
 

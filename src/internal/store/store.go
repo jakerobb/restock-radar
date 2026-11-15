@@ -4,7 +4,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -122,6 +124,32 @@ var migrations = []string{
 	// so the oldest checks are the ones repeated; NULL until the first.
 	`ALTER TABLE products ADD COLUMN techspecs_url TEXT NOT NULL DEFAULT '';
 	ALTER TABLE products ADD COLUMN techspecs_checked_at TEXT;`,
+	// The store's technical specification for a product, as the product endpoint
+	// lists it, one row per entry in the store's order (position). It is kept as
+	// the store gives it, text values and all; anything that wants numbers or
+	// ports is derived from it. specs_hash identifies the stored rows, so an
+	// unchanged specification isn't rewritten; specs_fetched_at is when the product
+	// endpoint last supplied the product (NULL until then), which is what decides
+	// when it is next fetched. feature_id repeats across sections, so it isn't a key.
+	`ALTER TABLE products ADD COLUMN specs_hash TEXT NOT NULL DEFAULT '';
+	ALTER TABLE products ADD COLUMN specs_fetched_at TEXT;
+	CREATE TABLE product_specs (
+		region            TEXT NOT NULL,
+		product_id        TEXT NOT NULL,
+		position          INTEGER NOT NULL,
+		section_id        TEXT NOT NULL,
+		section           TEXT NOT NULL,
+		section_type      TEXT NOT NULL,
+		feature_id        TEXT NOT NULL,
+		parent_feature_id TEXT NOT NULL DEFAULT '',
+		label             TEXT NOT NULL,
+		kind              TEXT NOT NULL,
+		value             TEXT NOT NULL DEFAULT '',
+		note              TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (region, product_id, position),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE INDEX product_specs_feature ON product_specs (feature_id);`,
 }
 
 type Store struct {
@@ -417,6 +445,11 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection, surcharges, p.ShortTitle, p.Group, detailedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
+	}
+	if p.Detailed {
+		if err := applySpecs(ctx, tx, region, p, now); err != nil {
+			return nil, err
+		}
 	}
 
 	var events []Event
@@ -770,16 +803,88 @@ func (s *Store) Items(ctx context.Context) ([]Item, error) {
 	return out, rows.Err()
 }
 
-// UndetailedItems lists watched items whose product has never been fetched from
-// the product endpoint (including those seen only on category pages), listed
-// products first, then oldest first.
-func (s *Store) UndetailedItems(ctx context.Context) ([]Item, error) {
+// applySpecs records that the product endpoint supplied the product, and its
+// specification if the response had one. A response without one (nil Specs)
+// leaves the stored specification alone: the store may have dropped the field,
+// and that is no reason to forget what we know. An unchanged specification is
+// not rewritten.
+func applySpecs(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product, now time.Time) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE products SET specs_fetched_at = ? WHERE region = ? AND id = ?`, ts(now), region, p.ID); err != nil {
+		return fmt.Errorf("recording specs fetch: %w", err)
+	}
+	if p.Specs == nil {
+		return nil
+	}
+	b, err := json.Marshal(p.Specs)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(b)
+	hash := hex.EncodeToString(sum[:])
+
+	var stored string
+	if err := tx.QueryRowContext(ctx, `SELECT specs_hash FROM products WHERE region = ? AND id = ?`, region, p.ID).Scan(&stored); err != nil {
+		return fmt.Errorf("reading specs hash: %w", err)
+	}
+	if stored == hash {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM product_specs WHERE region = ? AND product_id = ?`, region, p.ID); err != nil {
+		return fmt.Errorf("clearing specs: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO product_specs (region, product_id, position, section_id, section, section_type, feature_id, parent_feature_id, label, kind, value, note)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+	for i, sp := range p.Specs {
+		if _, err := stmt.ExecContext(ctx, region, p.ID, i, sp.SectionID, sp.Section, sp.SectionType, sp.FeatureID, sp.ParentID, sp.Label, sp.Kind, sp.Value, sp.Note); err != nil {
+			return fmt.Errorf("inserting spec %q: %w", sp.Label, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE products SET specs_hash = ? WHERE region = ? AND id = ?`, hash, region, p.ID); err != nil {
+		return fmt.Errorf("recording specs hash: %w", err)
+	}
+	return nil
+}
+
+// ProductSpecs returns the stored specification of a product in the store's
+// order. It is empty both for a product whose specification is empty and for one
+// we haven't read yet; the latter has no specs_fetched_at.
+func (s *Store) ProductSpecs(ctx context.Context, region, productID string) ([]unistore.Spec, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT section_id, section, section_type, feature_id, parent_feature_id, label, kind, value, note
+		FROM product_specs WHERE region = ? AND product_id = ? ORDER BY position`, region, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []unistore.Spec
+	for rows.Next() {
+		var sp unistore.Spec
+		if err := rows.Scan(&sp.SectionID, &sp.Section, &sp.SectionType, &sp.FeatureID, &sp.ParentID, &sp.Label, &sp.Kind, &sp.Value, &sp.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// DetailsDue lists watched items whose product is due a fetch from the product
+// endpoint, which alone supplies a product's group and specification: those
+// never fetched from it (including products seen only on category pages), then
+// those last fetched before olderThan, stalest first. Within each, listed
+// products come before discovered ones.
+func (s *Store) DetailsDue(ctx context.Context, olderThan time.Time) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT i.region, i.slug, i.source, i.product_id, COALESCE(p.category, ''), i.added_at
 		FROM items i
 		JOIN products p ON p.region = i.region AND p.id = i.product_id
-		WHERE p.detailed_at IS NULL
-		ORDER BY i.source = ?, i.added_at, i.slug`, SourceDiscovered)
+		WHERE p.specs_fetched_at IS NULL OR p.specs_fetched_at < ?
+		ORDER BY p.specs_fetched_at IS NOT NULL, i.source = ?, p.specs_fetched_at, i.added_at, i.slug`,
+		ts(olderThan), SourceDiscovered)
 	if err != nil {
 		return nil, err
 	}

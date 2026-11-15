@@ -23,6 +23,10 @@ type fakeFetcher struct {
 	err    error
 	price  int64  // cents; 0 means the default
 	cat    string // category reported for the widget; empty means unknown
+	// specs and specsSkipped are the specification the product endpoint reports
+	// for the widget; nil means it reports none.
+	specs        []unistore.Spec
+	specsSkipped int
 
 	// category is what the category page returns; categoryErr makes it fail.
 	category    *unistore.Category
@@ -48,7 +52,7 @@ func (f *fakeFetcher) FetchProduct(_ context.Context, _ config.Region, slug stri
 		d.Detailed = true
 		return &d, nil
 	}
-	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Category: f.cat, Detailed: true, Variants: []unistore.Variant{{
+	return &unistore.Product{ID: "p1", Slug: "widget", Name: "W", Title: "Widget", Category: f.cat, Detailed: true, Specs: f.specs, SpecsSkipped: f.specsSkipped, Variants: []unistore.Variant{{
 		ID: "v1", SKU: "W-1", Title: "US", Status: f.status,
 		Price: &unistore.Money{Amount: cmp.Or(f.price, 10900), Currency: "USD"},
 	}}}, nil
@@ -607,5 +611,216 @@ func TestTechSpecsFailureSkipsProductAndBlockStopsCycle(t *testing.T) {
 	p2.checkTechSpecs(ctx, pace)
 	if len(ts2.calls) != 1 {
 		t.Fatalf("a block should stop further checks, got %v", ts2.calls)
+	}
+}
+
+// spec is a one-entry specification; value distinguishes revisions of it.
+func spec(value string) []unistore.Spec {
+	return []unistore.Spec{{SectionID: "s", Section: "Hardware", SectionType: "Standard", FeatureID: "f-weight", Label: "Weight", Kind: unistore.SpecText, Value: value}}
+}
+
+func specValue(t *testing.T, p *Poller, productID string) string {
+	t.Helper()
+	got, err := p.store.ProductSpecs(context.Background(), "us", productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		return ""
+	}
+	return got[0].Value
+}
+
+// discoveredSetup watches the widget in category c1, whose page also lists the
+// given extra products, and runs the two cycles it takes to adopt them. Each
+// extra's product endpoint answers with specs "<slug>-v1".
+func discoveredSetup(t *testing.T, slugs ...string) (*Poller, *fakeFetcher) {
+	t.Helper()
+	p, f, _ := setup(t)
+	f.status, f.cat = "SoldOut", "c1"
+	f.details = map[string]unistore.Product{}
+	listed := []unistore.Product{listing("p1", "widget", "c1", "SoldOut")}
+	for _, slug := range slugs {
+		pr := listing("id-"+slug, slug, "c1", "Available")
+		listed = append(listed, pr)
+		pr.Specs = spec(slug + "-v1")
+		f.details[slug] = pr
+	}
+	f.category = &unistore.Category{Subcategories: []string{"c1"}, Products: listed}
+	p.cycle(context.Background()) // learns the widget's category
+	return p, f
+}
+
+// age makes a product's last fetch from the product endpoint old enough to be
+// repeated, by recording it as having happened long ago.
+func age(t *testing.T, p *Poller, f *fakeFetcher, slug string) {
+	t.Helper()
+	pr := f.details[slug]
+	pr.Detailed = true
+	if _, err := p.store.Apply(context.Background(), "us", &pr, time.Now().Add(-detailRecheck-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSpecsAreStoredFromTheProductEndpoint(t *testing.T) {
+	p, f, _ := setup(t)
+	f.specs = spec("680 g")
+	p.cycle(context.Background())
+	if got := specValue(t, p, "p1"); got != "680 g" {
+		t.Errorf("stored spec = %q", got)
+	}
+}
+
+func TestSpecsAreFetchedForDiscoveredProducts(t *testing.T) {
+	p, f := discoveredSetup(t, "a", "b")
+	p.cycle(context.Background()) // adopts a and b, then fetches them from the product endpoint
+	for _, slug := range []string{"a", "b"} {
+		if got := specValue(t, p, "id-"+slug); got != slug+"-v1" {
+			t.Errorf("%s: spec = %q", slug, got)
+		}
+	}
+	calls := f.productCalls
+	p.cycle(context.Background())
+	if f.productCalls != calls {
+		t.Errorf("products with specs were fetched again straight away: %v", f.productSlugs)
+	}
+}
+
+func TestSpecsAreRefreshedOnceTheyAreOld(t *testing.T) {
+	ctx := context.Background()
+	p, f := discoveredSetup(t, "a")
+	p.cycle(ctx)
+	if got := specValue(t, p, "id-a"); got != "a-v1" {
+		t.Fatalf("spec = %q", got)
+	}
+
+	// Just under the recheck interval: left alone.
+	pr := f.details["a"]
+	pr.Detailed = true
+	if _, err := p.store.Apply(ctx, "us", &pr, time.Now().Add(-detailRecheck+time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.productCalls
+	p.cycle(ctx)
+	if f.productCalls != calls {
+		t.Fatalf("fetched a product whose specs are not yet old: %v", f.productSlugs)
+	}
+
+	// Past it, and UniFi has revised the specification meanwhile.
+	age(t, p, f, "a")
+	revised := f.details["a"]
+	revised.Specs = spec("a-v2")
+	f.details["a"] = revised
+	p.cycle(ctx)
+	if f.productCalls != calls+1 {
+		t.Fatalf("want one refetch of a, got %v", f.productSlugs[calls-1:])
+	}
+	if got := specValue(t, p, "id-a"); got != "a-v2" {
+		t.Errorf("spec after refresh = %q", got)
+	}
+	p.cycle(ctx)
+	if f.productCalls != calls+1 {
+		t.Errorf("refreshed product fetched again: %v", f.productSlugs)
+	}
+}
+
+func TestRefreshesShareTheBatchWithFirstFetches(t *testing.T) {
+	ctx := context.Background()
+	slugs := []string{"a", "b", "c", "d", "e", "f", "g"}
+	p, f := discoveredSetup(t, slugs...)
+	for range 3 { // five, then two; then nothing left
+		p.cycle(ctx)
+	}
+	for _, slug := range slugs {
+		age(t, p, f, slug)
+	}
+	calls := f.productCalls
+
+	p.cycle(ctx)
+	if got := f.productCalls - calls; got != detailBatch {
+		t.Fatalf("a cycle refreshed %d products, want the batch of %d", got, detailBatch)
+	}
+	p.cycle(ctx)
+	if got := f.productCalls - calls; got != len(slugs) {
+		t.Fatalf("two cycles refreshed %d products, want %d", got, len(slugs))
+	}
+	p.cycle(ctx)
+	if got := f.productCalls - calls; got != len(slugs) {
+		t.Errorf("a product was refreshed twice: %v", f.productSlugs[calls:])
+	}
+}
+
+func TestFailedRefreshIsNotRetriedEveryCycle(t *testing.T) {
+	ctx := context.Background()
+	p, f := discoveredSetup(t, "a", "b")
+	p.cycle(ctx)
+	age(t, p, f, "a")
+	age(t, p, f, "b")
+	f.productErrFor = map[string]error{"a": unistore.ErrNotFound}
+	calls := f.productCalls
+
+	p.cycle(ctx) // a fails, b succeeds
+	if got := specValue(t, p, "id-b"); got != "b-v1" {
+		t.Errorf("b's refresh was lost: %q", got)
+	}
+	after := f.productCalls
+	if after-calls != 2 {
+		t.Fatalf("want a and b fetched once each, got %v", f.productSlugs[calls:])
+	}
+	p.cycle(ctx)
+	p.cycle(ctx)
+	if f.productCalls != after {
+		t.Errorf("a failing product is retried every cycle: %v", f.productSlugs[after:])
+	}
+	// The old specification stands.
+	if got := specValue(t, p, "id-a"); got != "a-v1" {
+		t.Errorf("a's spec = %q", got)
+	}
+}
+
+func TestAResponseWithoutSpecsIsNotRefetchedEveryCycle(t *testing.T) {
+	ctx := context.Background()
+	p, f := discoveredSetup(t, "a")
+	pr := f.details["a"]
+	pr.Specs = nil // the product endpoint says nothing about specs
+	f.details["a"] = pr
+	p.cycle(ctx)
+	calls := f.productCalls
+	p.cycle(ctx)
+	p.cycle(ctx)
+	if f.productCalls != calls {
+		t.Errorf("fetched again: %v", f.productSlugs[calls:])
+	}
+	if got := specValue(t, p, "id-a"); got != "" {
+		t.Errorf("spec = %q", got)
+	}
+}
+
+func TestMalformedSpecEntriesDoNotStopTheProductBeingTracked(t *testing.T) {
+	p, f, n := setup(t)
+	f.specs, f.specsSkipped = spec("680 g"), 3
+	ctx := context.Background()
+	p.cycle(ctx)
+	f.status = "Available"
+	p.cycle(ctx)
+	if len(n.sent) != 1 {
+		t.Errorf("the restock went unnoticed: %+v", n.sent)
+	}
+	if got := specValue(t, p, "p1"); got != "680 g" {
+		t.Errorf("spec = %q", got)
+	}
+}
+
+func TestCategoryPagesDoNotTouchSpecs(t *testing.T) {
+	ctx := context.Background()
+	p, f := discoveredSetup(t, "a")
+	p.cycle(ctx)
+	// Later cycles read the category page again, which carries no specs.
+	f.status = "Available"
+	for range 3 {
+		p.cycle(ctx)
+	}
+	if got := specValue(t, p, "id-a"); got != "a-v1" {
+		t.Errorf("spec = %q", got)
 	}
 }

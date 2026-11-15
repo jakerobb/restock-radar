@@ -491,7 +491,8 @@ func TestUndetailedItemsAndGroups(t *testing.T) {
 	if _, err := s.Discover(ctx, "us", p, false, now); err != nil {
 		t.Fatal(err)
 	}
-	todo, err := s.UndetailedItems(ctx)
+	cutoff := now.Add(-time.Hour)
+	todo, err := s.DetailsDue(ctx, cutoff)
 	if err != nil || len(todo) != 1 || todo[0].Slug != p.Slug {
 		t.Fatalf("want the discovered product awaiting details, got %+v (err %v)", todo, err)
 	}
@@ -502,7 +503,7 @@ func TestUndetailedItemsAndGroups(t *testing.T) {
 	if _, err := s.Apply(ctx, "us", &d, now); err != nil {
 		t.Fatal(err)
 	}
-	if todo, _ := s.UndetailedItems(ctx); len(todo) != 0 {
+	if todo, _ := s.DetailsDue(ctx, cutoff); len(todo) != 0 {
 		t.Fatalf("a detailed product should not be listed: %+v", todo)
 	}
 	vs, _ := s.Variants(ctx, "us")
@@ -518,7 +519,7 @@ func TestUndetailedItemsAndGroups(t *testing.T) {
 	if vs[0].ProductGroup != "Widgets" {
 		t.Fatalf("group lost: %+v", vs[0])
 	}
-	if todo, _ := s.UndetailedItems(ctx); len(todo) != 0 {
+	if todo, _ := s.DetailsDue(ctx, cutoff); len(todo) != 0 {
 		t.Fatalf("detailed_at must survive a category observation: %+v", todo)
 	}
 }
