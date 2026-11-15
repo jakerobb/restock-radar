@@ -105,7 +105,47 @@ type Product struct {
 	// the base price (e.g. "Memory"), in the store's order and unfiltered, so
 	// kinds we have never seen are kept. Nil means the response didn't say.
 	SurchargeTypes []string
-	Variants       []Variant
+	// Specs is the product's technical specification, in the store's order, with
+	// entries that have no value left out. Only the product endpoint carries it
+	// (category pages have just a short grid summary), so it is nil for anything
+	// else, and also when the response had no specification at all: nil means
+	// "not told", where an empty slice means the store says there is none.
+	Specs []Spec
+	// SpecsSkipped counts specification entries dropped for being malformed
+	// (no feature id, an unknown kind, an unreadable flag), so the caller can
+	// say so. Entries that are merely empty aren't counted.
+	SpecsSkipped int
+	Variants     []Variant
+}
+
+// Kinds of Spec.
+const (
+	SpecText  = "text"  // a free-text value ("400W", "2 x 2 (DL/UL MU-MIMO)")
+	SpecFlag  = "flag"  // a yes/no feature; Value is "true" or "false"
+	SpecGroup = "group" // a heading with no value of its own; other entries name it as their parent
+)
+
+// Spec is one entry of a product's technical specification.
+type Spec struct {
+	// SectionID, Section and SectionType say where the entry is shown: the
+	// store's id and label for the section ("Hardware"), and its type
+	// ("Standard", or "Overview" for the grid summary, which repeats features
+	// that appear in other sections).
+	SectionID   string `json:"section_id"`
+	Section     string `json:"section"`
+	SectionType string `json:"section_type"`
+	// FeatureID is the store's id for the feature, stable across products and
+	// time, unlike its label. It is unique within a section but not within a
+	// product. ParentID is the FeatureID of the group the entry sits under, or
+	// empty at the top level.
+	FeatureID string `json:"feature_id"`
+	ParentID  string `json:"parent_id,omitempty"`
+	Label     string `json:"label"`
+	Kind      string `json:"kind"`
+	// Value is the display text for SpecText, "true" or "false" for SpecFlag,
+	// and empty for SpecGroup. Note is the store's footnote for the entry.
+	Value string `json:"value,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 type build struct {
@@ -324,6 +364,9 @@ type rawProduct struct {
 		Name string `json:"name"`
 	} `json:"tags"`
 	SurchargeTypes []string `json:"productSurchargeTypes"`
+	// TechnicalSpecification is on both endpoints, but category pages carry only
+	// the grid summary, so only parseProduct reads it.
+	TechnicalSpecification *rawSpecs `json:"technicalSpecification"`
 	// Options are the choices a buyer makes (Color, Length, ...) in the order the
 	// store shows them; each variant picks one value per option.
 	Options []struct {
@@ -359,6 +402,9 @@ func parseProduct(currentID string, products []rawProduct, slug string) (*Produc
 		return nil, false, fmt.Errorf("%w: no product %q in response", ErrSchema, slug)
 	}
 	p, err := convertProduct(raw)
+	if p != nil {
+		p.Specs, p.SpecsSkipped = convertSpecs(raw.TechnicalSpecification)
+	}
 	return p, false, err
 }
 

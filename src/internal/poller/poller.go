@@ -23,8 +23,14 @@ import (
 const maxBackoffFactor = 8
 
 // detailBatch is how many products a cycle fetches from the product endpoint
-// just to fill in what category pages lack (see backfillDetails).
-const detailBatch = 5
+// just to fill in what category pages lack (see backfillDetails), and
+// detailRecheck how long what it brought stands before the product is fetched
+// again: the endpoint is the only source of a product's specification, which
+// UniFi revises now and then.
+const (
+	detailBatch   = 5
+	detailRecheck = 7 * 24 * time.Hour
+)
 
 // techSpecsBatch is how many products a cycle checks for a tech specs page, and
 // techSpecsRecheck how long a result stands before the product is checked again
@@ -294,13 +300,15 @@ func (p *Poller) checkTechSpecs(ctx context.Context, pace func() bool) {
 	}
 }
 
-// backfillDetails fetches up to detailBatch products that have never come from
-// the product endpoint. Category pages carry no breadcrumbs, so this is the only
-// way their group is learned. It reports whether the store blocked us.
+// backfillDetails fetches up to detailBatch products from the product endpoint:
+// those that have never come from it, then those that last did over
+// detailRecheck ago. Category pages carry no breadcrumbs or specification, so
+// this is the only way a product's group and specs are learned and kept
+// current. It reports whether the store blocked us.
 func (p *Poller) backfillDetails(ctx context.Context, pace func() bool, blockedBy func(string, error) bool) (blocked bool) {
-	todo, err := p.store.UndetailedItems(ctx)
+	todo, err := p.store.DetailsDue(ctx, time.Now().Add(-detailRecheck))
 	if err != nil {
-		slog.Error("failed to list products awaiting details", "err", err)
+		slog.Error("failed to list products due a details fetch", "err", err)
 		return false
 	}
 	done := 0
@@ -414,6 +422,9 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 		return err
 	}
 	p.recordSuccess(ctx, it)
+	if prod.SpecsSkipped > 0 {
+		slog.Warn("product has malformed specification entries; skipping them", "item", key, "skipped", prod.SpecsSkipped)
+	}
 
 	events, err := p.store.Apply(ctx, it.Region, prod, time.Now())
 	if err != nil {
