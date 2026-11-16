@@ -1,0 +1,367 @@
+package specs
+
+import (
+	"testing"
+)
+
+func metricOf(label, value string) (Result, *Metric) {
+	b := &builder{}
+	b.text("Overview", label, value)
+	r := b.derive()
+	return r, metric(r, map[string]string{
+		"Switching Capacity": "switching_capacity_gbps", "Total Non-Blocking Throughput": "nonblocking_throughput_gbps",
+		"IDS/IPS Throughput": "ids_ips_throughput_mbps", "Forwarding Rate": "forwarding_rate_mpps",
+	}[label])
+}
+
+func TestRateMetrics(t *testing.T) {
+	for _, tc := range []struct {
+		label, value string
+		want         float64
+		atLeast      bool
+	}{
+		{"Switching Capacity", "112 Gbps", 112, false},
+		{"Switching Capacity", "1.28 Tbps", 1280, false},
+		{"Switching Capacity", "500 Mbps", 0.5, false},
+		{"Total Non-Blocking Throughput", "56 Gbps", 56, false},
+		{"IDS/IPS Throughput", "5 Gbps", 5000, false},
+		{"IDS/IPS Throughput", "2.3 Gbps", 2300, false},
+		{"IDS/IPS Throughput", "1 Gbps", 1000, false},
+		{"IDS/IPS Throughput", "750 Mbps", 750, false},
+		{"IDS/IPS Throughput", "8+ Gbps", 8000, true},
+		{"IDS/IPS Throughput", "1,500 Mbps", 1500, false},
+		{"Forwarding Rate", "83 Mpps", 83, false},
+		{"Forwarding Rate", "14.88 Mpps", 14.88, false},
+		{"Forwarding Rate", "1.2 Gpps", 1200, false},
+		{"Forwarding Rate", "500 Kpps", 0.5, false},
+		{"Forwarding Rate", "2.4 Bpps", 2400, false},
+	} {
+		_, m := metricOf(tc.label, tc.value)
+		if m == nil || m.Value != tc.want || m.AtLeast != tc.atLeast || m.Raw != tc.value {
+			t.Errorf("%s = %q: got %+v, want %v (at least %v)", tc.label, tc.value, m, tc.want, tc.atLeast)
+		}
+	}
+}
+
+func TestRateMetricUnits(t *testing.T) {
+	for label, unit := range map[string]string{
+		"Switching Capacity": "Gbps", "Total Non-Blocking Throughput": "Gbps", "IDS/IPS Throughput": "Mbps", "Forwarding Rate": "Mpps",
+	} {
+		value := "1 Gbps"
+		if label == "Forwarding Rate" {
+			value = "1 Mpps"
+		}
+		if _, m := metricOf(label, value); m == nil || m.Unit != unit {
+			t.Errorf("%s unit = %+v", label, m)
+		}
+	}
+}
+
+func TestRateMetricsReportAnUnreadableValue(t *testing.T) {
+	for _, label := range []string{"Switching Capacity", "IDS/IPS Throughput", "Forwarding Rate", "Total Non-Blocking Throughput"} {
+		r, m := metricOf(label, "very fast")
+		if m != nil || len(r.Issues) != 1 || r.Issues[0].Area != "metrics" {
+			t.Errorf("%s: metric %+v issues %+v", label, m, r.Issues)
+		}
+	}
+}
+
+func TestPowerDraw(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		max         float64
+		excl        float64 // 0: none
+	}{
+		{"plain", "29W", 29, 0},
+		{"excluding PoE output", "50W (Excluding PoE Output)", 50, 50},
+		{"with and without PoE output", "50W (Excluding PoE Output)\n450W (Including PoE Output)", 450, 50},
+		{"per power source", "9W (Excluding PoE Output) with PoE input\n8W (Excluding PoE Output) with adapter input\n210W (Including PoE Output)", 210, 9},
+		{"thousands", "150W (Excluding PoE Output)\n2,400W (Including PoE Output)", 2400, 150},
+		{"fractional", "29.4W", 29.4, 0},
+		{"milliwatts", "27.7mW", 0.0277, 0},
+		{"milliwatts with a current", "50mW/20mA", 0.05, 0},
+		{"milliwatts and watts", "500mW (idle)\n3W (active)", 3, 0},
+		{"AC input line", "21W (AC input)\n15W (Excluding PoE output)", 21, 15},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{}
+			b.text("Hardware", "Max. Power Consumption", tc.value)
+			r := b.derive()
+			m := metric(r, "power_draw_max_w")
+			if m == nil || m.Value != tc.max || m.Unit != "W" {
+				t.Errorf("max = %+v, want %v", m, tc.max)
+			}
+			x := metric(r, "power_draw_excl_poe_w")
+			if (x == nil) != (tc.excl == 0) || x != nil && x.Value != tc.excl {
+				t.Errorf("excluding PoE = %+v, want %v", x, tc.excl)
+			}
+		})
+	}
+}
+
+func TestPowerDrawAlternativeLabelAndNoWatts(t *testing.T) {
+	b := &builder{}
+	b.text("Hardware", "Power Consumption", "12W")
+	if m := metric(b.derive(), "power_draw_max_w"); m == nil || m.Value != 12 {
+		t.Errorf("metric = %+v", m)
+	}
+	b = &builder{}
+	b.text("Hardware", "Max. Power Consumption", "varies")
+	if r := b.derive(); metric(r, "power_draw_max_w") != nil || len(r.Issues) != 1 {
+		t.Errorf("result = %+v", r)
+	}
+}
+
+func TestMetricsAbsentWhenNotPublished(t *testing.T) {
+	b := &builder{}
+	b.text("Overview", "Weight", "1 kg")
+	if r := b.derive(); len(r.Metrics) != 0 {
+		t.Errorf("metrics = %+v", r.Metrics)
+	}
+}
+
+func TestMetricsOnlyFromStandardSections(t *testing.T) {
+	b := &builder{}
+	b.grid("IDS/IPS", "5 Gbps IPS")
+	if r := b.derive(); len(r.Metrics) != 0 {
+		t.Errorf("the grid summary is not the specification: %+v", r.Metrics)
+	}
+}
+
+func TestRackForms(t *testing.T) {
+	for _, tc := range []struct {
+		in    string
+		known bool
+		mount bool
+		units int
+		full  bool
+	}{
+		{"Rack mount (1U)", true, true, 1, false},
+		{"Rack Mount (1U, Full-Depth)", true, true, 1, true},
+		{"Rack mount (1U, Full-Depth)", true, true, 1, true},
+		{"Rack mount (2U)", true, true, 2, false},
+		{"Rack Mount (3U)", true, true, 3, false},
+		{"Rack mount (1U), desktop, wall", true, true, 1, false},
+		{"Rack Mount | Compact Desktop", true, true, 0, false},
+		{"Rack-mount (1U)", true, true, 1, false},
+		{"Compact desktop", true, false, 0, false},
+		{"Compact DIN rail and wall-mountable", true, false, 0, false},
+		{"3.5-inch HDD", true, false, 0, false},
+		{"SFP+", true, false, 0, false},
+	} {
+		b := &builder{}
+		b.text("Overview", "Form Factor", tc.in)
+		r := b.derive()
+		if r.Known.Rack != tc.known || r.Rack.Mountable != tc.mount || r.Rack.Units != tc.units || r.Rack.FullDepth != tc.full {
+			t.Errorf("%q: known %v rack %+v", tc.in, r.Known.Rack, r.Rack)
+		}
+	}
+	b := &builder{}
+	b.text("Overview", "Weight", "1 kg")
+	if r := b.derive(); r.Known.Rack || r.Rack.Mountable {
+		t.Errorf("no form factor means rack status is unknown: %+v", r.Rack)
+	}
+}
+
+func dimsOf(formFactor, dims string) Result {
+	b := &builder{}
+	if formFactor != "" {
+		b.text("Overview", "Form Factor", formFactor)
+	}
+	b.text("Overview", "Dimensions", dims)
+	return b.derive()
+}
+
+func TestDimsSortedWhateverTheOrder(t *testing.T) {
+	for _, in := range []string{
+		"442 x 325 x 44 mm\n(17.4 x 12.8 x 1.7\")",
+		"44 x 442 x 325 mm",
+		"325×44×442 mm",
+		"442 x 325 x 44 mm (17.4 x 12.8 x 1.7\")",
+		"  442 x 325 x 44 mm  \n  (17.4 x 12.8 x 1.7\")",
+	} {
+		r := dimsOf("", in)
+		if !r.Known.Dims || r.Dims.MinMM != 44 || r.Dims.MidMM != 325 || r.Dims.MaxMM != 442 || r.Dims.Round {
+			t.Errorf("%q: dims = %+v known %v", in, r.Dims, r.Known.Dims)
+		}
+		if r.Dims.WidthMM != nil {
+			t.Errorf("%q: axes can't be told apart for a device that isn't rack mount", in)
+		}
+	}
+}
+
+func TestDimsRoundDevices(t *testing.T) {
+	for _, in := range []string{"⌀206 x 46 mm\n(⌀8.1 x 1.8\")", "⌀206 × 46 mm (⌀8.1 x 1.8\")", "Ø206 x 46 mm"} {
+		r := dimsOf("", in)
+		if !r.Dims.Round || r.Dims.MinMM != 46 || r.Dims.MidMM != 206 || r.Dims.MaxMM != 206 {
+			t.Errorf("%q: dims = %+v", in, r.Dims)
+		}
+	}
+}
+
+func TestDimsDecimals(t *testing.T) {
+	r := dimsOf("", "43.7 x 442.4 x 285.6 mm")
+	if r.Dims.MinMM != 43.7 || r.Dims.MidMM != 285.6 || r.Dims.MaxMM != 442.4 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+}
+
+func TestDimsLabelledLines(t *testing.T) {
+	// The device line is taken; the table stand is an accessory.
+	r := dimsOf("", "Device: 120 x 80 x 30 mm\n(4.7 x 3.1 x 1.2\")\nTable stand: 200 x 150 x 40 mm\n(7.9 x 5.9 x 1.6\")")
+	if !r.Known.Dims || r.Dims.MinMM != 30 || r.Dims.MaxMM != 120 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+	// A single labelled line is the device's.
+	r = dimsOf("", "Unit: 120 x 80 x 30 mm")
+	if !r.Known.Dims || r.Dims.MaxMM != 120 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+	// An unlabelled line beats labelled accessories.
+	r = dimsOf("", "120 x 80 x 30 mm\nWith stand: 200 x 150 x 40 mm")
+	if !r.Known.Dims || r.Dims.MaxMM != 120 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+}
+
+func TestDimsPicksTheBareDeviceAmongLabelledConfigurations(t *testing.T) {
+	for _, tc := range []struct {
+		name, in string
+		max      float64
+	}{
+		{"packaging is never the device", "Packaging: 500 x 400 x 100 mm\nRack: 442 x 325 x 44 mm", 442},
+		{"without mount", "With mount: 170 x 208 x 121.8 mm\nWithout mount: 170 x 208 x 66.5 mm", 208},
+		{"without, among three", "With antennas: 160 x 80 x 40 mm\nWith antennas and outdoor cover: 160 x 80 x 60 mm\nWithout antennas and outdoor cover: 150 x 70 x 30 mm", 150},
+		{"packaging, then without", "Packaging: 600 x 500 x 200 mm\nRack with caster: 519 x 460 x 485 mm\nRack without caster: 519 x 460 x 351 mm", 519},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := dimsOf("", tc.in)
+			if !r.Known.Dims || r.Dims.MaxMM != tc.max {
+				t.Errorf("dims = %+v known %v issues %+v", r.Dims, r.Known.Dims, r.Issues)
+			}
+		})
+	}
+}
+
+func TestDimsLabelsOnTheirOwnLine(t *testing.T) {
+	// How the Toolless Mini Rack's sizes are published: each label alone, the
+	// size on the next line. The bare rack is the lower one, 351 mm.
+	r := dimsOf("", "With handle and caster:\n519 x 460 x 485 mm\n(20.43 x 18.11 x 19.09\")\nWithout handle and caster:\n519 x 460 x 351 mm\n(20.43 x 18.11 x 13.82\")")
+	if !r.Known.Dims || r.Dims.MinMM != 351 || r.Dims.MidMM != 460 || r.Dims.MaxMM != 519 {
+		t.Errorf("dims = %+v issues %+v", r.Dims, r.Issues)
+	}
+	// A label on its own line also names a "Device" size.
+	r = dimsOf("", "Device:\n120 x 80 x 30 mm\nTable stand:\n200 x 150 x 40 mm")
+	if !r.Known.Dims || r.Dims.MaxMM != 120 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+	// A label with nothing after it names nothing.
+	r = dimsOf("", "120 x 80 x 30 mm\nWith stand:")
+	if !r.Known.Dims || r.Dims.MaxMM != 120 {
+		t.Errorf("dims = %+v", r.Dims)
+	}
+}
+
+func TestDimsRefusesToGuess(t *testing.T) {
+	for _, in := range []string{
+		"Packaging: 500 x 400 x 100 mm\nCase: 442 x 325 x 44 mm\nBase: 400 x 300 x 20 mm",
+		"With mount: 170 x 208 x 121.8 mm\nWith cover: 170 x 208 x 130 mm",
+		"Without mount: 170 x 208 x 66.5 mm\nWithout cover: 170 x 208 x 60 mm",
+		"With antenna: 159 x 82 x 26 mm\nWith wall mount: 159 x 82 x 30 mm\nWith DIN rail mount: 159 x 82 x 38 mm",
+		"120 x 80 x 30 mm\n200 x 150 x 40 mm",
+		"120 x 80 mm",
+		"approximately a shoebox",
+	} {
+		r := dimsOf("", in)
+		if r.Known.Dims || r.Dims.MaxMM != 0 || len(r.Issues) != 1 || r.Issues[0].Area != "dims" {
+			t.Errorf("%q: dims %+v known %v issues %+v", in, r.Dims, r.Known.Dims, r.Issues)
+		}
+	}
+}
+
+func TestDimsRackMountAxesWidthDepthHeight(t *testing.T) {
+	r := dimsOf("Rack mount (1U)", "442 x 325 x 44 mm\n(17.4 x 12.8 x 1.7\")")
+	d := r.Dims
+	if d.WidthMM == nil || *d.WidthMM != 442 || *d.DepthMM != 325 || *d.HeightMM != 44 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountAxesWidthHeightDepth(t *testing.T) {
+	r := dimsOf("Rack Mount (1U, Full-Depth)", "442.4 x 43.7 x 496 mm")
+	d := r.Dims
+	if d.WidthMM == nil || *d.WidthMM != 442.4 || *d.DepthMM != 496 || *d.HeightMM != 43.7 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountMultipleUnits(t *testing.T) {
+	r := dimsOf("Rack mount (2U)", "442.4 x 87.4 x 630 mm")
+	d := r.Dims
+	if d.WidthMM == nil || *d.HeightMM != 87.4 || *d.DepthMM != 630 || *d.WidthMM != 442.4 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountDeepDeviceNearWidth(t *testing.T) {
+	// A depth (480) near a rack width must not be taken for the width.
+	r := dimsOf("Rack Mount (1U, Full-Depth)", "442.4 x 43.7 x 480 mm")
+	if d := r.Dims; d.WidthMM == nil || *d.WidthMM != 442.4 || *d.DepthMM != 480 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountDepthBeyondTheWidth(t *testing.T) {
+	r := dimsOf("Rack mount (1U)", "787 x 43.7 x 481.4 mm")
+	if d := r.Dims; d.WidthMM == nil || *d.WidthMM != 481.4 || *d.DepthMM != 787 || *d.HeightMM != 43.7 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountWith19InchEars(t *testing.T) {
+	r := dimsOf("Rack mount (1U)", "482.6 x 44.45 x 250 mm")
+	if d := r.Dims; d.WidthMM == nil || *d.WidthMM != 482.6 || *d.DepthMM != 250 {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRackMountThatIsNotNineteenInchesIsLeftAlone(t *testing.T) {
+	// 325 x 160 x 43.7: the height is clear, the width isn't a 19-inch one.
+	r := dimsOf("Rack mount (1U), desktop, wall", "325.1 x 160 x 43.7 mm")
+	d := r.Dims
+	if !r.Known.Dims || d.MinMM != 43.7 || d.MidMM != 160 || d.MaxMM != 325.1 {
+		t.Errorf("dims = %+v", d)
+	}
+	if d.WidthMM != nil || d.DepthMM != nil || d.HeightMM != nil {
+		t.Errorf("axes should not be guessed: %+v", d)
+	}
+}
+
+func TestDimsRackMountWithoutUnitsOrWithAnAmbiguousHeight(t *testing.T) {
+	// No U count: nothing to tell the height by.
+	if d := dimsOf("Rack Mount | Compact Desktop", "442.4 x 43.7 x 285.6 mm").Dims; d.HeightMM != nil {
+		t.Errorf("dims = %+v", d)
+	}
+	// 1U is 44.45: two dimensions that both fit it can't be told apart.
+	if d := dimsOf("Rack mount (1U)", "44 x 44 x 442 mm").Dims; d.HeightMM != nil {
+		t.Errorf("dims = %+v", d)
+	}
+	// Nothing near the stated height.
+	if d := dimsOf("Rack mount (3U)", "442 x 325 x 44 mm").Dims; d.HeightMM != nil {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsRoundIsNotResolved(t *testing.T) {
+	if d := dimsOf("Rack mount (1U)", "⌀206 x 46 mm").Dims; d.WidthMM != nil {
+		t.Errorf("dims = %+v", d)
+	}
+}
+
+func TestDimsUnknownWithoutAnEntry(t *testing.T) {
+	b := &builder{}
+	b.text("Overview", "Weight", "1 kg")
+	if r := b.derive(); r.Known.Dims || len(r.Issues) != 0 {
+		t.Errorf("result = %+v", r)
+	}
+}
