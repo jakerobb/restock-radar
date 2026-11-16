@@ -297,3 +297,21 @@ func TestHistory(t *testing.T) {
 		t.Fatalf("days=0 gave %d", rec.Code)
 	}
 }
+
+func TestStatus(t *testing.T) {
+	srv, _ := newTestServer(t)
+	rec := request(srv, "GET", "/v1/status", "", nil)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got statusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Products != 2 || got.Variants != 3 || got.LastSync == nil || time.Since(*got.LastSync) > time.Minute {
+		t.Errorf("counts or last sync wrong: %+v", got)
+	}
+	if got.Categories == nil || got.Regions["us"] != 2 || got.Specs.Without != 2 || got.TechSpecsURL.Without != 2 {
+		t.Errorf("breakdowns wrong: %+v", got)
+	}
+}

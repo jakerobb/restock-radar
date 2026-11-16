@@ -95,6 +95,7 @@ POST /v1/items            {"item": "ucg-fiber" | "<store URL>", "region": "us"}
 GET /v1/history?days=30   per-variant price and status timeline
 GET /v1/variants?region=us
 GET /v1/events?region=us&since=0&limit=100
+GET /v1/status           counts behind the /status dashboard page
 ```
 
 Prices are integers in minor units (cents) with a `currency` field.
