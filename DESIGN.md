@@ -183,6 +183,7 @@ homelab puts Authelia in front.
 | `GET /` | web UI (static files embedded in the binary) |
 | `GET /v1/products` | products with variants grouped, last sync time, pending items |
 | `POST /v1/items` | add a product: `{"item": slug-or-URL, "region": optional}` |
+| `GET /v1/status` | counts for the `/status` page: products, categories, specs and techspecs URL coverage, stock, activity |
 | `GET /health` | liveness; includes time of last completed poll |
 | `GET /v1/history?days=` | each variant's status and price timeline over the last `days` (default 30, max 365), rebuilt from `events` |
 | `GET /v1/variants?region=` | latest state of every variant |

@@ -58,6 +58,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/history", srv.handleHistory)
 	mux.HandleFunc("GET /v1/variants", srv.handleVariants)
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
+	mux.HandleFunc("GET /v1/status", srv.handleStatus)
 	// Everything else is the web UI; the patterns above are more specific.
 	mux.Handle("GET /", webui.Handler())
 	return securityHeaders(mux)

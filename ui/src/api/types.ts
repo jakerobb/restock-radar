@@ -98,3 +98,48 @@ export interface HistoryResponse {
   until: string
   variants: VariantHistory[]
 }
+
+/** How many products have something collected, and how many don't (see GET /v1/status). */
+export interface Presence {
+  with: number
+  without: number
+  /** Among `without`: nothing has been fetched for them yet, so they may only be lacking it for now. */
+  not_checked: number
+}
+
+export interface StatusCategory {
+  region: string
+  /** The store's category id (e.g. "physical-security-nvr"). */
+  id: string
+  products: number
+}
+
+export interface StatusResponse {
+  now: string
+  products: number
+  variants: number
+  /** When the newest variant was last checked; null before the first poll. */
+  last_sync: string | null
+  /** When the variant checked longest ago was checked. */
+  oldest_check: string | null
+  /** When the poller last finished a pass; null until one has since the server started. */
+  last_poll: string | null
+  regions: Record<string, number>
+  categories: StatusCategory[]
+  /** Products not in any of the categories above (category not learned yet). */
+  uncategorized: number
+  specs: Presence
+  techspecs_url: Presence
+  /** Products whose own page hasn't been read yet. */
+  never_detailed: number
+  variants_by_status: Record<string, number>
+  watched_from_config: number
+  watched_from_ui: number
+  pending_items: number
+  events_24h: number
+  events_7d: number
+  pending_events: number
+  failed_events: number
+  latest_event: string | null
+  db_bytes: number | null
+}
