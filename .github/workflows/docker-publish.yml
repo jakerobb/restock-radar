@@ -7,8 +7,11 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Runs on the homelab cluster's ARC runners (see ci.yml). The publish job
+  # below stays on a GitHub-hosted runner: it needs Docker and holds the
+  # registry credentials.
   test:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-restock-radar
 
     steps:
       - name: Checkout
@@ -18,6 +21,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
+          cache: false
 
       - name: Vet
         run: go vet ./...

@@ -9,8 +9,13 @@ on:
     - cron: "23 6 * * 1"
 
 jobs:
+  # go and ui run on the homelab cluster's ARC runners (jakerobb/homelab,
+  # argocd/apps/arc-runners-restock-radar/). Those pods keep Go and Node
+  # toolchains, modules and the npm cache on a shared volume, so the setup
+  # actions' own caching is turned off. The docker job stays on a GitHub-hosted
+  # runner: the pods have no Docker daemon and are amd64-only.
   go:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-restock-radar
 
     steps:
       - name: Checkout
@@ -20,6 +25,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
+          cache: false
 
       - name: Build
         run: go build ./...
@@ -39,7 +45,7 @@ jobs:
         working-directory: src
 
   ui:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-restock-radar
 
     defaults:
       run:
@@ -53,8 +59,6 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/.nvmrc
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
 
       - name: Install
         run: npm ci
