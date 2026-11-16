@@ -150,6 +150,121 @@ var migrations = []string{
 		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
 	);
 	CREATE INDEX product_specs_feature ON product_specs (feature_id);`,
+	// The user's corrections to a product's specification, and what is derived
+	// from the specification once they are applied. An override is found by its
+	// target (section, group, label) and the product's slug, not by the store's
+	// ids or row positions, because the specification is rewritten whenever the
+	// store changes it. published_value is what the store published when the
+	// override was made, to notice when it moves. The derived tables are rebuilt
+	// from product_specs and spec_overrides: version says which derivation made
+	// them, so a newer one re-derives from the stored rows alone.
+	`CREATE TABLE spec_overrides (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		region          TEXT NOT NULL,
+		slug            TEXT NOT NULL,
+		action          TEXT NOT NULL,
+		section         TEXT NOT NULL,
+		group_label     TEXT NOT NULL DEFAULT '',
+		label           TEXT NOT NULL,
+		kind            TEXT NOT NULL DEFAULT '',
+		value           TEXT NOT NULL DEFAULT '',
+		note            TEXT NOT NULL DEFAULT '',
+		source_url      TEXT NOT NULL DEFAULT '',
+		reason          TEXT NOT NULL DEFAULT '',
+		published_value TEXT,
+		created_at      TEXT NOT NULL,
+		updated_at      TEXT NOT NULL
+	);
+	CREATE UNIQUE INDEX spec_overrides_target ON spec_overrides (region, slug, lower(section), lower(group_label), lower(label));
+	CREATE TABLE product_derived (
+		region        TEXT NOT NULL,
+		product_id    TEXT NOT NULL,
+		version       INTEGER NOT NULL,
+		derived_at    TEXT NOT NULL,
+		known_ports   INTEGER NOT NULL,
+		known_poe     INTEGER NOT NULL,
+		known_radios  INTEGER NOT NULL,
+		known_rack    INTEGER NOT NULL,
+		known_dims    INTEGER NOT NULL,
+		poe_max_class TEXT NOT NULL DEFAULT '',
+		rackmount     INTEGER NOT NULL DEFAULT 0,
+		rack_units    INTEGER NOT NULL DEFAULT 0,
+		full_depth    INTEGER NOT NULL DEFAULT 0,
+		dim_min_mm    REAL,
+		dim_mid_mm    REAL,
+		dim_max_mm    REAL,
+		dim_round     INTEGER NOT NULL DEFAULT 0,
+		width_mm      REAL,
+		depth_mm      REAL,
+		height_mm     REAL,
+		overridden    TEXT NOT NULL DEFAULT '{}',
+		issues        TEXT NOT NULL DEFAULT '[]',
+		PRIMARY KEY (region, product_id),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE TABLE product_ports (
+		region         TEXT NOT NULL,
+		product_id     TEXT NOT NULL,
+		position       INTEGER NOT NULL,
+		label          TEXT NOT NULL,
+		media          TEXT NOT NULL,
+		role           TEXT NOT NULL,
+		count          INTEGER NOT NULL,
+		max_speed_mbps INTEGER NOT NULL,
+		speeds_mbps    TEXT NOT NULL DEFAULT '',
+		poe_class      TEXT NOT NULL DEFAULT '',
+		poe_direction  TEXT NOT NULL DEFAULT '',
+		poe_inferred   INTEGER NOT NULL DEFAULT 0,
+		poe_watts      REAL,
+		combo          INTEGER NOT NULL DEFAULT 0,
+		note           TEXT NOT NULL DEFAULT '',
+		source         TEXT NOT NULL,
+		PRIMARY KEY (region, product_id, position),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE INDEX product_ports_search ON product_ports (media, max_speed_mbps, poe_class, poe_direction);
+	CREATE TABLE product_poe_budget (
+		region     TEXT NOT NULL,
+		product_id TEXT NOT NULL,
+		position   INTEGER NOT NULL,
+		name       TEXT NOT NULL DEFAULT '',
+		watts      REAL NOT NULL,
+		selected   INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (region, product_id, position),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE TABLE product_radios (
+		region                TEXT NOT NULL,
+		product_id            TEXT NOT NULL,
+		band                  TEXT NOT NULL,
+		tech                  TEXT NOT NULL,
+		antenna_gain_dbi      REAL,
+		tx_power_dbm          REAL,
+		tx_power_extended_dbm REAL,
+		streams               INTEGER,
+		max_rate_mbps         REAL,
+		multi                 INTEGER NOT NULL DEFAULT 0,
+		antenna_gain_raw      TEXT NOT NULL DEFAULT '',
+		tx_power_raw          TEXT NOT NULL DEFAULT '',
+		tx_power_note         TEXT NOT NULL DEFAULT '',
+		mimo_raw              TEXT NOT NULL DEFAULT '',
+		max_rate_raw          TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (region, product_id, band),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE INDEX product_radios_band ON product_radios (band);
+	CREATE TABLE product_metrics (
+		region     TEXT NOT NULL,
+		product_id TEXT NOT NULL,
+		name       TEXT NOT NULL,
+		value      REAL NOT NULL,
+		unit       TEXT NOT NULL DEFAULT '',
+		at_least   INTEGER NOT NULL DEFAULT 0,
+		raw        TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (region, product_id, name),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);
+	CREATE INDEX product_metrics_name ON product_metrics (name, value);`,
 }
 
 type Store struct {
@@ -847,7 +962,9 @@ func applySpecs(ctx context.Context, tx *sql.Tx, region string, p *unistore.Prod
 	if _, err := tx.ExecContext(ctx, `UPDATE products SET specs_hash = ? WHERE region = ? AND id = ?`, hash, region, p.ID); err != nil {
 		return fmt.Errorf("recording specs hash: %w", err)
 	}
-	return nil
+	// What is derived from the specification is rebuilt in the same transaction,
+	// so the two never disagree.
+	return rederiveTx(ctx, tx, region, p.ID, now)
 }
 
 // ProductSpecs returns the stored specification of a product in the store's

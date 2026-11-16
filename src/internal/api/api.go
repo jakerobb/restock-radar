@@ -38,6 +38,8 @@ type Server struct {
 	// adds limits how fast products can be added, since each one is checked
 	// against the live store.
 	adds *windowLimiter
+	// overrides limits changes to the user's spec overrides, which re-derive a product each.
+	overrides *windowLimiter
 }
 
 const (
@@ -46,13 +48,18 @@ const (
 )
 
 func New(s *store.Store, p Poller, cfg *config.Config) *Server {
-	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow)}
+	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow)}
 }
 
 func (srv *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/products", srv.handleProducts)
 	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
+	mux.HandleFunc("GET /v1/products/{region}/{slug}/specs", srv.handleProductSpecs)
+	mux.HandleFunc("GET /v1/derived", srv.handleDerived)
+	mux.HandleFunc("GET /v1/overrides", srv.handleOverrides)
+	mux.HandleFunc("PUT /v1/overrides", srv.handlePutOverride)
+	mux.HandleFunc("DELETE /v1/overrides/{id}", srv.handleDeleteOverride)
 	mux.HandleFunc("GET /health", srv.handleHealth)
 	mux.HandleFunc("GET /metrics", srv.handleMetrics)
 	mux.HandleFunc("GET /v1/history", srv.handleHistory)

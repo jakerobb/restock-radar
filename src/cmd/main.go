@@ -67,6 +67,16 @@ func main() {
 	}
 	slog.Info("watch list synced from config", "added", added, "removed", removed)
 
+	// Products whose specifications were stored before the current derivation
+	// (or before anything was derived) are derived from what is stored; nothing
+	// is fetched.
+	// A failure is logged and does not stop startup: stock and price come first.
+	if n, err := st.RederiveStale(context.Background(), time.Now()); err != nil {
+		slog.Error("failed to derive stored specifications", "err", err)
+	} else if n > 0 {
+		slog.Info("derived stored specifications", "products", n)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

@@ -127,7 +127,8 @@ src/internal/poller     poll loop, change recording, delivery, failure alerts
 src/internal/notify     Notifier interface, message rendering, ntfy sender
 src/internal/metrics    Prometheus counters and rendering
 src/internal/dbcopy     periodic database backups (VACUUM INTO)
-src/internal/api        JSON API (state, history, add product)
+src/internal/specs      derives ports, radios, PoE budgets and numbers from a specification; applies overrides
+src/internal/api        JSON API (state, history, add product, specs, overrides)
 src/internal/webui      embedded static web UI
 ui/                     React + TypeScript source of the web UI
 ```
@@ -150,6 +151,74 @@ position. `products.specs_hash` identifies the stored rows, so an unchanged
 specification isn't rewritten, and `products.specs_fetched_at` is when the
 product endpoint last supplied the product; it decides when the product is
 next fetched.
+
+### Derived specifications and overrides
+
+The stored specification is display text ("16 (8 PoE+; 8 PoE++)\n(1G/100M/10M)"),
+so searching and sorting by it needs numbers. `internal/specs` derives them, as
+pure functions of a product's specification, and the store keeps the result in
+tables that can be queried:
+
+| Table | One row per | Answers |
+|-------|-------------|---------|
+| `product_ports` | group of identical ports (split by PoE class) | "a 10GbE PoE+++ port": media, count, speeds, PoE class, direction (`out`/`in`), watts per port, combo, role |
+| `product_poe_budget` | PoE budget figure | the device's budgets; `selected` marks the one used for sorting |
+| `product_radios` | radio band | "a 6 GHz radio"; antenna gain, TX power, streams, max rate; `tech` separates WiFi from 60 GHz, Bluetooth and SuperLink |
+| `product_metrics` | number | `poe_budget_w`, `power_draw_max_w`, `power_draw_excl_poe_w`, `switching_capacity_gbps`, `nonblocking_throughput_gbps`, `forwarding_rate_mpps`, `ids_ips_throughput_mbps`, `wifi_generation`; with the text each came from |
+| `product_derived` | product | rack mount and U height, size in mm, which facts were found, issues, what overrides changed |
+
+Things worth knowing about how it reads the text, each found by testing against
+the whole real catalogue:
+
+- Only the standard sections are read; the grid overview is a summary of them.
+  Text is normalised first (non-breaking spaces and hyphens, a fullwidth `<`,
+  `<a>` links), and the stored text is never altered.
+- **PoE budget** is the figure after the colon on each line: `210W AC adapter
+  input: 196W` is a 196W budget, and the largest number in the text is wrong for
+  some products. A product that ships an external power supply gets the scenario
+  for that supply (USW-Ultra-60W: 52W, USW-Ultra-210W: 202W); any other gets its
+  best case, and every scenario is kept.
+- **PoE direction.** A port listed `PoE+++` on a device whose `Max. PoE Output`
+  is PoE++ is the one the device is powered through (the text sometimes says
+  "input" and sometimes doesn't), so it is stored as an input and never matches a
+  search for PoE+++ ports that supply power. Watts per port come from the
+  device's own table, since PoE+ is 30W on some and 32W on others.
+- **Radios** are the union of the bands named under antenna gain, TX power, MIMO
+  and data rate, which don't all list every band. WiFi generation says nothing
+  about 6 GHz: several WiFi 7 access points have no 6 GHz radio. A figure that
+  spans several antennas keeps the largest, flagged `multi`; EIRP figures are not
+  conducted power.
+- **Size.** The store lists a device's three dimensions in no consistent order,
+  so they are stored sorted (`min`, `mid`, `max`). Width, depth and height are
+  set only where they can be told apart: a rack-mount device of known height,
+  where the height is that of its units and the width is a 19-inch rack's. A
+  size that is given for several parts or configurations is used only if one is
+  the bare device ("Without mount") and otherwise left unread. A fit check for a
+  smaller rack (10-inch) is a query against these numbers, not stored data.
+- "No ports" or "no 6 GHz radio" is only a claim about a product whose ports or
+  radios were found (`known_*` on `product_derived`); otherwise it is unknown.
+- What it cannot read goes to `issues`, with the label and value, and the rest of
+  the product is still derived. A panic in a parser is recovered and recorded the
+  same way; it never stops a product being tracked.
+
+A product is derived in the same transaction that stores a changed
+specification, and again when its overrides change. `product_derived.version`
+records which derivation made each row; starting up with a newer one derives the
+stored specifications again, with no fetching.
+
+**Overrides** are the user's corrections: a value replaced (an IDS/IPS throughput
+the store rates at 5 Gbps but a teardown shows exceeding 8), an entry the store
+doesn't publish added, or a published entry hidden. They live in `spec_overrides`,
+apart from the published rows, so the store republishing a product doesn't lose
+them. An override is found by its product slug and its target (section, group,
+label), not by the store's ids, and is applied before anything is derived, so a
+value is read by the same parsers whether it was published or typed. The
+published value stays visible beside an overridden one in `/v1/products/.../specs`
+(`published_value` on the entry; `overridden` on the derived facts). Each override
+records the value the store published when it was made; if the store later
+publishes something else, the override still applies and is reported `stale`, and
+saving it again clears that. An override whose target has disappeared is
+`orphan` and does nothing. Each carries a source URL and a reason.
 
 ### Watch list and web UI
 
@@ -188,6 +257,18 @@ homelab puts Authelia in front.
 | `GET /v1/history?days=` | each variant's status and price timeline over the last `days` (default 30, max 365), rebuilt from `events` |
 | `GET /v1/variants?region=` | latest state of every variant |
 | `GET /v1/events?region=&since=&limit=` | changes with `id > since`, oldest first |
+| `GET /v1/products/{region}/{slug}/specs` | a product's effective specification (origin of each entry, published value beside an overridden one), its overrides with their status, and what is derived from it |
+| `GET /v1/derived?region=` | what is derived for every product: ports, PoE budgets, radios, numbers, rack, size |
+| `GET /v1/overrides?region=&slug=` | overrides, each with its status (`overrides`, `hides`, `adds`, `orphan`), `stale`, and the value published now |
+| `PUT /v1/overrides` | create or replace an override: `{"slug", "region" (optional), "action": "set"\|"hide", "section", "group" (optional), "label", "kind" (optional), "value", "note", "source_url", "reason"}` |
+| `DELETE /v1/overrides/{id}` | remove an override |
+
+`PUT` and `DELETE /v1/overrides` take the same cross-site checks as `POST
+/v1/items` (a JSON content type for `PUT`, no foreign `Origin` or `Sec-Fetch-Site:
+cross-site`), refuse unknown fields, require an `http(s)` source URL, bound the
+length of every field, and are limited to 30 changes a minute. A target that
+isn't a published entry of the product, or a hide of something that isn't there,
+is refused with a message rather than stored.
 
 `since` lets a client page forward by remembering the last event ID it saw.
 There is no auth yet; the service is intended to be reachable only inside the

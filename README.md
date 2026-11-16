@@ -96,6 +96,13 @@ GET /v1/history?days=30   per-variant price and status timeline
 GET /v1/variants?region=us
 GET /v1/events?region=us&since=0&limit=100
 GET /v1/status           counts behind the /status dashboard page
+GET /v1/products/us/ucg-fiber/specs   effective specification, overrides, derived facts
+GET /v1/derived?region=us             ports, PoE budgets, radios, numbers, rack and size for every product
+GET /v1/overrides?slug=ucg-fiber
+PUT /v1/overrides        {"slug": "ucg-fiber", "action": "set", "section": "Overview",
+                          "label": "IDS/IPS Throughput", "value": "8+ Gbps",
+                          "source_url": "https://...", "reason": "teardown"}
+DELETE /v1/overrides/{id}
 ```
 
 Prices are integers in minor units (cents) with a `currency` field.
