@@ -6,6 +6,7 @@ import { buildComparison, cleanRefs, MAX_COMPARE, productRef } from '../lib/comp
 import { cn } from '../lib/cn'
 import { matchesQuery, typeOf } from '../lib/filter'
 import { statusInfo } from '../lib/status'
+import { AddToPlan } from './AddToPlan'
 import { PageNav } from './PageNav'
 import { Badge } from './ui/Badge'
 import { Card } from './ui/Card'
@@ -138,6 +139,7 @@ export default function ComparePage() {
                           <div className="mt-1">
                             <Badge tone={status.tone}>{status.label}</Badge>
                           </div>
+                          <AddToPlan product={r.product} className="mt-1 mr-3" />
                           <button
                             type="button"
                             aria-label={`Remove ${r.product.title}`}

@@ -113,7 +113,7 @@ export function buildComparison(rows: CatalogRow[]): CompareSection[] {
       ],
     },
     { title: 'Value', lines: columns(['per_poe_w', 'per_poe_port', 'per_10g_port', 'per_gbps', 'per_sqft'], rows) },
-    { title: 'Performance and power', lines: columns(['poe_budget_w', 'power_draw_max_w', 'power_draw_excl_poe_w', 'switching_capacity_gbps', 'nonblocking_throughput_gbps', 'forwarding_rate_mpps', 'ids_ips_throughput_mbps'], rows) },
+    { title: 'Performance and power', lines: columns(['power', 'poe_budget_w', 'power_draw_max_w', 'power_draw_excl_poe_w', 'switching_capacity_gbps', 'nonblocking_throughput_gbps', 'forwarding_rate_mpps', 'ids_ips_throughput_mbps'], rows) },
     {
       title: 'Ports',
       lines: [...columns(['fastest_port', 'ports', 'poe_out_ports', 'poe_class'], rows), line('port_layout', 'Port layout', rows.map(portLines))].filter(informative),

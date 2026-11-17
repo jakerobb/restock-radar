@@ -79,6 +79,7 @@ export function derived(overrides: Partial<Derived> = {}): Derived {
     poe_budget: [],
     poe_max_class: '',
     radios: [],
+    power: [],
     metrics: [],
     rack: { mountable: false, units: 0, full_depth: false },
     dims: { min_mm: 0, mid_mm: 0, max_mm: 0 },

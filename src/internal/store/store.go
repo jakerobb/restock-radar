@@ -284,6 +284,18 @@ var migrations = []string{
 		after       TEXT
 	);
 	CREATE INDEX spec_override_history_product ON spec_override_history (region, slug, id);`,
+
+	// 16: how each product is powered, derived from "Power Method".
+	`CREATE TABLE product_power (
+		region     TEXT NOT NULL,
+		product_id TEXT NOT NULL,
+		position   INTEGER NOT NULL,
+		kind       TEXT NOT NULL,
+		poe_class  TEXT NOT NULL DEFAULT '',
+		detail     TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (region, product_id, position),
+		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
+	);`,
 }
 
 type Store struct {

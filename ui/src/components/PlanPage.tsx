@@ -1,0 +1,290 @@
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { useMemo, useState } from 'react'
+import { useDerived, useProducts } from '../api/queries'
+import { usePlan } from '../hooks/usePlan'
+import { formatPrice } from '../lib/format'
+import { lineKey, MAX_QTY, parsePlan, planTotals, serializeLine, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
+import { planChecks, type CheckVerdict } from '../lib/planChecks'
+import { statusInfo } from '../lib/status'
+import { PageNav } from './PageNav'
+import { Badge } from './ui/Badge'
+import { Button } from './ui/Button'
+import { Card } from './ui/Card'
+import { Notice } from './ui/Notice'
+import { Select } from './ui/Select'
+import { TextInput } from './ui/TextInput'
+import type { Tone } from './ui/tone'
+
+/** What the plan page keeps in the URL: a shared plan, as its lines in text form. */
+export interface PlanSearch {
+  l?: string[]
+}
+
+export function validatePlanSearch(raw: Record<string, unknown>): PlanSearch {
+  const list = Array.isArray(raw.l) ? raw.l : raw.l === undefined ? [] : [raw.l]
+  const lines = parsePlan(list.map(String))
+  return { l: lines.length > 0 ? lines.map(serializeLine) : undefined }
+}
+
+const STATE: Record<LineState, { label: string; tone: Tone }> = {
+  in: statusInfo('Available'),
+  soon: statusInfo('ComingSoon'),
+  out: statusInfo('SoldOut'),
+  unlisted: { label: 'Variant no longer listed', tone: 'bad' },
+  untracked: { label: 'No longer tracked', tone: 'bad' },
+}
+
+const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
+  ok: { mark: '✓', tone: 'text-ok' },
+  bad: { mark: '✕', tone: 'text-bad' },
+  unknown: { mark: '?', tone: 'text-muted' },
+  info: { mark: '•', tone: 'text-muted' },
+}
+
+/** A quantity box you can clear and retype in: only a whole number from 1 to 99 changes the plan, and leaving the box shows the real quantity. */
+function QtyInput({ qty, label, onChange }: { qty: number; label: string; onChange: (qty: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <input
+      type="number"
+      min={1}
+      max={MAX_QTY}
+      className="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-right text-ink"
+      aria-label={label}
+      value={draft ?? qty}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        const n = Number(e.target.value)
+        if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_QTY) onChange(n)
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  )
+}
+
+function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
+  const { remove, changeQty, switchVariant } = usePlan()
+  const { line, product, variant } = view
+  const key = lineKey(line)
+  const state = STATE[view.state]
+  return (
+    <tr className="border-b border-line align-top last:border-0">
+      <td className="px-2 py-2">
+        {product ? (
+          <Link to="/p/$region/$slug" params={{ region: product.region, slug: product.slug }} className="font-medium text-accent underline-offset-2 hover:underline">
+            {product.title}
+          </Link>
+        ) : (
+          <span className="font-medium">{line.ref}</span>
+        )}
+        {product && editable && product.variants.length > 1 ? (
+          <Select
+            className="mt-1 block max-w-full py-1 text-sm"
+            aria-label={`Variant of ${product.title}`}
+            value={variant?.sku ?? ''}
+            onChange={(e) => {
+              const next = product.variants.find((v) => v.sku === e.target.value)
+              if (next) switchVariant(key, next)
+            }}
+          >
+            {!variant && <option value="">{line.sku} (no longer listed)</option>}
+            {product.variants.map((v) => (
+              <option key={v.sku} value={v.sku}>
+                {v.title || v.sku}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <div className="text-xs text-muted">{variant?.title || line.sku}</div>
+        )}
+      </td>
+      <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
+        {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
+        {view.wasCents !== null && <div className="text-xs text-muted">was {formatPrice(view.wasCents, view.currency)} when added</div>}
+      </td>
+      <td className="px-2 py-2 text-right">
+        {editable ? (
+          <QtyInput qty={line.qty} label={`Quantity of ${product?.title ?? line.ref}`} onChange={(n) => changeQty(key, n)} />
+        ) : (
+          <span className="tabular-nums">{line.qty}</span>
+        )}
+      </td>
+      <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{view.totalCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.totalCents, view.currency)}</td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        <Badge tone={state.tone}>{state.label}</Badge>
+      </td>
+      {editable && (
+        <td className="px-2 py-2 text-right">
+          <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" aria-label={`Remove ${product?.title ?? line.ref} from the plan`} onClick={() => remove(key)}>
+            Remove
+          </button>
+        </td>
+      )}
+    </tr>
+  )
+}
+
+function ShareLink({ lines }: { lines: PlanLine[] }) {
+  const [copied, setCopied] = useState(false)
+  const url = `${window.location.origin}/plan?${lines.map((l) => `l=${encodeURIComponent(serializeLine(l))}`).join('&')}`
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+    } catch {
+      // The link is in the box to copy by hand.
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <TextInput readOnly className="min-w-0 flex-1 py-1 text-sm" value={url} aria-label="Link to this plan" onFocus={(e) => e.currentTarget.select()} />
+      <Button variant="secondary" className="py-1 text-sm" onClick={() => void copy()}>
+        {copied ? 'Copied' : 'Copy link'}
+      </Button>
+    </div>
+  )
+}
+
+export default function PlanPage() {
+  const search = useSearch({ strict: false }) as PlanSearch
+  const navigate = useNavigate()
+  const mine = usePlan()
+  const { data: productData, isPending, isError } = useProducts()
+  const { data: derived } = useDerived()
+  const [confirmClear, setConfirmClear] = useState(false)
+
+  const shared = search.l !== undefined
+  const lines = useMemo(() => (shared ? parsePlan(search.l) : mine.lines), [shared, search.l, mine.lines])
+  const products = useMemo(() => new Map((productData?.products ?? []).map((p) => [`${p.region}/${p.slug}`, p])), [productData?.products])
+  const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
+  const totals = useMemo(() => planTotals(views), [views])
+  const checks = useMemo(() => {
+    const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
+    return planChecks(views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null })))
+  }, [views, derived])
+  const leaveShared = () => void navigate({ to: '/plan', search: {}, replace: true })
+
+  return (
+    <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
+      <PageNav title="Build plan" />
+      <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
+
+      {shared && (
+        <Notice tone="ok" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span>This is a plan someone shared with you, not yours.</span>
+          <Button
+            variant="secondary"
+            className="py-1 text-sm"
+            onClick={() => {
+              mine.replace(lines)
+              leaveShared()
+            }}
+          >
+            {mine.lines.length > 0 ? 'Replace my plan with it' : 'Keep it as my plan'}
+          </Button>
+          <button type="button" className="cursor-pointer text-sm underline underline-offset-2" onClick={leaveShared}>
+            Back to my plan
+          </button>
+        </Notice>
+      )}
+      {isPending && <p className="py-8 text-center text-muted">Loading…</p>}
+      {isError && <Notice tone="bad" className="mt-4">Couldn't load the catalogue.</Notice>}
+
+      {productData && lines.length === 0 && (
+        <p className="py-8 text-muted">
+          Nothing in the plan yet. Add products from the{' '}
+          <Link to="/find" className="underline">
+            finder
+          </Link>
+          , a product page or a comparison.
+        </p>
+      )}
+
+      {productData && lines.length > 0 && (
+        <>
+          <Card className="mt-4 overflow-x-auto" aria-label="Plan">
+            <table className="w-full min-w-max border-collapse text-sm">
+              <thead className="border-b border-line text-muted">
+                <tr>
+                  <th scope="col" className="px-2 py-1.5 text-left font-medium">Product</th>
+                  <th scope="col" className="px-2 py-1.5 text-right font-medium">Each</th>
+                  <th scope="col" className="px-2 py-1.5 text-right font-medium">Qty</th>
+                  <th scope="col" className="px-2 py-1.5 text-right font-medium">Total</th>
+                  <th scope="col" className="px-2 py-1.5 text-left font-medium">Stock</th>
+                  {!shared && <th scope="col" className="px-2 py-1.5"><span className="sr-only">Remove</span></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {views.map((v) => (
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} />
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-3 space-y-1 border-t border-line pt-3 text-right" aria-label="Totals">
+              {totals.sums.map((s) => (
+                <div key={s.currency} className="text-lg font-semibold tabular-nums">
+                  Total {formatPrice(s.cents, s.currency)}
+                </div>
+              ))}
+              {totals.unpriced > 0 && <div className="text-sm text-muted">{totals.unpriced === 1 ? '1 line has' : `${totals.unpriced} lines have`} no price and isn't counted.</div>}
+              <div className="text-sm">
+                {totals.notInStock.length === 0 ? (
+                  <span className="text-ok">Everything is in stock.</span>
+                ) : (
+                  <span className="text-bad">Not in stock: {totals.notInStock.map((v) => v.product?.title ?? v.line.ref).join(', ')}.</span>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          {checks.length > 0 && (
+            <Card className="mt-5" aria-label="Checks">
+              <h2 className="mb-1 text-lg font-semibold">Does it add up?</h2>
+              <ul className="divide-y divide-line text-sm">
+                {checks.map((c) => (
+                  <li key={c.id} className="flex gap-2 py-1.5">
+                    <span aria-hidden className={`w-4 shrink-0 text-center font-bold ${VERDICT[c.verdict].tone}`}>
+                      {VERDICT[c.verdict].mark}
+                    </span>
+                    <span>
+                      <span className="font-medium">{c.label}: </span>
+                      {c.text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted">Worked out from published specifications and any corrections. A number that isn't known is said so, not guessed.</p>
+            </Card>
+          )}
+
+          <div className="mt-5 space-y-3">
+            <ShareLink lines={lines} />
+            {!shared &&
+              (confirmClear ? (
+                <div className="flex items-center gap-3 text-sm">
+                  <span>Remove every line?</span>
+                  <Button
+                    variant="secondary"
+                    className="py-1 text-sm"
+                    onClick={() => {
+                      mine.replace([])
+                      setConfirmClear(false)
+                    }}
+                  >
+                    Yes, clear the plan
+                  </Button>
+                  <button type="button" className="cursor-pointer underline underline-offset-2" onClick={() => setConfirmClear(false)}>
+                    Keep it
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" onClick={() => setConfirmClear(true)}>
+                  Clear the plan
+                </button>
+              ))}
+          </div>
+        </>
+      )}
+    </main>
+  )
+}

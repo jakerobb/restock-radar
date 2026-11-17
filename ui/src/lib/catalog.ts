@@ -1,5 +1,6 @@
 import type { Derived, Port, Product } from '../api/types'
 import { formatMoney, totalCents } from './format'
+import { powerSummary } from './power'
 import { METRICS, metricInfo } from './requirements'
 
 export type StockState = 'in' | 'soon' | 'out'
@@ -130,6 +131,7 @@ export const COLUMNS: readonly Column[] = [
     value: (r) => dataPorts(r)?.filter((p) => p.poe_class && p.poe_direction === 'out').reduce((n, p) => n + p.count, 0) ?? null,
     format: plain,
   },
+  { id: 'power', label: 'Power method', value: (r) => powerSummary(r.derived?.power), format: plain },
   { id: 'poe_class', label: 'Max PoE class', value: (r) => (r.derived?.known.poe ? r.derived.poe_max_class || null : null), format: plain },
   { id: 'rack_u', label: 'Rack units', value: (r) => (r.derived?.rack.mountable && r.derived.rack.units > 0 ? r.derived.rack.units : null), format: (v) => `${v}U`, lowerIsBetter: true },
   {

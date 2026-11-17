@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory 
 import App from './App'
 import ComparePage, { validateCompareSearch } from './components/ComparePage'
 import FindPage, { validateFindSearch } from './components/FindPage'
+import PlanPage, { validatePlanSearch } from './components/PlanPage'
 import ProductPage from './components/ProductPage'
 import StatusPage from './components/StatusPage'
 
@@ -12,6 +13,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/status', component: StatusPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/find', component: FindPage, validateSearch: validateFindSearch }),
   createRoute({ getParentRoute: () => rootRoute, path: '/compare', component: ComparePage, validateSearch: validateCompareSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/plan', component: PlanPage, validateSearch: validatePlanSearch }),
   createRoute({ getParentRoute: () => rootRoute, path: '/p/$region/$slug', component: ProductPage }),
 ])
 

@@ -168,6 +168,21 @@ describe('FindPage', () => {
     expect(screen.getByLabelText('Price per PoE watt')).toBeChecked()
   })
 
+  it('offers a power-method column, unknown where the specification doesn’t say', async () => {
+    catalog()
+    stubFetch({
+      'GET /v1/products': { body: productsResponse({ products: [product({ id: '1', slug: 'a', title: 'Switch A', type: 'Switches' }), product({ id: '2', slug: 'b', title: 'Switch B', type: 'Switches' })] }) },
+      'GET /v1/derived': { body: [derived({ slug: 'a', power: [{ kind: 'poe', poe_class: 'PoE+', detail: 'PoE+' }, { kind: 'usb', poe_class: '', detail: 'USB-C' }] }), derived({ slug: 'b' })] },
+    })
+    const user = userEvent.setup()
+    renderRoute('/find?type=Switches&cols=power')
+    const row = await waitFor(() => rowFor('Switch A'))
+    expect(within(row).getByText('PoE+, USB')).toBeInTheDocument()
+    expect(within(rowFor('Switch B')).getByText('?')).toBeInTheDocument()
+    await user.click(screen.getByText('Columns'))
+    expect(screen.getByLabelText('Power method')).toBeChecked()
+  })
+
   it('says so when the catalogue can’t be loaded', async () => {
     stubFetch({ 'GET /v1/products': { status: 500, body: { error: 'boom' } }, 'GET /v1/derived': { status: 500, body: { error: 'boom' } } })
     renderRoute('/find')
