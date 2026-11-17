@@ -258,10 +258,13 @@ homelab puts Authelia in front.
 | `GET /v1/variants?region=` | latest state of every variant |
 | `GET /v1/events?region=&since=&limit=` | changes with `id > since`, oldest first |
 | `GET /v1/products/{region}/{slug}/specs` | a product's effective specification (origin of each entry, published value beside an overridden one), its overrides with their status, and what is derived from it |
+| `POST /v1/products/{region}/{slug}/refresh` | fetch one tracked product from the store now, instead of waiting for the next read, and record what it finds as a poll would: price and stock, group, specification (re-derived if it changed). Returns `{region, slug, title, variants, spec_entries, specs_changed, events}`. `404` for a product we don't track, `400` if the store no longer has it or has given the slug to another product, `502` if the store can't be reached. Notifications for any change it finds go out with the next poll. |
 | `GET /v1/derived?region=` | what is derived for every product: ports, PoE budgets, radios, numbers, rack, size |
 | `GET /v1/overrides?region=&slug=` | overrides, each with its status (`overrides`, `hides`, `adds`, `orphan`), `stale`, and the value published now |
 | `PUT /v1/overrides` | create or replace an override: `{"slug", "region" (optional), "action": "set"\|"hide", "section", "group" (optional), "label", "kind" (optional), "value", "note", "source_url", "reason"}` |
 | `DELETE /v1/overrides/{id}` | remove an override |
+
+`POST /v1/products/{region}/{slug}/refresh` has no body, so its only cross-site guard is the `Origin`/`Sec-Fetch-Site` check; it is limited to 10 a minute, since each one is a request to the live store. A refresh doesn't count toward the consecutive-failure alert: the caller sees the error.
 
 `PUT` and `DELETE /v1/overrides` take the same cross-site checks as `POST
 /v1/items` (a JSON content type for `PUT`, no foreign `Origin` or `Sec-Fetch-Site:

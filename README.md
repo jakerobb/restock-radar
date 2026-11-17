@@ -110,6 +110,7 @@ GET /v1/events?region=us&since=0&limit=100
 GET /v1/status           counts behind the /status dashboard page
 GET /v1/products/us/ucg-fiber/specs   effective specification, overrides, derived facts
 GET /v1/derived?region=us             ports, PoE budgets, radios, numbers, rack and size for every product
+POST /v1/products/us/ucg-fiber/refresh  fetch this tracked product from the store now (price, stock, specs)
 GET /v1/overrides?slug=ucg-fiber
 PUT /v1/overrides        {"slug": "ucg-fiber", "action": "set", "section": "Overview",
                           "label": "IDS/IPS Throughput", "value": "8+ Gbps",

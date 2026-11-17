@@ -496,3 +496,12 @@ func (s *Store) ProductBySlug(ctx context.Context, region, slug string) (*Produc
 	}
 	return &p, nil
 }
+
+// SpecsHash identifies the stored specification of a product: it changes when
+// the store publishes a different one, and is empty for a product that has never
+// had one stored.
+func (s *Store) SpecsHash(ctx context.Context, region, productID string) (string, error) {
+	var h string
+	err := s.db.QueryRowContext(ctx, `SELECT specs_hash FROM products WHERE region = ? AND id = ?`, region, productID).Scan(&h)
+	return h, err
+}

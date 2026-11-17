@@ -17,8 +17,24 @@ func TestProductType(t *testing.T) {
 		"something-new":                 "",
 	}
 	for in, want := range cases {
-		if got := productType(in); got != want {
+		if got := productType(in, "some-product"); got != want {
 			t.Errorf("productType(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestProductTypeSlugOverridesTheCategory(t *testing.T) {
+	const category = "switching-utility"
+	if got := productType(category, "usw-ultra"); got != "Switches" {
+		t.Errorf("an ordinary switch in %s is %q, want Switches", category, got)
+	}
+	for _, slug := range []string{"usw-flexutility", "uacc-flex-utility-pro"} {
+		if got := productType(category, slug); got != "Accessories" {
+			t.Errorf("productType(%q, %q) = %q, want Accessories", category, slug, got)
+		}
+	}
+	// Even before a poll has recorded a category.
+	if got := productType("", "usw-flexutility"); got != "Accessories" {
+		t.Errorf("with no category: %q, want Accessories", got)
 	}
 }

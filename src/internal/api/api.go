@@ -27,6 +27,7 @@ type Poller interface {
 	Metrics() *metrics.Metrics
 	LastCycle() time.Time
 	Add(ctx context.Context, input, regionID string) (*poller.AddResult, error)
+	Refresh(ctx context.Context, regionID, slug string) (*poller.RefreshResult, error)
 }
 
 // Server serves the web UI and exposes current state and change history as
@@ -40,15 +41,20 @@ type Server struct {
 	adds *windowLimiter
 	// overrides limits changes to the user's spec overrides, which re-derive a product each.
 	overrides *windowLimiter
+	// refreshes limits on-demand fetches of a product, each of which is a request to the live store.
+	refreshes *windowLimiter
 }
 
 const (
 	addsPerWindow = 10
 	addsWindow    = time.Minute
+
+	refreshesPerWindow = 10
+	refreshesWindow    = time.Minute
 )
 
 func New(s *store.Store, p Poller, cfg *config.Config) *Server {
-	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow)}
+	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow), refreshes: newWindowLimiter(refreshesPerWindow, refreshesWindow)}
 }
 
 func (srv *Server) Handler() http.Handler {
@@ -56,6 +62,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/products", srv.handleProducts)
 	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
 	mux.HandleFunc("GET /v1/products/{region}/{slug}/specs", srv.handleProductSpecs)
+	mux.HandleFunc("POST /v1/products/{region}/{slug}/refresh", srv.handleRefreshProduct)
 	mux.HandleFunc("GET /v1/derived", srv.handleDerived)
 	mux.HandleFunc("GET /v1/overrides", srv.handleOverrides)
 	mux.HandleFunc("PUT /v1/overrides", srv.handlePutOverride)

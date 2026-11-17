@@ -614,3 +614,83 @@ func countDiscovered(items []store.Item) int {
 type UserError struct{ Msg string }
 
 func (e *UserError) Error() string { return e.Msg }
+
+// ErrNotTracked is returned by Refresh for a product we have no record of.
+var ErrNotTracked = errors.New("product is not tracked")
+
+// RefreshResult describes the outcome of Refresh.
+type RefreshResult struct {
+	Region string
+	Slug   string
+	Title  string
+	// Variants is how many variants the product has.
+	Variants int
+	// SpecEntries is how many specification entries the store published.
+	SpecEntries int
+	// SpecsChanged is true when the stored specification differs from what was
+	// stored before, so what is derived from it was rebuilt.
+	SpecsChanged bool
+	// Events is how many changes (price, stock) the fetch turned up; they are
+	// announced by the next poll like any other.
+	Events int
+}
+
+// Refresh fetches one tracked product from the store right now and records what
+// it finds, exactly as a poll would: price and stock, its group, and its
+// specification (which is re-derived if it changed). It is for when something
+// is known to have changed, and nobody should wait for the next scheduled read.
+//
+// It does not add a product (see Add), does not count toward the consecutive
+// failures that raise an alert (a person asked, and sees the error), and
+// leaves notifying to the next poll, which keeps one goroutine sending them.
+func (p *Poller) Refresh(ctx context.Context, regionID, slug string) (*RefreshResult, error) {
+	region, ok := p.cfg.RegionByID(regionID)
+	if !ok {
+		return nil, &UserError{fmt.Sprintf("there is no region %q", regionID)}
+	}
+	ref, err := p.store.ProductBySlug(ctx, region.ID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if ref == nil {
+		return nil, ErrNotTracked
+	}
+	before, err := p.store.SpecsHash(ctx, region.ID, ref.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	prod, err := p.fetcher.FetchProduct(ctx, region, ref.Slug)
+	if ctx.Err() == nil {
+		p.metrics.Fetch(fetchResult(err), time.Now())
+	}
+	if errors.Is(err, unistore.ErrNotFound) {
+		return nil, &UserError{fmt.Sprintf("the %s store no longer has a product with slug %q", region.ID, ref.Slug)}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetching from the store: %w", err)
+	}
+	if prod.ID != ref.ID {
+		// A slug that now names a different product; applying it would graft one product's state onto another.
+		return nil, &UserError{fmt.Sprintf("the %s store now has a different product at %q; leaving ours as it is", region.ID, ref.Slug)}
+	}
+
+	key := region.ID + "/" + ref.Slug
+	if prod.SpecsSkipped > 0 {
+		slog.Warn("product has malformed specification entries; skipping them", "item", key, "skipped", prod.SpecsSkipped)
+	}
+	events, err := p.store.Apply(ctx, region.ID, prod, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	p.logEvents(key, events)
+	after, err := p.store.SpecsHash(ctx, region.ID, ref.ID)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("product refreshed on request", "item", key, "spec_entries", len(prod.Specs), "specs_changed", before != after)
+	return &RefreshResult{
+		Region: region.ID, Slug: prod.Slug, Title: prod.Title, Variants: len(prod.Variants),
+		SpecEntries: len(prod.Specs), SpecsChanged: before != after, Events: len(events),
+	}, nil
+}

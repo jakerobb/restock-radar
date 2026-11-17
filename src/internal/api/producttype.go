@@ -22,9 +22,22 @@ var typeRules = []struct{ prefix, label string }{
 	{"accessories", "Accessories"},
 }
 
-// productType names the type of a product given its store category id, or ""
-// when the category is unknown (not yet polled since categories were recorded).
-func productType(category string) string {
+// typeBySlug files products whose category says one thing and whose nature
+// another. Both are mounting enclosures for Flex switches, which the store lists
+// under "switching-utility" beside the switches themselves; they have no ports,
+// so left among the switches they would never match a search for any.
+var typeBySlug = map[string]string{
+	"usw-flexutility":       "Accessories",
+	"uacc-flex-utility-pro": "Accessories",
+}
+
+// productType names the type of a product given its store category id and slug,
+// or "" when the category is unknown (not yet polled since categories were
+// recorded).
+func productType(category, slug string) string {
+	if t, ok := typeBySlug[slug]; ok {
+		return t
+	}
 	for _, r := range typeRules {
 		if strings.HasPrefix(category, r.prefix) {
 			return r.label

@@ -824,3 +824,121 @@ func TestCategoryPagesDoNotTouchSpecs(t *testing.T) {
 		t.Errorf("spec = %q", got)
 	}
 }
+
+func TestRefreshFetchesNowAndStoresNewSpecs(t *testing.T) {
+	ctx := context.Background()
+	p, f, _ := setup(t)
+	p.cycle(ctx) // the widget is tracked, with an empty specification
+
+	f.specs = spec("680 g")
+	calls := f.productCalls
+	res, err := p.Refresh(ctx, "us", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.productCalls != calls+1 {
+		t.Errorf("product fetches = %d, want %d", f.productCalls, calls+1)
+	}
+	if res.Slug != "widget" || res.Title != "Widget" || res.Variants != 1 || res.SpecEntries != 1 || !res.SpecsChanged {
+		t.Errorf("result = %+v", res)
+	}
+	if got := specValue(t, p, "p1"); got != "680 g" {
+		t.Errorf("stored spec = %q", got)
+	}
+	if d, err := p.store.Derived(ctx, "us", "p1"); err != nil || d == nil {
+		t.Errorf("what is derived from the new specification wasn't built: %v, %v", d, err)
+	}
+
+	// Again with nothing new: fetched, but nothing changed.
+	res, err = p.Refresh(ctx, "us", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SpecsChanged {
+		t.Errorf("an unchanged specification was reported as changed: %+v", res)
+	}
+}
+
+func TestRefreshRecordsPriceAndStockButLeavesNotifyingToThePoll(t *testing.T) {
+	ctx := context.Background()
+	p, f, n := setup(t)
+	p.cycle(ctx)
+
+	f.status = "Available"
+	res, err := p.Refresh(ctx, "us", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Events != 1 {
+		t.Errorf("events = %d, want the restock", res.Events)
+	}
+	if len(n.sent) != 0 {
+		t.Errorf("a refresh sent %d notifications itself", len(n.sent))
+	}
+	p.cycle(ctx)
+	if len(n.sent) != 1 {
+		t.Errorf("the next poll sent %d notifications, want the one restock", len(n.sent))
+	}
+}
+
+func TestRefreshOfAProductWeDoNotTrack(t *testing.T) {
+	ctx := context.Background()
+	p, f, _ := setup(t)
+	p.cycle(ctx)
+	calls := f.productCalls
+
+	if _, err := p.Refresh(ctx, "us", "nope"); !errors.Is(err, ErrNotTracked) {
+		t.Errorf("err = %v, want ErrNotTracked", err)
+	}
+	if f.productCalls != calls {
+		t.Error("the store was asked about a product we don't track")
+	}
+	var ue *UserError
+	if _, err := p.Refresh(ctx, "mars", "widget"); !errors.As(err, &ue) {
+		t.Errorf("an unknown region gave %v, want a user error", err)
+	}
+}
+
+func TestRefreshFailuresAreReportedButDoNotRaiseTheFailureAlert(t *testing.T) {
+	ctx := context.Background()
+	p, f, n := setup(t)
+	p.cycle(ctx)
+
+	f.err = errors.New("store exploded")
+	for range 5 { // well past FailureAlertAfter
+		if _, err := p.Refresh(ctx, "us", "widget"); err == nil {
+			t.Fatal("want the error")
+		}
+	}
+	if len(n.sent) != 0 {
+		t.Errorf("manual refreshes raised alerts: %+v", n.sent)
+	}
+
+	f.err = unistore.ErrNotFound
+	var ue *UserError
+	if _, err := p.Refresh(ctx, "us", "widget"); !errors.As(err, &ue) {
+		t.Errorf("a product the store dropped gave %v, want a user error", err)
+	}
+}
+
+func TestRefreshWontGraftADifferentProductOntoOurs(t *testing.T) {
+	ctx := context.Background()
+	p, f, _ := setup(t)
+	f.specs = spec("680 g")
+	p.cycle(ctx)
+
+	// The store has reused the slug for another product.
+	other := listing("p-other", "widget", "c1", "Available")
+	other.Specs = spec("1 kg")
+	f.details = map[string]unistore.Product{"widget": other}
+	var ue *UserError
+	if _, err := p.Refresh(ctx, "us", "widget"); !errors.As(err, &ue) {
+		t.Fatalf("err = %v, want a user error", err)
+	}
+	if got := specValue(t, p, "p1"); got != "680 g" {
+		t.Errorf("our product's spec became %q", got)
+	}
+	if got := specValue(t, p, "p-other"); got != "" {
+		t.Errorf("the other product's spec was stored: %q", got)
+	}
+}
