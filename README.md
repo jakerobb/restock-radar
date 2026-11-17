@@ -76,7 +76,8 @@ Other pages (client-side routes; the server falls back to `index.html` for them)
 | Path | What |
 |---|---|
 | `/p/{region}/{slug}` | One product: variants and history, what is derived from its specification (ports, PoE, radios, rack, size), and the full specification with any overrides shown beside the published value. A "Refresh from store" button reads the product from the store now |
-| `/find` | The product finder: pick a type, add requirements ("a 10 GbE port with PoE+++ out", "a 6 GHz radio", "PoE budget ≥ 200 W"), see matching products with current price and stock, sortable. Products whose specs don't say enough go under "Can't tell" instead of being dropped. The whole search is in the URL, so it can be bookmarked or shared |
+| `/find` | The product finder: pick a type, add requirements ("a 10 GbE port with PoE+++ out", "a 6 GHz radio", "PoE budget ≥ 200 W"), see matching products with current price and stock, sortable. Products whose specs don't say enough go under "Can't tell" instead of being dropped. The whole search is in the URL, so it can be bookmarked or shared. Columns include price per PoE watt, per port, per Gbps and per ft² of coverage, and up to four products can be ticked for comparison |
+| `/compare` | Up to four products side by side: price and stock, price per unit, performance and power, ports, radios and size, with the best number marked and an option to show only the differences. The products are in the URL |
 | `/status` | Collection status |
 
 The finder filters in the browser: it fetches `/v1/derived` and `/v1/products`

@@ -1,6 +1,6 @@
 # UI, product finder, and system builder: plan
 
-Status: built so far are the router, product pages, the finder (spec table, requirement chips, URL state, three-outcome matching), the on-demand product refresh, AP coverage as a derived metric, the access-control seam (permissions, proxy-header identity, override attribution and history), and the override editor on the product page. Everything after that is still plan. The backend half (raw specs,
+Status: built so far are the router, product pages, the finder (spec table, requirement chips, URL state, three-outcome matching, price-per-unit value sorts), the compare view, the on-demand product refresh, AP coverage as a derived metric, the access-control seam (permissions, proxy-header identity, override attribution and history), and the override editor on the product page. Everything after that is still plan. The backend half (raw specs,
 derived specs, overrides) is described in [DESIGN.md](../DESIGN.md#derived-specifications-and-overrides).
 
 The goal is to turn the collected data into something people can use:
@@ -8,8 +8,8 @@ The goal is to turn the collected data into something people can use:
 1. A product page for every product.
 2. A product finder: state what you need, see which products meet it, with
    current price and stock.
-3. A wish list (shopping-cart-like, but nothing can be bought here), and saved
-   searches that alert.
+3. A build plan (cart-like in how it lists products and totals them, but
+   nothing can be bought here), and saved searches that alert.
 4. Compare, alternatives, value sorts, and a rack planner.
 5. Much later, a system builder that turns a description of your network into
    a recommended bill of materials at a few budget levels.
@@ -58,7 +58,7 @@ The finder and builder need a few fields we don't derive yet.
   TanStack Query: its typed search params let all finder state live in the URL,
   so every search is bookmarkable and shareable.
 - Routes: `/` (existing list), `/p/{region}/{slug}` (product), `/status`
-  (existing status page), later `/find`, `/compare`, `/wishlist`, `/racks`.
+  (existing status page), later `/find`, `/compare`, `/plan`, `/racks`.
 - The Go server must serve `index.html` for unknown non-API paths so deep links
   work. Verify this first.
 - Products the store treats as one (shared collection, merged in the UI) get one
@@ -78,8 +78,10 @@ The finder and builder need a few fields we don't derive yet.
    Results show which port or radio satisfied each chip and the cheapest
    in-stock variant's out-the-door price (falling back to the last seen price).
    Products with unknown data go in a "can't tell" group.
-3. **Value sorts**: price per PoE watt, per 10G port, per Gbps, per m² of
-   coverage.
+3. **Value sorts**: price per PoE watt, per PoE port, per 10G port, per Gbps
+   switched, per ft² of coverage. These are ordinary sortable columns (cheapest
+   per unit first), listed apart in the column picker, and blank when the price
+   or the quantity is unknown.
 
 Price and stock are per variant; a product row summarises its variants.
 
@@ -92,9 +94,11 @@ overrides (published value changed since) are flagged.
 This is gated by [access control](#access-control). Until login exists the
 editor is only available on a private deployment.
 
-## Phase 4: wish list and saved searches
+## Phase 4: build plan and saved searches
 
-The wish list looks like a shopping cart; nothing is bought here.
+The build plan is where you collect what you intend to use. It lists products the
+way a cart does, with a total, but nothing is bought here: it is a plan for a
+system, and the name says so.
 
 - **Lines** are products (with a chosen variant and a quantity) or saved
   searches. Each product line shows live price and stock; the footer shows the
@@ -106,7 +110,7 @@ The wish list looks like a shopping cart; nothing is bought here.
   hand-picked watch list to needs.
 - Distinct from the existing watch list (config-driven items the poller
   tracks).
-- Anonymous visitors keep a wish list in the browser (localStorage), shareable
+- Anonymous visitors keep a build plan in the browser (localStorage), shareable
   as a link. Signed-in users get one stored on the server, which saved-search
   alerts require, since an alert needs to know where to send itself. Per-user
   subscriptions are currently out of scope in DESIGN.md; this phase brings them
@@ -115,14 +119,16 @@ The wish list looks like a shopping cart; nothing is bought here.
 
 ## Phase 5: compare, alternatives, rack planner
 
-- **Compare**: 2-4 products side by side, differences highlighted, override-aware.
+- **Compare** (built): 2-4 products side by side at `/compare`, picked from the
+  finder or added by name, with the best number marked and an option to show only
+  the rows that differ. Override-aware, since it reads the derived specs.
 - **Alternatives** on the product page: cheaper or in-stock products with
   similar derived specs.
 - **Rack planner**: choose a 19" or 10" rack and a number of U; add products and
   shelves; the planner sums heights and checks width and depth. 10" fit is a
   query-time check against the sorted dimensions. The usable-width rule is
   settled when this is built. Rack-mountable and shelf-mounted items are both
-  handled. Plans can be added to the wish list.
+  handled. Rack plans can be added to the build plan.
 
 ## Phase 6: system builder
 
@@ -183,7 +189,7 @@ and not for a public one.
   history of changes (append-only), so a public site can review and revert.
   This needs a schema addition (author, plus a history table), cheap to do
   before there is data worth migrating.
-- **Roles.** Anonymous (read, local wish list), member (server-side wish list,
+- **Roles.** Anonymous (read, local build plan), member (server-side build plan,
   saved searches, alerts), editor (overrides), admin (watch-list items,
   everything else).
 - **Abuse limits.** Keep the same-origin check, JSON-only bodies and rate
@@ -194,7 +200,7 @@ and not for a public one.
 
 ## Order of work
 
-Done: items 1, 2, 3, 4 and 5 below. (The data work's camera-bitrate experiments are still to do; the editor is where their findings go.)
+Done: items 1, 2, 3, 4 and 5 below, plus the value sorts and the compare view from phases 2 and 5. (The data work's camera-bitrate experiments are still to do; the editor is where their findings go.)
 
 1. Data work: AP coverage metric; start camera bitrate experiments (overrides).
 2. Access seam: permission middleware, principal, config modes; override
@@ -202,7 +208,7 @@ Done: items 1, 2, 3, 4 and 5 below. (The data work's camera-bitrate experiments 
 3. Phase 1 (router, product pages).
 4. Phase 2 (spec table, finder).
 5. Phase 3 (override editor), once the seam exists.
-6. Phase 4 (wish list, saved searches with alerts).
+6. Phase 4 (build plan, saved searches with alerts).
 7. Phase 5 (compare, alternatives, rack planner).
 8. Phase 6 (builder), one role at a time.
 

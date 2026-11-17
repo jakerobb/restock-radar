@@ -66,8 +66,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Only what ships: build and test tooling is not in the image, and an advisory
+      # with no fix (as picomatch's had) would otherwise block every PR.
       - name: Vulnerability scan
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Test
         run: npm test

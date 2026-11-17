@@ -110,9 +110,9 @@ describe('FindPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Price' }))
     expect(order()).toEqual(['Switch Mystery', 'Switch 1G', 'Switch 10G PoE'])
-    await user.click(screen.getByRole('button', { name: /^Price/ }))
+    await user.click(screen.getByRole('button', { name: /^Price( ▲| ▼)?$/ }))
     expect(order()).toEqual(['Switch 10G PoE', 'Switch 1G', 'Switch Mystery'])
-    expect(screen.getByRole('columnheader', { name: /Price/ })).toHaveAttribute('aria-sort', 'descending')
+    expect(screen.getByRole('columnheader', { name: /^Price( ▲| ▼)?$/ })).toHaveAttribute('aria-sort', 'descending')
   })
 
   it('narrows to in-stock products and by name', async () => {
@@ -124,6 +124,48 @@ describe('FindPage', () => {
     await user.type(screen.getByLabelText('Search by name'), 'mystery')
     await waitFor(() => expect(screen.queryByRole('link', { name: 'Switch 10G PoE' })).not.toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Switch Mystery' })).toBeInTheDocument()
+  })
+
+  it('picks products to compare, up to four, and links to the comparison', async () => {
+    catalog()
+    const user = userEvent.setup()
+    const { router } = renderRoute('/find?type=Switches')
+    await waitFor(() => rowFor('Switch 1G'))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('Compare Switch 1G'))
+    expect(await screen.findByRole('status')).toHaveTextContent('pick one more')
+    await user.click(screen.getByLabelText('Compare Switch 10G PoE'))
+    const link = await screen.findByRole('link', { name: 'Compare them' })
+    expect(router.state.location.search).toMatchObject({ c: ['us/switch-1g', 'us/switch-10g'] })
+    expect(link).toHaveAttribute('href', expect.stringContaining('/compare'))
+
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    expect(router.state.location.search).not.toHaveProperty('c')
+  })
+
+  it('lets no more than four be picked at once', async () => {
+    const products = ['a', 'b', 'c', 'd', 'e'].map((n, i) => product({ id: n, slug: `sw-${n}`, title: `Switch ${n.toUpperCase()}`, type: 'Switches', variants: [variant({ id: `v${i}` })] }))
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: products.map((p) => derived({ slug: p.slug })) } })
+    const user = userEvent.setup()
+    renderRoute('/find?type=Switches')
+    await waitFor(() => rowFor('Switch A'))
+    for (const n of ['A', 'B', 'C', 'D']) await user.click(screen.getByLabelText(`Compare Switch ${n}`))
+    expect(screen.getByLabelText('Compare Switch E')).toBeDisabled()
+    expect(screen.getByLabelText('Compare Switch A')).toBeEnabled() // the picked ones can still be unpicked
+    expect(await screen.findByRole('status')).toHaveTextContent('the most that fit: 4')
+  })
+
+  it('offers price-per-unit columns, apart from the others, in the column picker', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/find?type=Switches&cols=per_poe_w')
+    const row = await waitFor(() => rowFor('Switch 10G PoE'))
+    expect(within(row).getByText('$0.75')).toBeInTheDocument() // $299 over 400 W
+    expect(within(rowFor('Switch 1G')).getByText('?')).toBeInTheDocument() // no PoE budget known
+    await user.click(screen.getByText('Columns'))
+    expect(screen.getByLabelText('Price per PoE watt')).toBeChecked()
   })
 
   it('says so when the catalogue can’t be loaded', async () => {
