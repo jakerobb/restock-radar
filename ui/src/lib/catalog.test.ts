@@ -59,6 +59,17 @@ describe('columns', () => {
     expect(columnById('fastest_port')!.value(row(derived({ known, ports: [port({ max_speed_mbps: 0 })] })))).toBeNull()
   })
 
+  it('has coverage columns that say their unit, and shows APs\' coverage by default', () => {
+    expect(columnById('coverage_sqft')!.label).toBe('Coverage area (ft²)')
+    expect(columnById('coverage_m2')!.label).toBe('Coverage area (m²)')
+    expect(columnById('range_m')!.label).toBe('Link range')
+    expect(defaultColumns('WiFi')).toContain('coverage_sqft')
+    const r = row(derived({ known, metrics: [{ name: 'coverage_sqft', value: 1500, unit: 'ft²', at_least: false, raw: '140 m² (1,500 ft²)' }] }))
+    expect(columnById('coverage_sqft')!.value(r)).toBe(1500)
+    expect(columnById('coverage_sqft')!.format(1500)).toBe('1500 ft²')
+    expect(columnById('coverage_m2')!.value(r)).toBeNull()
+  })
+
   it('counts PoE-out ports only', () => {
     const r = row(derived({ known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' }), port({ count: 1, poe_class: 'PoE++', poe_direction: 'in' }), port({ count: 4 })] }))
     expect(columnById('poe_out_ports')!.value(r)).toBe(8)

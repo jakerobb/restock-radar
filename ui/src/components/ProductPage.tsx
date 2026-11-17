@@ -1,12 +1,15 @@
 import { Link, useParams } from '@tanstack/react-router'
 import { useMemo } from 'react'
-import { useHistory, useProductSpecs, useProducts } from '../api/queries'
-import type { Derived, Port, Product, SpecEntry } from '../api/types'
+import { useCan, useHistory, useProductSpecs, useProducts } from '../api/queries'
+import type { Derived, Port, Product, SpecEntry, SpecOverride } from '../api/types'
+import { formatRelative } from '../lib/format'
 import { indexHistory } from '../lib/history'
 import { formatSpeed, metricInfo } from '../lib/requirements'
 import { useHistoryDays } from '../hooks/useHistoryDays'
 import { ProductCard } from './ProductCard'
+import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
 import { PageNav } from './PageNav'
+import { RefreshButton } from './RefreshButton'
 import { HistoryRangePicker } from './HistoryRangePicker'
 import { Badge } from './ui/Badge'
 import { Card } from './ui/Card'
@@ -114,7 +117,7 @@ function DerivedSummary({ d }: { d: Derived }) {
 }
 
 /** The effective specification, grouped by section, with overrides shown beside what the store published. */
-function SpecTable({ specs }: { specs: SpecEntry[] }) {
+function SpecTable({ specs, region, slug, overrides, canEdit }: { specs: SpecEntry[]; region: string; slug: string; overrides: SpecOverride[]; canEdit: boolean }) {
   const sections = useMemo(() => {
     const out = new Map<string, SpecEntry[]>()
     // The grid overview repeats entries of the other sections.
@@ -146,6 +149,15 @@ function SpecTable({ specs }: { specs: SpecEntry[] }) {
                     )}
                     {e.published_value !== undefined && <span className="mt-0.5 block text-xs text-muted">Published: {e.published_value}</span>}
                     {e.note && <span className="mt-0.5 block text-xs text-muted">{e.note}</span>}
+                    {canEdit && (
+                      <EntryEditor
+                        region={region}
+                        slug={slug}
+                        entry={e}
+                        group={entries.find((g) => g.kind === 'group' && g.feature_id === e.parent_id)?.label ?? ''}
+                        override={overrides.find((o) => o.id === e.override_id)}
+                      />
+                    )}
                   </dd>
                 </div>
               ),
@@ -166,6 +178,8 @@ export default function ProductPage() {
 
   const product: Product | undefined = productData?.products.find((p) => p.region === region && p.slug === slug)
   const index = useMemo(() => (history.data ? indexHistory(history.data) : undefined), [history.data])
+  const canEdit = useCan('overrides:write')
+  const canRefresh = useCan('products:refresh')
 
   if (isPending || (specs.isPending && !product)) {
     return (
@@ -193,7 +207,8 @@ export default function ProductPage() {
       <div className="mt-4 space-y-5">
         {product && (
           <div>
-            <div className="mb-2 flex justify-end">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              {canRefresh ? <RefreshButton region={region} slug={slug} /> : <span />}
               <HistoryRangePicker days={days} onChange={setDays} />
             </div>
             <ProductCard product={product} showRegion={(productData?.regions.length ?? 0) > 1} history={index} />
@@ -207,7 +222,12 @@ export default function ProductPage() {
               {specs.data.overrides.map((o) => (
                 <li key={o.id}>
                   <strong>{o.label}</strong>: {o.action === 'hide' ? 'hidden' : o.value}
-                  {o.stale && <Badge tone="warn" className="ml-2">published value changed</Badge>}
+                  {o.stale && (
+                    <Badge tone="warn" className="ml-2">
+                      published value changed
+                    </Badge>
+                  )}
+                  {canEdit && <RemoveOverrideButton region={region} slug={slug} id={o.id} label={o.label} />}
                   {(o.reason || o.source_url) && (
                     <span className="block text-muted">
                       {o.reason}
@@ -221,15 +241,26 @@ export default function ProductPage() {
                       )}
                     </span>
                   )}
+                  {canEdit && o.updated_by && o.updated_at && (
+                    <span className="block text-xs text-muted">
+                      {o.created_by && o.created_by !== o.updated_by ? `Made by ${o.created_by}, last changed by ${o.updated_by}` : `By ${o.updated_by}`}, {formatRelative(o.updated_at)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
           </Card>
         )}
+        {canEdit && specs.data && <AddFact region={region} slug={slug} sections={[...new Set(specs.data.specs.filter((e) => e.section_type !== 'Overview').map((e) => e.section))]} />}
         <section aria-label="Specification">
           <h2 className="mb-2 text-lg font-semibold">Specification</h2>
-          {specs.isError ? <Notice tone="bad">Couldn't load the specification.</Notice> : <SpecTable specs={specs.data?.specs ?? []} />}
+          {specs.isError ? (
+            <Notice tone="bad">Couldn't load the specification.</Notice>
+          ) : (
+            <SpecTable specs={specs.data?.specs ?? []} region={region} slug={slug} overrides={specs.data?.overrides ?? []} canEdit={canEdit} />
+          )}
         </section>
+        {canEdit && <OverrideHistory region={region} slug={slug} />}
       </div>
     </main>
   )

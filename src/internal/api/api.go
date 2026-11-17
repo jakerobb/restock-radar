@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jakerobb/restock-radar/internal/auth"
 	"github.com/jakerobb/restock-radar/internal/config"
 	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/poller"
@@ -43,6 +44,8 @@ type Server struct {
 	overrides *windowLimiter
 	// refreshes limits on-demand fetches of a product, each of which is a request to the live store.
 	refreshes *windowLimiter
+	// auth says who each request is from, and so what it may change.
+	auth auth.Authenticator
 }
 
 const (
@@ -54,19 +57,21 @@ const (
 )
 
 func New(s *store.Store, p Poller, cfg *config.Config) *Server {
-	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow), refreshes: newWindowLimiter(refreshesPerWindow, refreshesWindow)}
+	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow), refreshes: newWindowLimiter(refreshesPerWindow, refreshesWindow), auth: auth.New(cfg.Auth)}
 }
 
 func (srv *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/products", srv.handleProducts)
-	mux.HandleFunc("POST /v1/items", srv.handleAddItem)
+	mux.HandleFunc("POST /v1/items", srv.require(auth.WatchlistWrite, srv.handleAddItem))
 	mux.HandleFunc("GET /v1/products/{region}/{slug}/specs", srv.handleProductSpecs)
-	mux.HandleFunc("POST /v1/products/{region}/{slug}/refresh", srv.handleRefreshProduct)
+	mux.HandleFunc("POST /v1/products/{region}/{slug}/refresh", srv.require(auth.ProductsRefresh, srv.handleRefreshProduct))
 	mux.HandleFunc("GET /v1/derived", srv.handleDerived)
 	mux.HandleFunc("GET /v1/overrides", srv.handleOverrides)
-	mux.HandleFunc("PUT /v1/overrides", srv.handlePutOverride)
-	mux.HandleFunc("DELETE /v1/overrides/{id}", srv.handleDeleteOverride)
+	mux.HandleFunc("PUT /v1/overrides", srv.require(auth.OverridesWrite, srv.handlePutOverride))
+	mux.HandleFunc("DELETE /v1/overrides/{id}", srv.require(auth.OverridesWrite, srv.handleDeleteOverride))
+	mux.HandleFunc("GET /v1/overrides/history", srv.require(auth.OverridesWrite, srv.handleOverrideHistory))
+	mux.HandleFunc("GET /v1/me", srv.handleMe)
 	mux.HandleFunc("GET /health", srv.handleHealth)
 	mux.HandleFunc("GET /metrics", srv.handleMetrics)
 	mux.HandleFunc("GET /v1/history", srv.handleHistory)

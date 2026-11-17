@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,9 +55,44 @@ type Config struct {
 	BackupInterval       time.Duration `yaml:"-"`
 	BackupKeep           int           `yaml:"backup_keep"`
 	Ntfy                 Ntfy          `yaml:"ntfy"`
+	Auth                 Auth          `yaml:"auth"`
 	Regions              []Region      `yaml:"regions"`
 	Items                []Item        `yaml:"items"`
 }
+
+// Auth says who may change things. By default (mode "open") every request is
+// trusted, which suits a deployment only its owner can reach. In mode "proxy"
+// the service believes the identity an authenticating reverse proxy (Authelia,
+// oauth2-proxy, ...) forwards in headers, but only on requests that come from
+// one of TrustedProxies, so that a direct request can't claim to be anybody.
+type Auth struct {
+	// Mode is "open" (the default) or "proxy".
+	Mode string `yaml:"mode"`
+	// Public marks a deployment reachable by people the owner doesn't know. It is
+	// refused in mode "open", where anyone could change data.
+	Public bool `yaml:"public"`
+	// TrustedProxies are the networks (CIDR, or a single address) whose requests
+	// may carry identity headers. Required in mode "proxy".
+	TrustedProxies []string `yaml:"trusted_proxies"`
+	// The headers the proxy sets; the defaults are Authelia's.
+	UserHeader   string `yaml:"user_header"`
+	NameHeader   string `yaml:"name_header"`
+	EmailHeader  string `yaml:"email_header"`
+	GroupsHeader string `yaml:"groups_header"`
+	// Roles maps a role ("editor", "admin") to the proxy groups that hold it.
+	Roles map[string][]string `yaml:"roles"`
+
+	// TrustedPrefixes is TrustedProxies, parsed.
+	TrustedPrefixes []netip.Prefix `yaml:"-"`
+}
+
+const (
+	AuthModeOpen  = "open"
+	AuthModeProxy = "proxy"
+)
+
+// AuthRoles are the roles Auth.Roles may name.
+var AuthRoles = []string{"editor", "admin"}
 
 type Ntfy struct {
 	URL   string `yaml:"url"`
@@ -187,6 +224,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("backup_keep must be positive, got %d", cfg.BackupKeep)
 	}
 
+	if err := validateAuth(&cfg.Auth); err != nil {
+		return err
+	}
+
 	if cfg.Ntfy.URL == "" {
 		return fmt.Errorf("ntfy.url is required")
 	}
@@ -305,4 +346,58 @@ func (c *Config) parseItemURL(s string) (Region, string, error) {
 		}
 	}
 	return Region{}, "", errors.New("couldn't find /products/<slug> in that URL")
+}
+
+// validateAuth checks the auth block and fills in its defaults.
+func validateAuth(a *Auth) error {
+	if a.Mode == "" {
+		a.Mode = AuthModeOpen
+	}
+	switch a.Mode {
+	case AuthModeOpen:
+		if a.Public {
+			return errors.New("auth.public is set but auth.mode is \"open\", which would let anyone change data; use auth.mode: proxy")
+		}
+		return nil
+	case AuthModeProxy:
+	default:
+		return fmt.Errorf("auth.mode must be %q or %q, got %q", AuthModeOpen, AuthModeProxy, a.Mode)
+	}
+
+	if len(a.TrustedProxies) == 0 {
+		return errors.New("auth.trusted_proxies is required in proxy mode: the networks whose requests may carry identity headers")
+	}
+	a.TrustedPrefixes = a.TrustedPrefixes[:0]
+	for i, raw := range a.TrustedProxies {
+		raw = strings.TrimSpace(raw)
+		p, err := netip.ParsePrefix(raw)
+		if err != nil {
+			addr, aerr := netip.ParseAddr(raw)
+			if aerr != nil {
+				return fmt.Errorf("auth.trusted_proxies[%d]: %q is neither a CIDR nor an address", i, raw)
+			}
+			p = netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen())
+		}
+		if p.Bits() == 0 {
+			return fmt.Errorf("auth.trusted_proxies[%d]: %q trusts every address, which makes the identity headers forgeable", i, raw)
+		}
+		a.TrustedPrefixes = append(a.TrustedPrefixes, p.Masked())
+	}
+
+	for field, def := range map[*string]string{&a.UserHeader: "Remote-User", &a.NameHeader: "Remote-Name", &a.EmailHeader: "Remote-Email", &a.GroupsHeader: "Remote-Groups"} {
+		if *field = strings.TrimSpace(*field); *field == "" {
+			*field = def
+		}
+	}
+	for role, groups := range a.Roles {
+		if !slices.Contains(AuthRoles, role) {
+			return fmt.Errorf("auth.roles: unknown role %q (known: %s)", role, strings.Join(AuthRoles, ", "))
+		}
+		for _, g := range groups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("auth.roles.%s: a group name is empty", role)
+			}
+		}
+	}
+	return nil
 }

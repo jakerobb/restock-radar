@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useProducts } from './api/queries'
+import { useCan, useProducts } from './api/queries'
 import { useHistoryDays } from './hooks/useHistoryDays'
 import { useSidebarOpen } from './hooks/useSidebarOpen'
 import { useSort } from './hooks/useSort'
@@ -19,6 +19,7 @@ import { filterProducts, prefixCounts, tagCounts, typeCounts } from './lib/filte
 
 export default function App() {
   const { data, isPending, isError, refetch } = useProducts()
+  const canAdd = useCan('watchlist:write')
   const [historyDays, setHistoryDays] = useHistoryDays()
   const [sort, setSort] = useSort()
   const [query, setQuery] = useState('')
@@ -75,7 +76,7 @@ export default function App() {
           >
             {sidebarOpen ? '◂ Hide filters' : '▸ Show filters'}
           </Button>
-          <AddProductDialog regions={data?.regions ?? []} />
+          {canAdd && <AddProductDialog regions={data?.regions ?? []} />}
         </div>
       </div>
 

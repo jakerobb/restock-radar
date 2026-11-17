@@ -304,6 +304,13 @@ export interface SpecOverride {
   status: string
   stale: boolean
   published_now: string | null
+  /** What the store published when the override was made; null for an added entry. */
+  published_value?: string | null
+  created_at?: string
+  updated_at?: string
+  /** Who made and last changed it; only sent to those who may review overrides. */
+  created_by?: string
+  updated_by?: string
 }
 
 export interface ProductSpecsResponse {
@@ -316,4 +323,64 @@ export interface ProductSpecsResponse {
   overrides: SpecOverride[]
   /** Null for a product with nothing to derive from. */
   derived: Derived | null
+}
+
+/** What POST /v1/products/{region}/{slug}/refresh found. */
+export interface RefreshResult {
+  region: string
+  slug: string
+  title: string
+  variants: number
+  /** How many specification entries the store published. */
+  spec_entries: number
+  /** The stored specification differs from before, so what is derived from it was rebuilt. */
+  specs_changed: boolean
+  /** Changes (price, stock) the fetch turned up; they are announced by the next poll. */
+  events: number
+}
+
+// ---- Who may do what (GET /v1/me) ----
+
+export type Permission = 'overrides:write' | 'watchlist:write' | 'products:refresh'
+
+export interface Me {
+  /** How identity is decided: "open" (nobody is asked), "proxy", or "closed" (misconfigured: nothing may change). */
+  mode: 'open' | 'proxy' | 'closed'
+  authenticated: boolean
+  open: boolean
+  user?: string
+  name?: string
+  email?: string
+  roles: string[]
+  permissions: Permission[]
+}
+
+// ---- Overrides (PUT /v1/overrides, GET /v1/overrides/history) ----
+
+export interface OverrideRequest {
+  region: string
+  slug: string
+  action: 'set' | 'hide'
+  section: string
+  group?: string
+  label: string
+  kind?: 'text' | 'flag'
+  value?: string
+  note?: string
+  source_url?: string
+  reason?: string
+}
+
+export interface OverrideChange {
+  id: number
+  at: string
+  actor: string
+  change: 'create' | 'update' | 'delete'
+  override_id: number
+  region: string
+  slug: string
+  /** The override as it was; null for a creation. */
+  before: SpecOverride | null
+  /** The override as it became; null for a deletion. */
+  after: SpecOverride | null
 }

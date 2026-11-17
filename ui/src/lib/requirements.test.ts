@@ -160,6 +160,8 @@ describe('the URL form', () => {
     { kind: 'metric', name: 'power_draw_max_w', max: 30 },
     { kind: 'rack', maxUnits: 1 },
     { kind: 'rack' },
+    { kind: 'metric', name: 'coverage_m2', min: 140 },
+    { kind: 'metric', name: 'range_m', min: 500 },
   ]
 
   it.each(samples)('round-trips %j', (r) => {
@@ -210,6 +212,7 @@ describe('describeRequirement', () => {
     [{ kind: 'radio', band: '6 GHz', minTxDbm: 20 }, '6 GHz radio (TX ≥ 20 dBm)'],
     [{ kind: 'metric', name: 'poe_budget_w', min: 200 }, 'PoE budget ≥ 200 W'],
     [{ kind: 'metric', name: 'power_draw_max_w', max: 30 }, 'Max power draw ≤ 30 W'],
+    [{ kind: 'metric', name: 'coverage_sqft', min: 1500 }, 'Coverage area ≥ 1500 ft²'],
     [{ kind: 'rack', maxUnits: 1 }, 'Rack-mount, ≤ 1U'],
   ])('%j -> %s', (r, text) => {
     expect(describeRequirement(r)).toBe(text)

@@ -1,6 +1,6 @@
 import type { Derived, Product } from '../api/types'
 import { totalCents } from './format'
-import { metricInfo } from './requirements'
+import { METRICS, metricInfo } from './requirements'
 
 export type StockState = 'in' | 'soon' | 'out'
 
@@ -68,7 +68,9 @@ const dataPorts = (r: CatalogRow) => (r.derived?.known.ports ? r.derived.ports.f
 
 const fromMetric = (name: string): Column => {
   const info = metricInfo(name)!
-  return { id: name, label: info.label, value: metricValue(name), format: withUnit(info.unit), lowerIsBetter: info.lowerIsBetter }
+  // Two metrics can measure one thing in different units (coverage in ft² and m²); say which.
+  const shared = METRICS.filter((m) => m.label === info.label).length > 1
+  return { id: name, label: shared ? `${info.label} (${info.unit})` : info.label, value: metricValue(name), format: withUnit(info.unit), lowerIsBetter: info.lowerIsBetter }
 }
 
 /** The extra columns the table can show (price and stock are always there). */
@@ -81,6 +83,9 @@ export const COLUMNS: readonly Column[] = [
   fromMetric('forwarding_rate_mpps'),
   fromMetric('ids_ips_throughput_mbps'),
   fromMetric('wifi_generation'),
+  fromMetric('coverage_sqft'),
+  fromMetric('coverage_m2'),
+  fromMetric('range_m'),
   {
     id: 'fastest_port',
     label: 'Fastest port',
@@ -132,7 +137,7 @@ export function defaultColumns(type: string): string[] {
     case 'Switches':
       return ['fastest_port', 'ports', 'poe_budget_w', 'switching_capacity_gbps', 'rack_u']
     case 'WiFi':
-      return ['wifi_generation', 'tx_6ghz', 'max_gain', 'power_draw_max_w']
+      return ['wifi_generation', 'coverage_sqft', 'tx_6ghz', 'max_gain', 'power_draw_max_w']
     case 'Gateways':
       return ['fastest_port', 'ids_ips_throughput_mbps', 'power_draw_max_w', 'rack_u']
     default:

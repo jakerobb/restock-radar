@@ -58,6 +58,9 @@ export const METRICS: readonly MetricInfo[] = [
   { name: 'forwarding_rate_mpps', label: 'Forwarding rate', unit: 'Mpps' },
   { name: 'ids_ips_throughput_mbps', label: 'IDS/IPS throughput', unit: 'Mbps' },
   { name: 'wifi_generation', label: 'Wi-Fi generation', unit: '' },
+  { name: 'coverage_sqft', label: 'Coverage area', unit: 'ft²' },
+  { name: 'coverage_m2', label: 'Coverage area', unit: 'm²' },
+  { name: 'range_m', label: 'Link range', unit: 'm' },
 ]
 
 export const metricInfo = (name: string): MetricInfo | undefined => METRICS.find((m) => m.name === name)

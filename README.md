@@ -75,7 +75,7 @@ Other pages (client-side routes; the server falls back to `index.html` for them)
 
 | Path | What |
 |---|---|
-| `/p/{region}/{slug}` | One product: variants and history, what is derived from its specification (ports, PoE, radios, rack, size), and the full specification with any overrides shown beside the published value |
+| `/p/{region}/{slug}` | One product: variants and history, what is derived from its specification (ports, PoE, radios, rack, size), and the full specification with any overrides shown beside the published value. A "Refresh from store" button reads the product from the store now |
 | `/find` | The product finder: pick a type, add requirements ("a 10 GbE port with PoE+++ out", "a 6 GHz radio", "PoE budget ≥ 200 W"), see matching products with current price and stock, sortable. Products whose specs don't say enough go under "Can't tell" instead of being dropped. The whole search is in the URL, so it can be bookmarked or shared |
 | `/status` | Collection status |
 
@@ -83,8 +83,9 @@ The finder filters in the browser: it fetches `/v1/derived` and `/v1/products`
 once and matches locally (`ui/src/lib/requirements.ts`). The plan for what
 comes next is in [docs/ui-roadmap.md](docs/ui-roadmap.md).
 
-There is no login. Put it behind an authenticating proxy; the server only
-refuses cross-site posts.
+There is no login of its own: see [Access control](#access-control). Corrections
+to a product's specification are made on its page by anyone allowed to, and the
+specification shows them beside what the store publishes.
 
 The UI is compiled to static files and embedded in the Go binary, so the image
 is still one `FROM scratch` binary with no Node at runtime.
@@ -112,6 +113,8 @@ GET /v1/products/us/ucg-fiber/specs   effective specification, overrides, derive
 GET /v1/derived?region=us             ports, PoE budgets, radios, numbers, rack and size for every product
 POST /v1/products/us/ucg-fiber/refresh  fetch this tracked product from the store now (price, stock, specs)
 GET /v1/overrides?slug=ucg-fiber
+GET /v1/overrides/history?slug=ucg-fiber   who changed which corrections, and what they were before
+GET /v1/me                  who you are to the service, and what you may do
 PUT /v1/overrides        {"slug": "ucg-fiber", "action": "set", "section": "Overview",
                           "label": "IDS/IPS Throughput", "value": "8+ Gbps",
                           "source_url": "https://...", "reason": "teardown"}
@@ -119,6 +122,31 @@ DELETE /v1/overrides/{id}
 ```
 
 Prices are integers in minor units (cents) with a `currency` field.
+
+## Access control
+
+Reading is open to everybody. Changing things needs a permission:
+
+| Permission | Allows |
+|---|---|
+| `overrides:write` | creating, changing and removing spec corrections, and seeing who made them and the history |
+| `products:refresh` | reading a product from the store on demand |
+| `watchlist:write` | adding products to the watch list |
+
+There is no login: who somebody is comes from the config's `auth` block.
+
+- **`mode: open`** (the default) treats every request as an administrator's. Use it only where nobody
+  else can reach the service. `public: true` is refused in this mode.
+- **`mode: proxy`** believes the identity an authenticating reverse proxy forwards in headers
+  (`Remote-User`, `Remote-Name`, `Remote-Email`, `Remote-Groups`: Authelia's names; each can be changed),
+  but only on requests whose connection comes from one of `trusted_proxies`. A request from anywhere else
+  is anonymous however it is dressed, and `X-Forwarded-For` is never consulted. `roles` maps proxy groups
+  to the roles `editor` (`overrides:write`, `products:refresh`) and `admin` (those plus `watchlist:write`).
+  Trusting every address is refused.
+
+A configuration that can't be made sense of leaves nobody able to change anything, rather than everybody.
+`GET /v1/me` says who the service takes you to be and what you may do, which is what the web UI uses to
+offer only what will work. Every correction records who made it, and its history is kept.
 
 ## Backups
 

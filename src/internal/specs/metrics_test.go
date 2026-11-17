@@ -365,3 +365,99 @@ func TestDimsUnknownWithoutAnEntry(t *testing.T) {
 		t.Errorf("result = %+v", r)
 	}
 }
+
+func coverageOf(value string) Result {
+	b := &builder{}
+	b.text("Overview", "Coverage Area", value)
+	return b.derive()
+}
+
+func TestCoverageArea(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		m2, sqft float64
+	}{
+		{"140 m² (1,500 ft²)", 140, 1500},
+		{"115 m² (1,250 ft²)", 115, 1250},
+		{"465 m² (5,000 ft²)", 465, 5000},
+		{"465 m² (5,000 ft²)", 465, 5000}, // a non-breaking space, as the store sometimes writes
+		{"1,500 ft² (139 m²)", 139, 1500}, // in the other order
+		{"140 m²", 140, 1507},             // one unit only: the other is worked out
+		{"1,500 ft²", 139, 1500},
+	} {
+		r := coverageOf(tc.value)
+		m2, sqft := metric(r, "coverage_m2"), metric(r, "coverage_sqft")
+		if m2 == nil || sqft == nil || m2.Value != tc.m2 || sqft.Value != tc.sqft || m2.Unit != "m²" || sqft.Unit != "ft²" {
+			t.Errorf("%q: got %+v and %+v, want %v m² and %v ft²", tc.value, m2, sqft, tc.m2, tc.sqft)
+		}
+		if metric(r, "range_m") != nil {
+			t.Errorf("%q: an area was also read as a range", tc.value)
+		}
+	}
+}
+
+func TestCoverageRangeOfABridge(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  float64
+	}{
+		{"500 m (1,640 ft)", 500},
+		{"5 km (3.1 mi)", 5000},
+		{"1.5 km (0.9 mi)", 1500},
+	} {
+		r := coverageOf(tc.value)
+		m := metric(r, "range_m")
+		if m == nil || m.Value != tc.want || m.Unit != "m" || m.Raw != tc.value {
+			t.Errorf("%q: got %+v, want %v m", tc.value, m, tc.want)
+		}
+		if metric(r, "coverage_m2") != nil || metric(r, "coverage_sqft") != nil {
+			t.Errorf("%q: a range was also read as an area", tc.value)
+		}
+	}
+}
+
+func TestCoverageThatCannotBeReadIsReportedNotGuessed(t *testing.T) {
+	for _, value := range []string{"", "wide", "0 m²", "0 m (0 ft)", "Up to the horizon"} {
+		r := coverageOf(value)
+		for _, name := range []string{"coverage_m2", "coverage_sqft", "range_m"} {
+			if metric(r, name) != nil {
+				t.Errorf("%q gave a %s", value, name)
+			}
+		}
+		if value != "" && len(r.Issues) == 0 {
+			t.Errorf("%q gave no issue", value)
+		}
+	}
+}
+
+func TestRealCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		slug     string
+		m2, sqft float64
+		reach    float64
+	}{
+		{"u7-pro", 140, 1500, 0},
+		{"u7-pro-max", 160, 1750, 0},
+		{"u7-outdoor", 465, 5000, 0},
+		{"e7", 185, 2000, 0},
+		{"udr7", 160, 1750, 0},
+		{"ucg-industrial", 115, 1250, 0},
+		{"ubb-xg", 0, 0, 500},
+	} {
+		r := derived(t, tc.slug)
+		if tc.reach > 0 {
+			if m := metric(r, "range_m"); m == nil || m.Value != tc.reach {
+				t.Errorf("%s: range = %+v, want %v", tc.slug, m, tc.reach)
+			}
+			continue
+		}
+		m2, sqft := metric(r, "coverage_m2"), metric(r, "coverage_sqft")
+		if m2 == nil || sqft == nil || m2.Value != tc.m2 || sqft.Value != tc.sqft {
+			t.Errorf("%s: coverage = %+v / %+v, want %v m² / %v ft²", tc.slug, m2, sqft, tc.m2, tc.sqft)
+		}
+	}
+	// Devices with no coverage figure have none.
+	if r := derived(t, "usw-ultra"); metric(r, "coverage_m2") != nil || metric(r, "range_m") != nil {
+		t.Error("a switch has coverage")
+	}
+}

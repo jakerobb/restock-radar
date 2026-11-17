@@ -1,4 +1,4 @@
-import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, ProductSpecsResponse, ProductsResponse, StatusResponse } from './types'
+import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, Me, OverrideChange, OverrideRequest, ProductSpecsResponse, SpecOverride, ProductsResponse, RefreshResult, StatusResponse } from './types'
 
 /** An error response from the API; message is safe to show to the user. */
 export class ApiError extends Error {
@@ -41,3 +41,21 @@ export const addItem = (req: AddItemRequest) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
+
+/** Asks the server to read one tracked product from the store now. */
+export const refreshProduct = (region: string, slug: string) =>
+  request<RefreshResult>(`/v1/products/${encodeURIComponent(region)}/${encodeURIComponent(slug)}/refresh`, { method: 'POST' })
+
+export const getMe = () => request<Me>('/v1/me')
+
+export const putOverride = (req: OverrideRequest) =>
+  request<SpecOverride>('/v1/overrides', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+
+export const deleteOverride = (id: number) => request<null>(`/v1/overrides/${id}`, { method: 'DELETE' })
+
+export const getOverrideHistory = (region: string, slug: string) =>
+  request<OverrideChange[]>(`/v1/overrides/history?region=${encodeURIComponent(region)}&slug=${encodeURIComponent(slug)}`)

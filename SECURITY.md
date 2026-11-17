@@ -15,9 +15,15 @@ are read and taken seriously.
 Restock Radar is built to run inside a home network, behind an authenticating
 reverse proxy:
 
-- **It has no login of its own.** Anything that can reach the HTTP port can
-  read the watch list and add products. Don't expose it directly to the
-  internet; put it behind something that authenticates users.
+- **It has no login of its own.** By default (`auth.mode: open`) anything that
+  can reach the HTTP port can read the watch list, add products and correct
+  specs, so don't expose it directly to the internet. To make it reachable by
+  people you don't know, put it behind an authenticating proxy and set
+  `auth.mode: proxy`: the service then believes the identity headers only of
+  requests from `trusted_proxies`, and only users in a configured group may
+  change anything (see "Access control" in the README). Reading stays open, and
+  who made each correction is shown only to those who may review them. A
+  misconfiguration leaves nobody able to change anything, not everybody.
 - **It only talks to the stores you configure** (by default `store.ui.com`),
   to your ntfy server, and to `techspecs.ui.com`, where it sends a `HEAD`
   request for the product pages it links to (a few a cycle; the host is fixed

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import type { Me } from '../api/types'
 import { createAppRouter } from '../router'
 
 /** Renders with a fresh query client that doesn't retry, so failures show up at once. */
@@ -12,6 +13,8 @@ export function renderWithClient(ui: ReactElement) {
 
 /** A fetch stub that answers by "METHOD /path". */
 export function stubFetch(routes: Record<string, { status?: number; body: unknown }>) {
+  // Unless a test says otherwise, the server is one where nobody is asked who they are, so everything is allowed.
+  routes = { 'GET /v1/me': { body: openMe() }, ...routes }
   const calls: { key: string; body?: string }[] = []
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? 'GET'} ${String(input)}`
@@ -34,4 +37,19 @@ export function renderRoute(path: string) {
     </QueryClientProvider>,
   )
   return { router, ...utils }
+}
+
+/** What GET /v1/me says on a server where identity isn't asked for. */
+export function openMe(): Me {
+  return { mode: 'open', authenticated: false, open: true, roles: ['admin'], permissions: ['overrides:write', 'products:refresh', 'watchlist:write'] }
+}
+
+/** What it says for somebody signed in through a proxy, with the given permissions. */
+export function signedInMe(user: string, permissions: Me['permissions']): Me {
+  return { mode: 'proxy', authenticated: true, open: false, user, roles: [], permissions }
+}
+
+/** What it says for a visitor nobody has vouched for. */
+export function anonymousMe(): Me {
+  return { mode: 'proxy', authenticated: false, open: false, roles: [], permissions: [] }
 }
