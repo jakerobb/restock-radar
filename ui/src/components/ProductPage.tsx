@@ -208,7 +208,12 @@ export default function ProductPage() {
         {product && (
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              {canRefresh ? <RefreshButton region={region} slug={slug} /> : <span />}
+              <div className="flex flex-wrap items-center gap-3">
+                {canRefresh && <RefreshButton region={region} slug={slug} />}
+                <Link to="/compare" search={{ p: [`${region}/${slug}`] }} className="text-sm text-muted underline underline-offset-2 hover:text-ink">
+                  Compare with…
+                </Link>
+              </div>
               <HistoryRangePicker days={days} onChange={setDays} />
             </div>
             <ProductCard product={product} showRegion={(productData?.regions.length ?? 0) > 1} history={index} />

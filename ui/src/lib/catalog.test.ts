@@ -124,3 +124,49 @@ describe('sortRows', () => {
     expect(titles(sortRows(rows, 'nonsense', 'asc'))).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta'])
   })
 })
+
+describe('price-per-unit columns', () => {
+  const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
+  const row = (cents: number, over: Parameters<typeof derived>[0], status: 'Available' | 'SoldOut' = 'Available') =>
+    buildCatalog([product({ variants: [variant({ price_cents: cents, status })] })], [derived({ known, ...over })])[0]!
+  const col = (id: string) => columnById(id)!
+
+  it('divides the price by the PoE budget, and says what it costs per watt', () => {
+    const r = row(30000, { metrics: [{ name: 'poe_budget_w', value: 200, unit: 'W', at_least: false, raw: '' }] })
+    expect(col('per_poe_w').value(r)).toBe(150) // 150 cents a watt
+    expect(col('per_poe_w').format(150, r)).toBe('$1.50')
+  })
+
+  it('counts PoE-out ports and 10 GbE+ ports, ignoring PoE input and slower ports', () => {
+    const r = row(40000, {
+      ports: [
+        port({ count: 16, poe_class: 'PoE+', poe_direction: 'out' }),
+        port({ count: 2, poe_class: 'PoE+++', poe_direction: 'in', max_speed_mbps: 10000 }),
+        port({ count: 4, max_speed_mbps: 25000 }),
+      ],
+    })
+    expect(col('per_poe_port').value(r)).toBe(2500)
+    expect(col('per_10g_port').value(r)).toBeCloseTo(40000 / 6)
+  })
+
+  it('has no value when the price or the quantity is missing, rather than dividing by zero', () => {
+    expect(col('per_poe_w').value(row(30000, {}))).toBeNull()
+    expect(col('per_poe_w').value(row(30000, { metrics: [{ name: 'poe_budget_w', value: 0, unit: 'W', at_least: false, raw: '' }] }))).toBeNull()
+    expect(col('per_sqft').value(buildCatalog([product({ variants: [variant({ price_cents: null })] })], [derived({ known, metrics: [{ name: 'coverage_sqft', value: 1500, unit: 'ft²', at_least: false, raw: '' }] })])[0]!)).toBeNull()
+    // Known ports of which none qualify buy nothing, so there is no price per port (not an infinite one).
+    expect(col('per_10g_port').value(row(30000, { ports: [port({ count: 8 })] }))).toBeNull()
+    expect(col('per_poe_port').value(row(30000, { ports: [port({ count: 8 })] }))).toBeNull()
+    // Ports that aren't known say nothing about a price per port.
+    expect(col('per_10g_port').value(buildCatalog([product()], [derived()])[0]!)).toBeNull()
+  })
+
+  it('sorts cheapest-per-unit first, unknowns last', () => {
+    const m = (v: number) => [{ name: 'coverage_sqft', value: v, unit: 'ft²', at_least: false, raw: '' }]
+    const rows = buildCatalog(
+      [product({ slug: 'a', title: 'A', variants: [variant({ price_cents: 20000 })] }), product({ slug: 'b', title: 'B', variants: [variant({ price_cents: 20000 })] }), product({ slug: 'c', title: 'C' })],
+      [derived({ slug: 'a', metrics: m(1000) }), derived({ slug: 'b', metrics: m(2000) })],
+    )
+    expect(sortRows(rows, 'per_sqft', 'asc').map((r) => r.product.title)).toEqual(['B', 'A', 'C'])
+    expect(col('per_sqft').lowerIsBetter).toBe(true)
+  })
+})

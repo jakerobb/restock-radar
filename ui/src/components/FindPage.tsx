@@ -2,6 +2,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import { buildCatalog, columnById, defaultColumns, COLUMNS, NAME_SORT, PRICE_SORT, sortRows, type CatalogRow } from '../lib/catalog'
+import { MAX_COMPARE, productRef } from '../lib/compare'
 import { matchesQuery, typeCounts, typeOf } from '../lib/filter'
 import { formatPrice } from '../lib/format'
 import { describeRequirement, judge, parseRequirements, serializeRequirement, type Judgement, type Requirement } from '../lib/requirements'
@@ -26,6 +27,8 @@ export interface FindSearch {
   dir?: 'asc' | 'desc'
   /** Chosen columns; the type's defaults when absent. */
   cols?: string[]
+  /** Products picked to compare, as "region/slug". */
+  c?: string[]
 }
 
 /** Makes whatever the URL holds into a valid search; nothing in the URL can break the page. */
@@ -44,6 +47,7 @@ export function validateFindSearch(raw: Record<string, unknown>): FindSearch {
     sort: text(raw.sort),
     dir: raw.dir === 'asc' || raw.dir === 'desc' ? raw.dir : undefined,
     cols: strings(raw.cols),
+    c: strings(raw.c)?.slice(0, MAX_COMPARE),
   }
 }
 
@@ -52,13 +56,15 @@ interface Scored {
   judgement: Judgement
 }
 
-function ResultTable({ rows, columns, sort, dir, onSort, reqs }: {
+function ResultTable({ rows, columns, sort, dir, onSort, reqs, picked, onPick }: {
   rows: Scored[]
   columns: string[]
   sort: string
   dir: 'asc' | 'desc'
   onSort: (key: string) => void
   reqs: Requirement[]
+  picked: string[]
+  onPick: (ref: string, on: boolean) => void
 }) {
   const cols = columns.map(columnById).filter((c) => c !== undefined)
   const head = (key: string, label: string, align = 'text-left') => (
@@ -74,6 +80,9 @@ function ResultTable({ rows, columns, sort, dir, onSort, reqs }: {
       <table className="w-full min-w-max border-collapse text-sm">
         <thead className="border-b border-line text-muted">
           <tr>
+            <th scope="col" className="w-8 px-2 py-1.5">
+              <span className="sr-only">Compare</span>
+            </th>
             {head(NAME_SORT, 'Product')}
             {head(PRICE_SORT, 'Price', 'text-right')}
             <th scope="col" className="px-2 py-1.5 text-left font-medium">
@@ -87,7 +96,16 @@ function ResultTable({ rows, columns, sort, dir, onSort, reqs }: {
             const { product, price } = row
             const status = price.stock === 'in' ? statusInfo('Available') : price.stock === 'soon' ? statusInfo('ComingSoon') : statusInfo('SoldOut')
             return (
-              <tr key={`${product.region}/${product.slug}`} className="border-b border-line align-top last:border-0">
+              <tr key={productRef(product)} className="border-b border-line align-top last:border-0">
+                <td className="px-2 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Compare ${product.title}`}
+                    checked={picked.includes(productRef(product))}
+                    disabled={!picked.includes(productRef(product)) && picked.length >= MAX_COMPARE}
+                    onChange={(e) => onPick(productRef(product), e.target.checked)}
+                  />
+                </td>
                 <td className="px-2 py-2">
                   <Link to="/p/$region/$slug" params={{ region: product.region, slug: product.slug }} className="font-medium text-accent underline-offset-2 hover:underline">
                     {product.title}
@@ -113,7 +131,7 @@ function ResultTable({ rows, columns, sort, dir, onSort, reqs }: {
                   const v = c.value(row)
                   return (
                     <td key={c.id} className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
-                      {v === null ? <span className="text-muted">?</span> : c.format(v)}
+                      {v === null ? <span className="text-muted">?</span> : c.format(v, row)}
                     </td>
                   )
                 })}
@@ -164,6 +182,11 @@ export default function FindPage() {
     const first: 'asc' | 'desc' = key === NAME_SORT || col?.lowerIsBetter || key === PRICE_SORT ? 'asc' : 'desc'
     update(sort === key ? { sort: key, dir: dir === 'asc' ? 'desc' : 'asc' } : { sort: key, dir: first })
   }
+  const picked = search.c ?? []
+  const pick = (ref: string, on: boolean) => {
+    const next = on ? [...picked.filter((x) => x !== ref), ref].slice(0, MAX_COMPARE) : picked.filter((x) => x !== ref)
+    update({ c: next.length > 0 ? next : undefined })
+  }
   const setReqs = (next: Requirement[]) => update({ r: next.length > 0 ? next.map(serializeRequirement) : undefined })
 
   return (
@@ -206,8 +229,8 @@ export default function FindPage() {
               <details className="relative text-sm">
                 <summary className="cursor-pointer text-muted hover:text-ink">Columns</summary>
                 <div className="absolute z-10 mt-1 grid min-w-56 gap-1 rounded-lg border border-line bg-surface p-3 shadow-lg">
-                  {COLUMNS.map((c) => (
-                    <label key={c.id} className="flex cursor-pointer items-center gap-1.5">
+                  {COLUMNS.map((c, i) => (
+                    <label key={c.id} className={cn('flex cursor-pointer items-center gap-1.5', c.group === 'value' && COLUMNS[i - 1]?.group !== 'value' && 'mt-2 border-t border-line pt-2')}>
                       <input
                         type="checkbox"
                         checked={columns.includes(c.id)}
@@ -221,12 +244,30 @@ export default function FindPage() {
             </div>
           </Card>
 
+          {picked.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-sm" role="status">
+              <span>
+                {picked.length} picked to compare{picked.length >= MAX_COMPARE ? ` (the most that fit: ${MAX_COMPARE})` : ''}
+              </span>
+              {picked.length >= 2 ? (
+                <Link to="/compare" search={{ p: picked }} className="font-medium text-accent underline underline-offset-2">
+                  Compare them
+                </Link>
+              ) : (
+                <span className="text-muted">pick one more</span>
+              )}
+              <button type="button" onClick={() => update({ c: undefined })} className="cursor-pointer text-muted underline underline-offset-2 hover:text-ink">
+                Clear
+              </button>
+            </div>
+          )}
+
           <section className="mt-5" aria-label="Results">
             <h2 className="mb-2 text-lg font-semibold">
               {reqs.length > 0 ? `Matches (${matches.length})` : `Products (${matches.length})`}
             </h2>
             {matches.length > 0 ? (
-              <ResultTable rows={matches} columns={columns} sort={sort} dir={dir} onSort={onSort} reqs={reqs} />
+              <ResultTable rows={matches} columns={columns} sort={sort} dir={dir} onSort={onSort} reqs={reqs} picked={picked} onPick={pick} />
             ) : (
               <p className="py-4 text-muted">{scoped.length === 0 ? 'Nothing here yet.' : 'No product is known to meet all of these.'}</p>
             )}
@@ -237,7 +278,7 @@ export default function FindPage() {
                   Can't tell ({unknown.length}) <span className="font-normal text-muted">— the specifications don't say enough to judge</span>
                 </summary>
                 <div className="mt-2">
-                  <ResultTable rows={unknown} columns={columns} sort={sort} dir={dir} onSort={onSort} reqs={reqs} />
+                  <ResultTable rows={unknown} columns={columns} sort={sort} dir={dir} onSort={onSort} reqs={reqs} picked={picked} onPick={pick} />
                 </div>
               </details>
             )}

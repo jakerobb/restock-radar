@@ -22,6 +22,9 @@ export function PageNav({ title, children }: { title: string; children?: ReactNo
         <Link to="/find" className={link}>
           Finder
         </Link>
+        <Link to="/compare" className={link}>
+          Compare
+        </Link>
         <Link to="/status" className={link}>
           Status
         </Link>

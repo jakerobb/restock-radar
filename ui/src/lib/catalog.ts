@@ -1,5 +1,5 @@
-import type { Derived, Product } from '../api/types'
-import { totalCents } from './format'
+import type { Derived, Port, Product } from '../api/types'
+import { formatMoney, totalCents } from './format'
 import { METRICS, metricInfo } from './requirements'
 
 export type StockState = 'in' | 'soon' | 'out'
@@ -53,10 +53,12 @@ export interface Column {
   label: string
   /** The sortable value; null when unknown. Strings sort alphabetically. */
   value: (r: CatalogRow) => number | string | null
-  /** The cell text for a non-null value. */
-  format: (v: number | string) => string
+  /** The cell text for a non-null value; the row is there for what depends on it (a price's currency). */
+  format: (v: number | string, row?: CatalogRow) => string
   /** True when a smaller value is better, so the first sort click goes ascending. */
   lowerIsBetter?: boolean
+  /** "value" columns divide the price by what it buys; they sit apart in the column picker. */
+  group?: 'value'
 }
 
 const plain = (v: number | string) => String(v)
@@ -72,6 +74,25 @@ const fromMetric = (name: string): Column => {
   const shared = METRICS.filter((m) => m.label === info.label).length > 1
   return { id: name, label: shared ? `${info.label} (${info.unit})` : info.label, value: metricValue(name), format: withUnit(info.unit), lowerIsBetter: info.lowerIsBetter }
 }
+
+const metricNumber = (r: CatalogRow, name: string): number | null => {
+  const v = r.derived?.metrics.find((m) => m.name === name)?.value
+  return typeof v === 'number' && v > 0 ? v : null
+}
+
+const portsWhere = (r: CatalogRow, keep: (p: Port) => boolean): number | null => dataPorts(r)?.filter(keep).reduce((n, p) => n + p.count, 0) ?? null
+
+/** What the price buys per unit, in cents; null when the price or the quantity isn't known (or is nothing). */
+const perUnit = (r: CatalogRow, units: number | null): number | null => (r.price.cents !== null && units !== null && units > 0 ? r.price.cents / units : null)
+
+const perUnitColumn = (id: string, label: string, units: (r: CatalogRow) => number | null): Column => ({
+  id,
+  label,
+  value: (r) => perUnit(r, units(r)),
+  format: (v, r) => formatMoney(Number(v), r?.price.currency ?? 'USD'),
+  lowerIsBetter: true,
+  group: 'value',
+})
 
 /** The extra columns the table can show (price and stock are always there). */
 export const COLUMNS: readonly Column[] = [
@@ -127,6 +148,11 @@ export const COLUMNS: readonly Column[] = [
     format: withUnit('dBi'),
   },
   { id: 'size', label: 'Largest dimension', value: (r) => (r.derived?.known.dims && r.derived.dims.max_mm > 0 ? r.derived.dims.max_mm : null), format: withUnit('mm'), lowerIsBetter: true },
+  perUnitColumn('per_poe_w', 'Price per PoE watt', (r) => metricNumber(r, 'poe_budget_w')),
+  perUnitColumn('per_poe_port', 'Price per PoE out port', (r) => portsWhere(r, (p) => !!p.poe_class && p.poe_direction === 'out')),
+  perUnitColumn('per_10g_port', 'Price per 10 GbE+ port', (r) => portsWhere(r, (p) => p.max_speed_mbps >= 10000)),
+  perUnitColumn('per_gbps', 'Price per Gbps switched', (r) => metricNumber(r, 'switching_capacity_gbps')),
+  perUnitColumn('per_sqft', 'Price per ft² covered', (r) => metricNumber(r, 'coverage_sqft')),
 ]
 
 export const columnById = (id: string): Column | undefined => COLUMNS.find((c) => c.id === id)
@@ -135,9 +161,9 @@ export const columnById = (id: string): Column | undefined => COLUMNS.find((c) =
 export function defaultColumns(type: string): string[] {
   switch (type) {
     case 'Switches':
-      return ['fastest_port', 'ports', 'poe_budget_w', 'switching_capacity_gbps', 'rack_u']
+      return ['fastest_port', 'ports', 'poe_budget_w', 'per_poe_w', 'rack_u']
     case 'WiFi':
-      return ['wifi_generation', 'coverage_sqft', 'tx_6ghz', 'max_gain', 'power_draw_max_w']
+      return ['wifi_generation', 'coverage_sqft', 'per_sqft', 'tx_6ghz', 'max_gain']
     case 'Gateways':
       return ['fastest_port', 'ids_ips_throughput_mbps', 'power_draw_max_w', 'rack_u']
     default:
