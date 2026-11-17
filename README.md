@@ -71,6 +71,18 @@ coming soon, white where nothing was observed). A form at the top adds a product
 or by pasting its store URL. The product is checked against the live store
 first, so a typo is rejected with a message instead of being saved.
 
+Other pages (client-side routes; the server falls back to `index.html` for them):
+
+| Path | What |
+|---|---|
+| `/p/{region}/{slug}` | One product: variants and history, what is derived from its specification (ports, PoE, radios, rack, size), and the full specification with any overrides shown beside the published value |
+| `/find` | The product finder: pick a type, add requirements ("a 10 GbE port with PoE+++ out", "a 6 GHz radio", "PoE budget ≥ 200 W"), see matching products with current price and stock, sortable. Products whose specs don't say enough go under "Can't tell" instead of being dropped. The whole search is in the URL, so it can be bookmarked or shared |
+| `/status` | Collection status |
+
+The finder filters in the browser: it fetches `/v1/derived` and `/v1/products`
+once and matches locally (`ui/src/lib/requirements.ts`). The plan for what
+comes next is in [docs/ui-roadmap.md](docs/ui-roadmap.md).
+
 There is no login. Put it behind an authenticating proxy; the server only
 refuses cross-site posts.
 

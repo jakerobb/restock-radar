@@ -28,11 +28,19 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
           <Badge tone={tone}>{label}</Badge>
           {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
         </h2>
-        {product.techspecs_url && (
-          <a className="shrink-0 text-sm text-accent underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
-            Tech specs
-          </a>
-        )}
+        <div className="flex shrink-0 gap-3 text-sm">
+          {/* A merged group has no page of its own: each member has its own specification. */}
+          {!product.id.startsWith('collection:') && (
+            <a className="text-accent underline-offset-2 hover:underline" href={`/p/${encodeURIComponent(product.region)}/${encodeURIComponent(product.slug)}`}>
+              Details
+            </a>
+          )}
+          {product.techspecs_url && (
+            <a className="text-accent underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
+              Tech specs
+            </a>
+          )}
+        </div>
       </div>
       {history && (
         <div className="mb-1">

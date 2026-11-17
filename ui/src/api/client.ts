@@ -1,4 +1,4 @@
-import type { AddItemRequest, AddItemResult, HistoryResponse, ProductsResponse, StatusResponse } from './types'
+import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, ProductSpecsResponse, ProductsResponse, StatusResponse } from './types'
 
 /** An error response from the API; message is safe to show to the user. */
 export class ApiError extends Error {
@@ -27,6 +27,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const getProducts = () => request<ProductsResponse>('/v1/products')
 
 export const getStatus = () => request<StatusResponse>('/v1/status')
+
+export const getDerived = () => request<Derived[]>('/v1/derived')
+
+export const getProductSpecs = (region: string, slug: string) =>
+  request<ProductSpecsResponse>(`/v1/products/${encodeURIComponent(region)}/${encodeURIComponent(slug)}/specs`)
 
 export const getHistory = (days: number) => request<HistoryResponse>(`/v1/history?days=${days}`)
 

@@ -143,3 +143,177 @@ export interface StatusResponse {
   latest_event: string | null
   db_bytes: number | null
 }
+
+// ---- Specifications (src/internal/specs, GET /v1/derived and /v1/products/{region}/{slug}/specs) ----
+
+export interface Port {
+  label: string
+  /** "rj45", "sfp", "sfp+", "sfp28", "qsfp28", ... or "other". */
+  media: string
+  /** "data", "console", "mgmt", "sma" or "stacking". */
+  role: string
+  count: number
+  /** Zero when the store doesn't say. */
+  max_speed_mbps: number
+  speeds_mbps: number[]
+  /** "PoE", "PoE+", "PoE++" or "PoE+++"; empty for a port with no PoE. */
+  poe_class: string
+  /** "out" (powers what is plugged in), "in" (the device is powered through it), or empty. */
+  poe_direction: string
+  poe_inferred?: boolean
+  poe_watts?: number | null
+}
+
+export interface PoEScenario {
+  name: string
+  watts: number
+  /** The figure used as the device's budget. */
+  selected: boolean
+}
+
+export interface Radio {
+  /** "2.4 GHz", "5 GHz", "6 GHz", "60 GHz", "Bluetooth" or "SuperLink". */
+  band: string
+  /** "wifi", "wigig", "bluetooth" or "superlink". */
+  tech: string
+  antenna_gain_dbi: number | null
+  tx_power_dbm: number | null
+  tx_power_extended_dbm?: number | null
+  streams: number | null
+  max_rate_mbps: number | null
+  multi?: boolean
+  antenna_gain_raw?: string
+  tx_power_raw?: string
+  tx_power_note?: string
+  mimo_raw?: string
+}
+
+export interface Metric {
+  name: string
+  value: number
+  unit: string
+  /** Published as "N+". */
+  at_least: boolean
+  /** The text the number came from. */
+  raw: string
+}
+
+export interface Rack {
+  mountable: boolean
+  units: number
+  full_depth: boolean
+}
+
+export interface Dims {
+  min_mm: number
+  mid_mm: number
+  max_mm: number
+  round?: boolean
+  width_mm?: number | null
+  depth_mm?: number | null
+  height_mm?: number | null
+}
+
+/** Which kinds of fact could be derived at all; "not known" is not "none". */
+export interface Known {
+  ports: boolean
+  poe: boolean
+  radios: boolean
+  rack: boolean
+  dims: boolean
+}
+
+export interface SpecIssue {
+  area: string
+  label: string
+  value: string
+  problem: string
+}
+
+export interface OverriddenMetric {
+  name: string
+  published: Metric | null
+}
+
+export interface Overridden {
+  ports: boolean
+  poe_budget: boolean
+  radios: boolean
+  rack: boolean
+  dims: boolean
+  metrics: OverriddenMetric[]
+}
+
+export interface Derived {
+  region: string
+  product_id: string
+  slug: string
+  title: string
+  category: string
+  version: number
+  derived_at: string
+  ports: Port[]
+  poe_budget: PoEScenario[]
+  poe_max_class: string
+  radios: Radio[]
+  metrics: Metric[]
+  rack: Rack
+  dims: Dims
+  known: Known
+  issues: SpecIssue[]
+  overridden: Overridden
+}
+
+/** One entry of a product's effective specification. */
+export interface SpecEntry {
+  section_id: string
+  section: string
+  /** "Standard", or "Overview" for the store's grid summary (which repeats entries of other sections). */
+  section_type: string
+  feature_id: string
+  parent_id?: string
+  label: string
+  /** "text", "flag" or "group". */
+  kind: string
+  value?: string
+  note?: string
+  /** "published", "override" or "added". */
+  origin: string
+  /** What the store published, when an override replaced it. */
+  published_value?: string
+  override_id?: number
+  /** The store's published value has changed since the override was made. */
+  stale?: boolean
+}
+
+export interface SpecOverride {
+  id: number
+  region: string
+  slug: string
+  /** "set" or "hide". */
+  action: string
+  section: string
+  group: string
+  label: string
+  kind: string
+  value: string
+  note: string
+  source_url: string
+  reason: string
+  /** What the override does to the specification now: "overrides", "hides", "adds", "orphan" or "unknown_product". */
+  status: string
+  stale: boolean
+  published_now: string | null
+}
+
+export interface ProductSpecsResponse {
+  region: string
+  id: string
+  slug: string
+  title: string
+  category: string
+  specs: SpecEntry[]
+  overrides: SpecOverride[]
+  /** Null for a product with nothing to derive from. */
+  derived: Derived | null
+}
