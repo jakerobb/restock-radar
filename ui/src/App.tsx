@@ -60,6 +60,9 @@ export default function App() {
       <div className="flex shrink-0 items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Restock Radar</h1>
         <div className="flex items-center gap-2">
+          <a href="/find" className="text-sm text-muted underline">
+            Finder
+          </a>
           <a href="/status" className="text-sm text-muted underline">
             Status
           </a>

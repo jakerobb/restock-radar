@@ -1,4 +1,4 @@
-import type { HistoryResponse, Product, ProductsResponse, Variant } from '../api/types'
+import type { Derived, HistoryResponse, Port, Product, ProductsResponse, Variant } from '../api/types'
 
 export function variant(overrides: Partial<Variant> = {}): Variant {
   return {
@@ -47,6 +47,44 @@ export function historyResponse(overrides: Partial<HistoryResponse> = {}): Histo
     since: new Date(until - 30 * 86_400_000).toISOString(),
     until: new Date(until).toISOString(),
     variants: [],
+    ...overrides,
+  }
+}
+
+export function port(overrides: Partial<Port> = {}): Port {
+  return {
+    label: '1 GbE RJ45',
+    media: 'rj45',
+    role: 'data',
+    count: 8,
+    max_speed_mbps: 1000,
+    speeds_mbps: [1000, 100],
+    poe_class: '',
+    poe_direction: '',
+    ...overrides,
+  }
+}
+
+/** A product's derived specs with nothing known, unless the overrides say so. */
+export function derived(overrides: Partial<Derived> = {}): Derived {
+  return {
+    region: 'us',
+    product_id: 'p1',
+    slug: 'widget',
+    title: 'Widget',
+    category: 'switching-professional',
+    version: 1,
+    derived_at: new Date().toISOString(),
+    ports: [],
+    poe_budget: [],
+    poe_max_class: '',
+    radios: [],
+    metrics: [],
+    rack: { mountable: false, units: 0, full_depth: false },
+    dims: { min_mm: 0, mid_mm: 0, max_mm: 0 },
+    known: { ports: false, poe: false, radios: false, rack: false, dims: false },
+    issues: [],
+    overridden: { ports: false, poe_budget: false, radios: false, rack: false, dims: false, metrics: [] },
     ...overrides,
   }
 }

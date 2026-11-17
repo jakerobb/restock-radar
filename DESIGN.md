@@ -335,7 +335,9 @@ Removing products from the UI, per-user subscriptions, device tokens, APNs/FCM, 
 (jitter, rate limits, device attestation), Live Activities, trend analysis,
 and regions beyond the US. The event history already stores what trend
 analysis would need. The March design covers those ideas and can be mined
-when the apps start.
+when the apps start. Per-user wish lists and saved-search alerts are planned
+separately in [docs/ui-roadmap.md](docs/ui-roadmap.md), along with the UI,
+product finder and access-control design.
 
 ## Open questions
 

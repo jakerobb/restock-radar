@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import { createAppRouter } from '../router'
 
 /** Renders with a fresh query client that doesn't retry, so failures show up at once. */
 export function renderWithClient(ui: ReactElement) {
@@ -20,4 +22,16 @@ export function stubFetch(routes: Record<string, { status?: number; body: unknow
   })
   vi.stubGlobal('fetch', fn)
   return calls
+}
+
+/** Renders the whole app at a path (with its query string), returning the router so a test can read the URL. */
+export function renderRoute(path: string) {
+  const router = createAppRouter(createMemoryHistory({ initialEntries: [path] }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const utils = render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  return { router, ...utils }
 }

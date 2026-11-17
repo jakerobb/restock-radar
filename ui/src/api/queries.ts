@@ -1,9 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addItem, getHistory, getProducts, getStatus } from './client'
+import { addItem, getDerived, getHistory, getProductSpecs, getProducts, getStatus } from './client'
 
 const productsKey = ['products'] as const
 
-/** How often the page re-reads state; the server itself polls every 20 minutes. */
+/** How often the page re-reads state; the server itself polls every 5 minutes. */
 const REFRESH_MS = 30_000
 
 export function useProducts() {
@@ -33,4 +33,13 @@ export function useAddProduct() {
     mutationFn: addItem,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: productsKey }),
   })
+}
+
+/** Every product's derived specs. Specs change rarely (the server re-reads them weekly), so this is fetched once and kept. */
+export function useDerived() {
+  return useQuery({ queryKey: ['derived'], queryFn: getDerived, staleTime: 10 * 60_000 })
+}
+
+export function useProductSpecs(region: string, slug: string) {
+  return useQuery({ queryKey: ['specs', region, slug], queryFn: () => getProductSpecs(region, slug), staleTime: 60_000 })
 }
