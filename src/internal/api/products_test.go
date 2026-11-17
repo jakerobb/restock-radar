@@ -22,6 +22,15 @@ type fakePoller struct {
 	res *poller.AddResult
 	err error
 	got addItemRequest
+
+	refreshRes *poller.RefreshResult
+	refreshErr error
+	refreshed  []string
+}
+
+func (f *fakePoller) Refresh(_ context.Context, region, slug string) (*poller.RefreshResult, error) {
+	f.refreshed = append(f.refreshed, region+"/"+slug)
+	return f.refreshRes, f.refreshErr
 }
 
 func (f *fakePoller) LastCycle() time.Time { return time.Time{} }
@@ -313,5 +322,87 @@ func TestStatus(t *testing.T) {
 	}
 	if got.Categories == nil || got.Regions["us"] != 2 || got.Specs.Without != 2 || got.TechSpecsURL.Without != 2 {
 		t.Errorf("breakdowns wrong: %+v", got)
+	}
+}
+
+func TestRefreshProduct(t *testing.T) {
+	srv, fp := newTestServer(t)
+	fp.refreshRes = &poller.RefreshResult{Region: "us", Slug: "zeta", Title: "Zeta Cam", Variants: 2, SpecEntries: 41, SpecsChanged: true, Events: 1}
+
+	rec := request(srv, "POST", "/v1/products/us/zeta/refresh", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got refreshResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := (refreshResponse{Region: "us", Slug: "zeta", Title: "Zeta Cam", Variants: 2, SpecEntries: 41, SpecsChanged: true, Events: 1}); got != want {
+		t.Errorf("response = %+v, want %+v", got, want)
+	}
+	if len(fp.refreshed) != 1 || fp.refreshed[0] != "us/zeta" {
+		t.Errorf("refreshed %v", fp.refreshed)
+	}
+}
+
+func TestRefreshProductErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"not tracked", poller.ErrNotTracked, http.StatusNotFound},
+		{"user error", &poller.UserError{Msg: "the us store no longer has it"}, http.StatusBadRequest},
+		{"store trouble", errors.New("dial tcp: boom"), http.StatusBadGateway},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, fp := newTestServer(t)
+			fp.refreshErr = c.err
+			rec := request(srv, "POST", "/v1/products/us/zeta/refresh", "", nil)
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.want, rec.Body)
+			}
+			// Internal detail (the dial error) must not reach the client.
+			if strings.Contains(rec.Body.String(), "boom") {
+				t.Errorf("leaked internal error: %s", rec.Body)
+			}
+		})
+	}
+}
+
+func TestRefreshProductRefusesCrossSiteRequests(t *testing.T) {
+	srv, fp := newTestServer(t)
+	for _, h := range []map[string]string{
+		{"Origin": "https://evil.example"},
+		{"Sec-Fetch-Site": "cross-site"},
+	} {
+		rec := request(srv, "POST", "/v1/products/us/zeta/refresh", "", h)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%v: status = %d, want 403", h, rec.Code)
+		}
+	}
+	if len(fp.refreshed) != 0 {
+		t.Errorf("a cross-site request reached the poller: %v", fp.refreshed)
+	}
+}
+
+func TestRefreshProductIsPostOnlyAndRateLimited(t *testing.T) {
+	srv, fp := newTestServer(t)
+	fp.refreshRes = &poller.RefreshResult{Region: "us", Slug: "zeta"}
+	if rec := request(srv, "GET", "/v1/products/us/zeta/refresh", "", nil); rec.Code == http.StatusOK {
+		t.Errorf("GET refreshed a product")
+	}
+	var limited bool
+	for range refreshesPerWindow + 1 {
+		if request(srv, "POST", "/v1/products/us/zeta/refresh", "", nil).Code == http.StatusTooManyRequests {
+			limited = true
+		}
+	}
+	if !limited {
+		t.Errorf("%d refreshes in a minute were all allowed", refreshesPerWindow+1)
+	}
+	if len(fp.refreshed) > refreshesPerWindow {
+		t.Errorf("%d refreshes reached the poller, limit %d", len(fp.refreshed), refreshesPerWindow)
 	}
 }

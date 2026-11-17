@@ -102,7 +102,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		key := [2]string{v.Region, v.ProductID}
 		i, ok := index[key]
 		if !ok {
-			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, ShortTitle: v.ProductShortTitle, Group: v.ProductGroup, TechSpecsURL: v.ProductTechSpecsURL, Variants: []variantJSON{}}
+			p := productJSON{Region: v.Region, ID: v.ProductID, Slug: v.ProductSlug, Title: v.ProductTitle, Type: productType(v.ProductCategory, v.ProductSlug), Category: v.ProductCategory, Tags: v.ProductTags, Collection: v.ProductCollection, ShortTitle: v.ProductShortTitle, Group: v.ProductGroup, TechSpecsURL: v.ProductTechSpecsURL, Variants: []variantJSON{}}
 			if reg, ok := srv.cfg.RegionByID(v.Region); ok {
 				p.URL = fmt.Sprintf("%s/%s/products/%s", reg.BaseURL, reg.Path, url.PathEscape(v.ProductSlug))
 			}
@@ -203,4 +203,50 @@ func sameOrigin(r *http.Request) bool {
 		return site == "same-origin" || site == "none"
 	}
 	return true
+}
+
+// refreshResponse is the body of POST /v1/products/{region}/{slug}/refresh.
+type refreshResponse struct {
+	Region       string `json:"region"`
+	Slug         string `json:"slug"`
+	Title        string `json:"title"`
+	Variants     int    `json:"variants"`
+	SpecEntries  int    `json:"spec_entries"`
+	SpecsChanged bool   `json:"specs_changed"`
+	Events       int    `json:"events"`
+}
+
+// handleRefreshProduct fetches one tracked product from the store now, instead
+// of waiting for the next scheduled read. The request has no body, so a browser
+// could be made to send it from another site; the Origin check is what stops that.
+func (srv *Server) handleRefreshProduct(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-site request refused"})
+		return
+	}
+	if ok, wait := srv.refreshes.allow(); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many refreshes in the last minute; wait a moment and try again"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), addTimeout)
+	defer cancel()
+	region, slug := r.PathValue("region"), r.PathValue("slug")
+	res, err := srv.poller.Refresh(ctx, region, slug)
+	var ue *poller.UserError
+	switch {
+	case errors.Is(err, poller.ErrNotTracked):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown product"})
+	case errors.As(err, &ue):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": ue.Msg})
+	case err != nil:
+		slog.Error("failed to refresh product", "region", region, "slug", slug, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "couldn't refresh that product from the store; try again in a moment"})
+	default:
+		writeJSON(w, http.StatusOK, refreshResponse{
+			Region: res.Region, Slug: res.Slug, Title: res.Title, Variants: res.Variants,
+			SpecEntries: res.SpecEntries, SpecsChanged: res.SpecsChanged, Events: res.Events,
+		})
+	}
 }
