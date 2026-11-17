@@ -1,5 +1,6 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
+import { POE_CLASSES } from './requirements'
 
 /** What a check found. 'info' is a fact with nothing to judge it against. */
 export type CheckVerdict = 'ok' | 'bad' | 'unknown' | 'info'
@@ -26,11 +27,50 @@ const dataPorts = (d: Derived) => d.ports.filter((p) => p.role === 'data')
 /** Ports that take power in (an AP, a camera) and ports that give it out (a PoE switch). */
 const poePortsIn = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== '' && p.poe_direction === 'in')
 const poePortsOut = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== '' && p.poe_direction === 'out')
-const count = (ports: { count: number }[]) => ports.reduce((n, p) => n + p.count, 0)
 const list = (ls: DerivedLine[]) => ls.map(name).join(', ')
 
+const rank = (c: string) => POE_CLASSES.indexOf(c as (typeof POE_CLASSES)[number]) + 1
+const lowest = (classes: string[]): string => classes.reduce((a, b) => (rank(b) < rank(a) ? b : a))
+
+/**
+ * The PoE class a product needs to be powered, or null when it isn't a PoE-powered device. The ports say
+ * so when the store marks one as taking PoE in. Many products (access points, mostly) give no such port
+ * and only say "Power Method: PoE++", so that counts too, unless another way of powering it is listed
+ * (an AC adapter), since then it needs no PoE at all.
+ */
+function poeNeed(d: Derived): string | null {
+  const inPorts = d.known.ports ? poePortsIn(d) : []
+  if (inPorts.length > 0) return lowest(inPorts.map((p) => p.poe_class))
+  const power = d.power ?? []
+  const onlyPoE = power.length > 0 && power.every((s) => s.kind === 'poe' || s.kind === 'passive_poe')
+  const classes = power.filter((s) => s.kind === 'poe' && s.poe_class !== '').map((s) => s.poe_class)
+  return onlyPoE && classes.length > 0 ? lowest(classes) : null
+}
+
+/** "6 PoE++ and 2 PoE", highest class first. */
+const byClass = (counts: Map<string, number>): string =>
+  [...counts]
+    .sort((a, b) => rank(b[0]) - rank(a[0]))
+    .map(([c, n]) => `${n} ${c}`)
+    .join(' and ')
+
+/** Fits devices to ports: each device takes the lowest class of port that can power it. Returns how many have no port. */
+function unplaced(need: Map<string, number>, have: Map<string, number>): number {
+  const left = new Map(have)
+  let lost = 0
+  for (const [cls, n] of [...need].sort((a, b) => rank(b[0]) - rank(a[0]))) {
+    for (let i = 0; i < n; i++) {
+      const fit = [...left].filter(([c, k]) => rank(c) >= rank(cls) && k > 0).sort((a, b) => rank(a[0]) - rank(b[0]))[0]
+      if (fit) left.set(fit[0], fit[1] - 1)
+      else lost++
+    }
+  }
+  return lost
+}
+
 function poeCheck(lines: DerivedLine[]): PlanCheck[] {
-  const consumers = lines.filter((l) => l.derived?.known.ports && poePortsIn(l.derived).length > 0)
+  const needs = new Map(lines.map((l) => [l, l.derived ? poeNeed(l.derived) : null] as const))
+  const consumers = lines.filter((l) => needs.get(l) !== null && needs.get(l) !== undefined)
   const suppliers = lines.filter((l) => l.derived?.known.ports && poePortsOut(l.derived!).length > 0)
   if (consumers.length === 0 && suppliers.length === 0) return []
   const qty = (l: DerivedLine) => l.view.line.qty
@@ -40,15 +80,19 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   const demand = consumers.reduce((n, l) => n + qty(l) * (metric(l.derived, 'power_draw_max_w') ?? 0), 0)
   const supply = suppliers.reduce((n, l) => n + qty(l) * (metric(l.derived, 'poe_budget_w') ?? 0), 0)
   const devices = consumers.reduce((n, l) => n + qty(l), 0)
-  const sockets = suppliers.reduce((n, l) => n + qty(l) * count(poePortsOut(l.derived!)), 0)
+  const need = new Map<string, number>()
+  for (const l of consumers) need.set(needs.get(l)!, (need.get(needs.get(l)!) ?? 0) + qty(l))
+  const have = new Map<string, number>()
+  for (const l of suppliers) for (const p of poePortsOut(l.derived!)) have.set(p.poe_class, (have.get(p.poe_class) ?? 0) + qty(l) * p.count)
+  const sockets = [...have.values()].reduce((a, b) => a + b, 0)
   const out: PlanCheck[] = []
 
   if (suppliers.length === 0) {
-    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W; nothing in the plan supplies PoE.` })
+    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
     return out
   }
   if (consumers.length === 0) {
-    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${supply} W of PoE budget and ${sockets} PoE ports, and no PoE-powered device in the plan yet.` })
+    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${supply} W of PoE budget and ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}, and no PoE-powered device in the plan yet.` })
     return out
   }
 
@@ -59,12 +103,13 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     out.push({ id: 'poe-power', label: 'PoE power', verdict: 'unknown', text: `Can't tell: ${why}. Known so far: ${demand} W drawn, ${supply} W supplied.` })
   } else out.push({ id: 'poe-power', label: 'PoE power', verdict: demand <= supply ? 'ok' : 'bad', text: `Devices draw up to ${demand} W of the ${supply} W supplied.` })
 
-  // Ports.
+  // Ports: a device needs a port of at least its class.
+  const lost = unplaced(need, have)
   out.push({
     id: 'poe-ports',
     label: 'PoE ports',
-    verdict: devices <= sockets ? 'ok' : 'bad',
-    text: `${devices} PoE-powered ${devices === 1 ? 'device' : 'devices'} for ${sockets} PoE ${sockets === 1 ? 'port' : 'ports'}.`,
+    verdict: lost === 0 ? 'ok' : 'bad',
+    text: `${byClass(need)} ${devices === 1 ? 'device' : 'devices'} for ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}${lost > 0 ? `: ${lost} can't be given a port of a high enough class` : ''}.`,
   })
   return out
 }

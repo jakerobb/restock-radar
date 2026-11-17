@@ -124,7 +124,7 @@ describe('PlanPage', () => {
     renderRoute('/plan')
     const checks = await screen.findByLabelText('Checks')
     expect(checks).toHaveTextContent('Devices can draw up to 120 W, over the 100 W the plan supplies.')
-    expect(checks).toHaveTextContent('6 PoE-powered devices for 8 PoE ports.')
+    expect(checks).toHaveTextContent('6 PoE+ devices for 8 PoE+ ports.')
   })
 
   it('says so when the plan is empty', async () => {
