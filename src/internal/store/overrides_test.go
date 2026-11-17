@@ -302,7 +302,7 @@ func TestDeletingAnOverrideRestoresThePublishedValue(t *testing.T) {
 	applyReal(t, s, "ucg-fiber", now)
 	st, _ := s.UpsertOverride(ctx, idsOverride("8 Gbps"), now)
 
-	ok, err := s.DeleteOverride(ctx, st.ID, now)
+	ok, err := s.DeleteOverride(ctx, st.ID, "tester", now)
 	if err != nil || !ok {
 		t.Fatalf("delete = %v (%v)", ok, err)
 	}
@@ -316,10 +316,10 @@ func TestDeletingAnOverrideRestoresThePublishedValue(t *testing.T) {
 	if got, _ := s.OverrideByID(ctx, st.ID); got != nil {
 		t.Errorf("still there: %+v", got)
 	}
-	if ok, err := s.DeleteOverride(ctx, st.ID, now); err != nil || ok {
+	if ok, err := s.DeleteOverride(ctx, st.ID, "tester", now); err != nil || ok {
 		t.Errorf("deleting again = %v (%v)", ok, err)
 	}
-	if ok, err := s.DeleteOverride(ctx, 9999, now); err != nil || ok {
+	if ok, err := s.DeleteOverride(ctx, 9999, "tester", now); err != nil || ok {
 		t.Errorf("deleting nothing = %v (%v)", ok, err)
 	}
 }
@@ -487,5 +487,124 @@ func TestProductBySlug(t *testing.T) {
 	}
 	if p, err := s.ProductBySlug(ctx, "us", "nope"); err != nil || p != nil {
 		t.Errorf("product = %+v (%v)", p, err)
+	}
+}
+
+func by(o specs.Override, actor string) specs.Override {
+	o.UpdatedBy = actor
+	return o
+}
+
+func TestOverridesRecordWhoMadeAndChangedThem(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Now()
+	applyReal(t, s, "ucg-fiber", t0)
+
+	first, err := s.UpsertOverride(ctx, by(idsOverride("8 Gbps"), "kim"), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.CreatedBy != "kim" || first.UpdatedBy != "kim" {
+		t.Errorf("after creating: %q / %q", first.CreatedBy, first.UpdatedBy)
+	}
+	second, err := s.UpsertOverride(ctx, by(idsOverride("9 Gbps"), "lee"), t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID || second.CreatedBy != "kim" || second.UpdatedBy != "lee" {
+		t.Errorf("after lee changed it: id %d, %q / %q", second.ID, second.CreatedBy, second.UpdatedBy)
+	}
+	// A client can't claim to have created it by saying so.
+	forged := idsOverride("9 Gbps")
+	forged.CreatedBy, forged.UpdatedBy = "mallory", "lee"
+	third, err := s.UpsertOverride(ctx, forged, t0.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.CreatedBy != "kim" {
+		t.Errorf("created_by = %q", third.CreatedBy)
+	}
+}
+
+func TestOverrideHistoryKeepsEveryChangeAndOutlivesTheOverride(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Now().Truncate(time.Second)
+	applyReal(t, s, "ucg-fiber", t0)
+
+	created, _ := s.UpsertOverride(ctx, by(idsOverride("8 Gbps"), "kim"), t0)
+	if _, err := s.UpsertOverride(ctx, by(idsOverride("9 Gbps"), "lee"), t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DeleteOverride(ctx, created.ID, "kim", t0.Add(2*time.Minute)); err != nil || !ok {
+		t.Fatalf("delete: %v %v", ok, err)
+	}
+
+	h, err := s.OverrideHistory(ctx, "us", "ucg-fiber", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h) != 3 {
+		t.Fatalf("history has %d entries, want 3: %+v", len(h), h)
+	}
+	// Newest first.
+	for i, want := range []struct{ change, actor string }{{"delete", "kim"}, {"update", "lee"}, {"create", "kim"}} {
+		if h[i].Change != want.change || h[i].Actor != want.actor || h[i].OverrideID != created.ID || h[i].Slug != "ucg-fiber" {
+			t.Errorf("entry %d = %+v, want %+v", i, h[i], want)
+		}
+	}
+	if string(h[2].Before) != "null" || !strings.Contains(string(h[2].After), `"value":"8 Gbps"`) {
+		t.Errorf("creation: before %s after %s", h[2].Before, h[2].After)
+	}
+	if !strings.Contains(string(h[1].Before), `"value":"8 Gbps"`) || !strings.Contains(string(h[1].After), `"value":"9 Gbps"`) {
+		t.Errorf("update: before %s after %s", h[1].Before, h[1].After)
+	}
+	if !strings.Contains(string(h[0].Before), `"value":"9 Gbps"`) || string(h[0].After) != "null" {
+		t.Errorf("deletion: before %s after %s", h[0].Before, h[0].After)
+	}
+	// With the override gone, what it said is still on record.
+	if o, _ := s.OverrideByID(ctx, created.ID); o != nil {
+		t.Fatal("the override is still there")
+	}
+
+	if h, _ := s.OverrideHistory(ctx, "us", "ucg-fiber", 2); len(h) != 2 || h[0].Change != "delete" {
+		t.Errorf("limit 2 gave %+v", h)
+	}
+	if h, _ := s.OverrideHistory(ctx, "us", "other-product", 0); len(h) != 0 {
+		t.Errorf("another product's history = %+v", h)
+	}
+	if h, _ := s.OverrideHistory(ctx, "", "", 0); len(h) != 3 {
+		t.Errorf("unfiltered history = %d entries", len(h))
+	}
+}
+
+func TestSavingAnOverrideAgainChangesNothingOnRecord(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	applyReal(t, s, "ucg-fiber", now)
+	if _, err := s.UpsertOverride(ctx, by(idsOverride("8 Gbps"), "kim"), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertOverride(ctx, by(idsOverride("8 Gbps"), "lee"), now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := s.OverrideHistory(ctx, "", "", 0); len(h) != 1 {
+		t.Errorf("a save with nothing new made %d history entries", len(h))
+	}
+}
+
+func TestARefusedOverrideLeavesNoHistory(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	applyReal(t, s, "ucg-fiber", now)
+	bad := idsOverride("")
+	if _, err := s.UpsertOverride(ctx, by(bad, "kim"), now); err == nil {
+		t.Fatal("accepted")
+	}
+	if h, _ := s.OverrideHistory(ctx, "", "", 0); len(h) != 0 {
+		t.Errorf("history = %+v", h)
 	}
 }

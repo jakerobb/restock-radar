@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -103,24 +104,40 @@ func (s *Store) UpsertOverride(ctx context.Context, o specs.Override, now time.T
 		}
 	}
 
+	const targetWhere = `WHERE region = ? AND slug = ? AND lower(section) = lower(?) AND lower(group_label) = lower(?) AND lower(label) = lower(?)`
+	before, err := queryOverrides(ctx, tx, targetWhere, o.Region, o.Slug, o.Section, o.Group, o.Label)
+	if err != nil {
+		return OverrideStatus{}, err
+	}
+
+	actor := strings.TrimSpace(o.UpdatedBy)
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO spec_overrides (region, slug, action, section, group_label, label, kind, value, note, source_url, reason, published_value, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO spec_overrides (region, slug, action, section, group_label, label, kind, value, note, source_url, reason, published_value, created_at, updated_at, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (region, slug, lower(section), lower(group_label), lower(label)) DO UPDATE SET
 			action = excluded.action, section = excluded.section, group_label = excluded.group_label, label = excluded.label,
 			kind = excluded.kind, value = excluded.value, note = excluded.note, source_url = excluded.source_url, reason = excluded.reason,
-			published_value = excluded.published_value, updated_at = excluded.updated_at`,
+			published_value = excluded.published_value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
 		o.Region, o.Slug, o.Action, o.Section, o.Group, o.Label, o.Kind, o.Value, strings.TrimSpace(o.Note),
-		strings.TrimSpace(o.SourceURL), strings.TrimSpace(o.Reason), published, ts(now), ts(now))
+		strings.TrimSpace(o.SourceURL), strings.TrimSpace(o.Reason), published, ts(now), ts(now), actor, actor)
 	if err != nil {
 		return OverrideStatus{}, fmt.Errorf("storing override: %w", err)
 	}
 	if err := rederiveTx(ctx, tx, o.Region, productID, now); err != nil {
 		return OverrideStatus{}, err
 	}
-	var id int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM spec_overrides WHERE region = ? AND slug = ? AND lower(section) = lower(?) AND lower(group_label) = lower(?) AND lower(label) = lower(?)`,
-		o.Region, o.Slug, o.Section, o.Group, o.Label).Scan(&id); err != nil {
+	after, err := queryOverrides(ctx, tx, targetWhere, o.Region, o.Slug, o.Section, o.Group, o.Label)
+	if err != nil || len(after) != 1 {
+		return OverrideStatus{}, fmt.Errorf("reading back the stored override: %v (%d rows)", err, len(after))
+	}
+	id := after[0].ID
+	switch {
+	case len(before) == 0:
+		err = recordChange(ctx, tx, now, actor, changeCreate, nil, &after[0])
+	case differs(before[0], after[0]):
+		err = recordChange(ctx, tx, now, actor, changeUpdate, &before[0], &after[0])
+	}
+	if err != nil {
 		return OverrideStatus{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -133,9 +150,9 @@ func (s *Store) UpsertOverride(ctx context.Context, o specs.Override, now time.T
 	return *got, nil
 }
 
-// DeleteOverride removes an override and derives its product's facts again. It
-// reports whether there was one.
-func (s *Store) DeleteOverride(ctx context.Context, id int64, now time.Time) (bool, error) {
+// DeleteOverride removes an override, on behalf of actor, and derives its
+// product's facts again. It reports whether there was one.
+func (s *Store) DeleteOverride(ctx context.Context, id int64, actor string, now time.Time) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -147,6 +164,9 @@ func (s *Store) DeleteOverride(ctx context.Context, id int64, now time.Time) (bo
 	}
 	o := ovs[0]
 	if _, err := tx.ExecContext(ctx, `DELETE FROM spec_overrides WHERE id = ?`, id); err != nil {
+		return false, err
+	}
+	if err := recordChange(ctx, tx, now, strings.TrimSpace(actor), changeDelete, &o, nil); err != nil {
 		return false, err
 	}
 	var productID string
@@ -238,4 +258,98 @@ func (s *Store) statuses(ctx context.Context, ovs []specs.Override) ([]OverrideS
 		out[i] = st
 	}
 	return out, nil
+}
+
+const (
+	changeCreate = "create"
+	changeUpdate = "update"
+	changeDelete = "delete"
+)
+
+// differs reports whether two versions of an override say different things (as
+// opposed to merely having been saved again, or against a new published value).
+func differs(a, b specs.Override) bool {
+	return a.Action != b.Action || a.Kind != b.Kind || a.Value != b.Value || a.Note != b.Note || a.SourceURL != b.SourceURL || a.Reason != b.Reason
+}
+
+// recordChange appends to the history of overrides. The history is only ever
+// added to.
+func recordChange(ctx context.Context, tx *sql.Tx, now time.Time, actor, change string, before, after *specs.Override) error {
+	enc := func(o *specs.Override) (any, error) {
+		if o == nil {
+			return nil, nil
+		}
+		b, err := json.Marshal(o)
+		return string(b), err
+	}
+	b, err := enc(before)
+	if err != nil {
+		return err
+	}
+	a, err := enc(after)
+	if err != nil {
+		return err
+	}
+	ref := after
+	if ref == nil {
+		ref = before
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO spec_override_history (at, actor, change, override_id, region, slug, before, after)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, ts(now), actor, change, ref.ID, ref.Region, ref.Slug, b, a); err != nil {
+		return fmt.Errorf("recording override change: %w", err)
+	}
+	return nil
+}
+
+// OverrideChange is one entry in the history of overrides.
+type OverrideChange struct {
+	ID    int64     `json:"id"`
+	At    time.Time `json:"at"`
+	Actor string    `json:"actor"`
+	// Change is "create", "update" or "delete".
+	Change     string `json:"change"`
+	OverrideID int64  `json:"override_id"`
+	Region     string `json:"region"`
+	Slug       string `json:"slug"`
+	// Before and After are the override as it was and as it became; null for a
+	// creation and a deletion respectively.
+	Before json.RawMessage `json:"before"`
+	After  json.RawMessage `json:"after"`
+}
+
+// OverrideHistory lists changes to overrides, newest first, up to limit. An
+// empty region or slug matches any.
+func (s *Store) OverrideHistory(ctx context.Context, region, slug string, limit int) ([]OverrideChange, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, at, actor, change, override_id, region, slug, before, after
+		FROM spec_override_history
+		WHERE (? = '' OR region = ?) AND (? = '' OR slug = ?)
+		ORDER BY id DESC LIMIT ?`, region, region, slug, slug, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverrideChange{}
+	for rows.Next() {
+		var c OverrideChange
+		var at string
+		var before, after sql.NullString
+		if err := rows.Scan(&c.ID, &at, &c.Actor, &c.Change, &c.OverrideID, &c.Region, &c.Slug, &before, &after); err != nil {
+			return nil, err
+		}
+		c.At, _ = time.Parse(time.RFC3339, at)
+		c.Before, c.After = json.RawMessage("null"), json.RawMessage("null")
+		if before.Valid {
+			c.Before = json.RawMessage(before.String)
+		}
+		if after.Valid {
+			c.After = json.RawMessage(after.String)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

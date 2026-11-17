@@ -16,7 +16,7 @@ import (
 
 // Version identifies the derivation. A product derived with an older one is
 // derived again at startup.
-const Version = 1
+const Version = 2
 
 var (
 	tagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)

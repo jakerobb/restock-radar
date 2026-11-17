@@ -60,6 +60,10 @@ type Override struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// CreatedBy and UpdatedBy say who made and last changed the override (see
+	// auth.Principal.Actor). When storing one, UpdatedBy is the person doing it.
+	CreatedBy string `json:"created_by,omitempty"`
+	UpdatedBy string `json:"updated_by,omitempty"`
 }
 
 // Effective is a specification entry after overrides: what the rest of the

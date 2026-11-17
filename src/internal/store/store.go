@@ -265,6 +265,25 @@ var migrations = []string{
 		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
 	);
 	CREATE INDEX product_metrics_name ON product_metrics (name, value);`,
+	// Who changed an override, and an append-only record of every change, so
+	// corrections can be reviewed and undone. A history row says what the override
+	// looked like before and after (as JSON; null before a creation and after a
+	// deletion) and is not tied to the override by a foreign key, since the
+	// override may be gone.
+	`ALTER TABLE spec_overrides ADD COLUMN created_by TEXT NOT NULL DEFAULT '';
+	ALTER TABLE spec_overrides ADD COLUMN updated_by TEXT NOT NULL DEFAULT '';
+	CREATE TABLE spec_override_history (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		at          TEXT NOT NULL,
+		actor       TEXT NOT NULL,
+		change      TEXT NOT NULL,
+		override_id INTEGER NOT NULL,
+		region      TEXT NOT NULL,
+		slug        TEXT NOT NULL,
+		before      TEXT,
+		after       TEXT
+	);
+	CREATE INDEX spec_override_history_product ON spec_override_history (region, slug, id);`,
 }
 
 type Store struct {

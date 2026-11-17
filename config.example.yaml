@@ -16,6 +16,23 @@ db_path: /data/restock-radar.db
 # backup_interval: 24h
 # backup_keep: 14
 
+# Who may change things (add products, correct specs, refresh a product). By
+# default nobody is asked, which suits a deployment only you can reach. Behind an
+# authenticating proxy (Authelia, oauth2-proxy, ...), have the service believe the
+# identity it forwards; see "Access control" in the README. Required if the site is
+# reachable by anyone else (`public: true` is refused in the default mode).
+# auth:
+#   mode: proxy                  # open (default) | proxy
+#   public: true
+#   trusted_proxies: ["10.244.0.0/16"]   # networks whose requests may carry identity headers
+#   # user_header: Remote-User            # these are Authelia's names, and the defaults
+#   # name_header: Remote-Name
+#   # email_header: Remote-Email
+#   # groups_header: Remote-Groups
+#   roles:                       # proxy groups that hold each role
+#     admin: [admins]            # everything an editor may do, plus adding products
+#     editor: [editors]          # correct specs, refresh a product
+
 ntfy:
   url: https://ntfy.example.com
   topic: restock-radar

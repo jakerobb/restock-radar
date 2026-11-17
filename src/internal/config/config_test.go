@@ -123,3 +123,66 @@ backup_keep: 3
 		}
 	}
 }
+
+func TestAuthDefaultsToOpen(t *testing.T) {
+	cfg, err := load(t, `ntfy: {url: "https://n", topic: t}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.Mode != AuthModeOpen || cfg.Auth.Public {
+		t.Errorf("auth = %+v", cfg.Auth)
+	}
+}
+
+func TestAuthProxyMode(t *testing.T) {
+	cfg, err := load(t, `
+ntfy: {url: "https://n", topic: t}
+auth:
+  mode: proxy
+  public: true
+  trusted_proxies: ["10.244.0.0/16", "192.168.1.10", "fd00::/8"]
+  roles:
+    admin: [admins]
+    editor: [editors, helpers]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Auth
+	if len(a.TrustedPrefixes) != 3 || a.TrustedPrefixes[0].String() != "10.244.0.0/16" || a.TrustedPrefixes[1].String() != "192.168.1.10/32" {
+		t.Errorf("prefixes = %v", a.TrustedPrefixes)
+	}
+	if a.UserHeader != "Remote-User" || a.NameHeader != "Remote-Name" || a.EmailHeader != "Remote-Email" || a.GroupsHeader != "Remote-Groups" {
+		t.Errorf("header defaults: %+v", a)
+	}
+	if len(a.Roles["editor"]) != 2 {
+		t.Errorf("roles = %v", a.Roles)
+	}
+
+	cfg, err = load(t, `
+ntfy: {url: "https://n", topic: t}
+auth: {mode: proxy, trusted_proxies: ["10.0.0.0/8"], user_header: X-Forwarded-User}
+`)
+	if err != nil || cfg.Auth.UserHeader != "X-Forwarded-User" {
+		t.Errorf("custom header: %v %+v", err, cfg.Auth)
+	}
+}
+
+func TestAuthValidationErrors(t *testing.T) {
+	base := `ntfy: {url: "https://n", topic: t}` + "\n"
+	cases := map[string]string{
+		"public but open":       "auth: {public: true}",
+		"unknown mode":          "auth: {mode: magic}",
+		"proxy without proxies": "auth: {mode: proxy}",
+		"bad network":           "auth: {mode: proxy, trusted_proxies: [\"nowhere\"]}",
+		"trust everything (v4)": "auth: {mode: proxy, trusted_proxies: [\"0.0.0.0/0\"]}",
+		"trust everything (v6)": "auth: {mode: proxy, trusted_proxies: [\"::/0\"]}",
+		"unknown role":          "auth: {mode: proxy, trusted_proxies: [\"10.0.0.0/8\"], roles: {root: [x]}}",
+		"empty group":           "auth: {mode: proxy, trusted_proxies: [\"10.0.0.0/8\"], roles: {admin: [\"\"]}}",
+	}
+	for name, block := range cases {
+		if _, err := load(t, base+block); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

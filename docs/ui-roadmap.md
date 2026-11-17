@@ -1,6 +1,6 @@
 # UI, product finder, and system builder: plan
 
-Status: phases 1 and 2 are started: the router, product pages and the finder (spec table, requirement chips, URL state, three-outcome matching) exist. Everything after that is still plan. The backend half (raw specs,
+Status: built so far are the router, product pages, the finder (spec table, requirement chips, URL state, three-outcome matching), the on-demand product refresh, AP coverage as a derived metric, the access-control seam (permissions, proxy-header identity, override attribution and history), and the override editor on the product page. Everything after that is still plan. The backend half (raw specs,
 derived specs, overrides) is described in [DESIGN.md](../DESIGN.md#derived-specifications-and-overrides).
 
 The goal is to turn the collected data into something people can use:
@@ -193,6 +193,8 @@ and not for a public one.
   protect write methods and the editor route, leaving reads open.
 
 ## Order of work
+
+Done: items 1, 2, 3, 4 and 5 below. (The data work's camera-bitrate experiments are still to do; the editor is where their findings go.)
 
 1. Data work: AP coverage metric; start camera bitrate experiments (overrides).
 2. Access seam: permission middleware, principal, config modes; override

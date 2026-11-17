@@ -63,7 +63,7 @@ func queryOverrides(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, where string, args ...any) ([]specs.Override, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT id, region, slug, action, section, group_label, label, kind, value, note, source_url, reason, published_value, created_at, updated_at
+		SELECT id, region, slug, action, section, group_label, label, kind, value, note, source_url, reason, published_value, created_at, updated_at, created_by, updated_by
 		FROM spec_overrides `+where, args...)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func queryOverrides(ctx context.Context, q interface {
 		var o specs.Override
 		var pub sql.NullString
 		var created, updated string
-		if err := rows.Scan(&o.ID, &o.Region, &o.Slug, &o.Action, &o.Section, &o.Group, &o.Label, &o.Kind, &o.Value, &o.Note, &o.SourceURL, &o.Reason, &pub, &created, &updated); err != nil {
+		if err := rows.Scan(&o.ID, &o.Region, &o.Slug, &o.Action, &o.Section, &o.Group, &o.Label, &o.Kind, &o.Value, &o.Note, &o.SourceURL, &o.Reason, &pub, &created, &updated, &o.CreatedBy, &o.UpdatedBy); err != nil {
 			return nil, err
 		}
 		if pub.Valid {

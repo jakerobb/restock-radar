@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jakerobb/restock-radar/internal/auth"
 	"github.com/jakerobb/restock-radar/internal/specs"
 	"github.com/jakerobb/restock-radar/internal/store"
 )
@@ -67,6 +68,7 @@ func (srv *Server) handleProductSpecs(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to read derived specs", err)
 		return
 	}
+	srv.redactActors(r, ovs)
 	writeJSON(w, http.StatusOK, productSpecsResponse{ProductRef: *p, Specs: nonNil(eff), Overrides: nonNil(ovs), Derived: d})
 }
 
@@ -89,6 +91,7 @@ func (srv *Server) handleOverrides(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list overrides", err)
 		return
 	}
+	srv.redactActors(r, ovs)
 	writeJSON(w, http.StatusOK, nonNil(ovs))
 }
 
@@ -181,6 +184,7 @@ func (srv *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
 	st, err := srv.store.UpsertOverride(r.Context(), specs.Override{
 		Region: req.Region, Slug: req.Slug, Action: req.Action, Section: req.Section, Group: req.Group, Label: req.Label,
 		Kind: req.Kind, Value: req.Value, Note: req.Note, SourceURL: req.SourceURL, Reason: req.Reason,
+		UpdatedBy: auth.FromContext(r.Context()).Actor(),
 	}, time.Now())
 	switch {
 	case errors.Is(err, store.ErrUnknownProduct):
@@ -204,7 +208,7 @@ func (srv *Server) handleDeleteOverride(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, "id must be a positive integer")
 		return
 	}
-	ok, err := srv.store.DeleteOverride(r.Context(), id, time.Now())
+	ok, err := srv.store.DeleteOverride(r.Context(), id, auth.FromContext(r.Context()).Actor(), time.Now())
 	switch {
 	case err != nil:
 		serverError(w, "failed to delete override", err)

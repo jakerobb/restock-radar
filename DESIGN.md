@@ -242,8 +242,8 @@ configured regions, fetch it from the store, refuse if its product ID is already
 known, otherwise add the item under the store's canonical slug and record a
 silent baseline. `POST /v1/items` requires a JSON content type, which a
 cross-site form can't send, and refuses a foreign `Origin` or
-`Sec-Fetch-Site: cross-site`. There is no authentication in the app; the
-homelab puts Authelia in front.
+`Sec-Fetch-Site: cross-site`. Who may change things is decided in
+`internal/auth` (see Access control below).
 
 ### API
 
@@ -260,6 +260,8 @@ homelab puts Authelia in front.
 | `GET /v1/products/{region}/{slug}/specs` | a product's effective specification (origin of each entry, published value beside an overridden one), its overrides with their status, and what is derived from it |
 | `POST /v1/products/{region}/{slug}/refresh` | fetch one tracked product from the store now, instead of waiting for the next read, and record what it finds as a poll would: price and stock, group, specification (re-derived if it changed). Returns `{region, slug, title, variants, spec_entries, specs_changed, events}`. `404` for a product we don't track, `400` if the store no longer has it or has given the slug to another product, `502` if the store can't be reached. Notifications for any change it finds go out with the next poll. |
 | `GET /v1/derived?region=` | what is derived for every product: ports, PoE budgets, radios, numbers, rack, size |
+| `GET /v1/me` | who the service takes the caller to be and what they may do: `{mode, authenticated, open, user, name, email, roles, permissions}`; never cached |
+| `GET /v1/overrides/history?region=&slug=&limit=` | the append-only record of changes to overrides, newest first: who, when, and the override before and after. Needs `overrides:write` |
 | `GET /v1/overrides?region=&slug=` | overrides, each with its status (`overrides`, `hides`, `adds`, `orphan`), `stale`, and the value published now |
 | `PUT /v1/overrides` | create or replace an override: `{"slug", "region" (optional), "action": "set"\|"hide", "section", "group" (optional), "label", "kind" (optional), "value", "note", "source_url", "reason"}` |
 | `DELETE /v1/overrides/{id}` | remove an override |
@@ -274,8 +276,35 @@ isn't a published entry of the product, or a hide of something that isn't there,
 is refused with a message rather than stored.
 
 `since` lets a client page forward by remembering the last event ID it saw.
-There is no auth yet; the service is intended to be reachable only inside the
-homelab. Auth arrives with the mobile apps.
+Reading needs no permission. The routes that change something are wrapped by
+`require(permission, handler)`; see Access control.
+
+### Access control
+
+Who is asking, and what they may do, is separate from what each route does.
+`auth.Authenticator` turns a request into a `Principal` (user, roles); roles
+hold `Permission`s (`overrides:write`, `watchlist:write`, `products:refresh`);
+`Server.require(perm, handler)` wraps every route that changes something (and
+the override history, which names people), answering 401 to somebody not
+signed in and 403 to somebody who is but may not. The handler reads the
+principal from the request context, never from headers. Anything that
+authenticates differently (accounts of the service's own, say) is another
+`Authenticator`; nothing else changes.
+
+Two modes. `open` treats everyone as an administrator, for a deployment only its
+owner reaches; `public: true` is a config error there. `proxy` believes
+identity headers (Authelia's by default) only when the request's own connection
+(`RemoteAddr`, never `X-Forwarded-For`) comes from a `trusted_proxies` network,
+and maps proxy groups to roles. Header values with control characters or odd
+lengths are refused rather than recorded. If the config can't be made sense of
+at run time, `auth.New` returns an authenticator that treats everybody as
+nobody: it fails closed, not open.
+
+Overrides record `created_by` and `updated_by`, and every create, update and
+delete appends a row to `spec_override_history` (before and after as JSON; no
+foreign key, so a deleted override is still on record). A save that changes
+nothing adds no row. Anyone without `overrides:write` gets overrides without the
+names.
 
 ### Metrics
 

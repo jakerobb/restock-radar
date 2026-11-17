@@ -1,6 +1,7 @@
 package specs
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,7 +11,15 @@ var (
 	powerRe = regexp.MustCompile(numRe + `\s*(m?W)\b`)
 	rateTpl = regexp.MustCompile(numRe + `(\+?)\s*(Tbps|Gbps|Mbps|Kbps)`)
 	ppsRe   = regexp.MustCompile(numRe + `(\+?)\s*(Bpps|Gpps|Mpps|Kpps)`)
+
+	// "140 m² (1,500 ft²)": the area an access point covers.
+	areaM2Re  = regexp.MustCompile(numRe + `\s*m²`)
+	areaFt2Re = regexp.MustCompile(numRe + `\s*ft²`)
+	// "500 m (1,640 ft)", "5 km (3.1 mi)": how far a bridge reaches.
+	reachRe = regexp.MustCompile(numRe + `\s*(km|m)\b`)
 )
+
+const sqftPerSqM = 10.7639
 
 // deriveMetrics reads the plain numeric facts: power draw, switching capacity,
 // throughput. Each is found by the label the store uses for it.
@@ -96,6 +105,8 @@ func deriveMetrics(ix *index, r *Result) {
 			ix.issue("metrics", e, "no packet rate")
 		}
 	}
+
+	deriveCoverage(ix, r)
 
 	if e, ok := ix.scalar("WiFi Standard", "WiFi Standards"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
@@ -338,4 +349,58 @@ func sortDims(a, b, c float64, round bool) Dims {
 		}
 	}
 	return Dims{MinMM: v[0], MidMM: v[1], MaxMM: v[2], Round: round}
+}
+
+// deriveCoverage reads "Coverage Area". Access points give an area ("115 m²
+// (1,250 ft²)"), which becomes coverage_m2 and coverage_sqft: each as the store
+// published it, and the other worked out only if the store gave one unit. Wireless
+// bridges give a distance ("5 km (3.1 mi)"), which becomes range_m.
+func deriveCoverage(ix *index, r *Result) {
+	e, ok := ix.scalar("Coverage Area")
+	if !ok {
+		return
+	}
+	text := strings.Join(Lines(e.Value), " | ")
+	m2, haveM2 := firstNumber(areaM2Re, text)
+	ft2, haveFt2 := firstNumber(areaFt2Re, text)
+	switch {
+	case haveM2 || haveFt2:
+		switch {
+		case !haveFt2:
+			ft2 = math.Round(m2 * sqftPerSqM)
+		case !haveM2:
+			m2 = math.Round(ft2 / sqftPerSqM)
+		}
+		if m2 <= 0 || ft2 <= 0 {
+			ix.issue("metrics", e, "coverage area isn't positive")
+			return
+		}
+		r.Metrics = append(r.Metrics,
+			Metric{Name: "coverage_m2", Value: m2, Unit: "m²", Raw: text},
+			Metric{Name: "coverage_sqft", Value: ft2, Unit: "ft²", Raw: text})
+	default:
+		m := reachRe.FindStringSubmatch(text)
+		if m == nil {
+			ix.issue("metrics", e, "no coverage area or range")
+			return
+		}
+		v, ok := num(m[1])
+		if !ok || v <= 0 {
+			ix.issue("metrics", e, "range isn't positive")
+			return
+		}
+		if m[2] == "km" {
+			v *= 1000
+		}
+		r.Metrics = append(r.Metrics, Metric{Name: "range_m", Value: v, Unit: "m", Raw: text})
+	}
+}
+
+// firstNumber is the number captured by the first match of re in text.
+func firstNumber(re *regexp.Regexp, text string) (float64, bool) {
+	m := re.FindStringSubmatch(text)
+	if m == nil {
+		return 0, false
+	}
+	return num(m[1])
 }
