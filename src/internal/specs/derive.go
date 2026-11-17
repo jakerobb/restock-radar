@@ -29,8 +29,11 @@ type Result struct {
 	PoEMaxClass string   `json:"poe_max_class"`
 	Radios      []Radio  `json:"radios"`
 	Metrics     []Metric `json:"metrics"`
-	Rack        Rack     `json:"rack"`
-	Dims        Dims     `json:"dims"`
+	// Power lists the ways the product can be powered (PoE, AC, USB-C, ...).
+	// Empty when the specification doesn't say.
+	Power []PowerSource `json:"power"`
+	Rack  Rack          `json:"rack"`
+	Dims  Dims          `json:"dims"`
 	// Known says which of the above could be derived at all. "No ports" is only a
 	// statement about a product whose ports were found; for the others it means we
 	// don't know.
@@ -79,7 +82,7 @@ func Derive(in Input) Result { return deriveWith(in, nil) }
 // that a panic is contained.
 func deriveWith(in Input, hook func()) (r Result) {
 	ix := newIndex(in.Specs)
-	r = Result{Ports: []Port{}, PoEBudget: []PoEScenario{}, Radios: []Radio{}, Metrics: []Metric{}, Issues: []Issue{}}
+	r = Result{Ports: []Port{}, PoEBudget: []PoEScenario{}, Radios: []Radio{}, Metrics: []Metric{}, Power: []PowerSource{}, Issues: []Issue{}}
 	ix.res = &r
 	defer func() {
 		if p := recover(); p != nil {
@@ -97,6 +100,7 @@ func deriveWith(in Input, hook func()) (r Result) {
 	derivePoEBudget(ix, &r)
 	deriveRadios(ix, &r)
 	deriveMetrics(ix, &r)
+	derivePower(ix, &r)
 	deriveRack(ix, &r)
 	deriveDims(ix, &r)
 

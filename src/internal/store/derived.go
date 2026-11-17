@@ -155,7 +155,7 @@ func splitInts(s string) []int {
 }
 
 func storeDerived(ctx context.Context, tx *sql.Tx, region, productID string, r specs.Result, over specs.Overridden, now time.Time) error {
-	for _, t := range []string{"product_ports", "product_poe_budget", "product_radios", "product_metrics", "product_derived"} {
+	for _, t := range []string{"product_ports", "product_poe_budget", "product_radios", "product_metrics", "product_power", "product_derived"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE region = ? AND product_id = ?`, region, productID); err != nil {
 			return fmt.Errorf("clearing %s: %w", t, err)
 		}
@@ -205,6 +205,12 @@ func storeDerived(ctx context.Context, tx *sql.Tx, region, productID string, r s
 			region, productID, rd.Band, rd.Tech, nullF(rd.AntennaGainDBi), nullF(rd.TxPowerDBm), nullF(rd.TxPowerExtendedDBm), nullI(rd.Streams),
 			nullF(rd.MaxRateMbps), b2i(rd.Multi), rd.AntennaGainRaw, rd.TxPowerRaw, rd.TxPowerNote, rd.MIMORaw, rd.MaxRateRaw); err != nil {
 			return fmt.Errorf("storing radio: %w", err)
+		}
+	}
+	for i, p := range r.Power {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO product_power (region, product_id, position, kind, poe_class, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+			region, productID, i, p.Kind, p.PoEClass, p.Detail); err != nil {
+			return fmt.Errorf("storing power source: %w", err)
 		}
 	}
 	for _, m := range r.Metrics {
@@ -333,7 +339,7 @@ func (s *Store) derived(ctx context.Context, where string, args ...any) ([]Deriv
 		d.Dims.Round = round == 1
 		d.Dims.MinMM, d.Dims.MidMM, d.Dims.MaxMM = mn.Float64, md.Float64, mx.Float64
 		d.Dims.WidthMM, d.Dims.DepthMM, d.Dims.HeightMM = optF(w), optF(dep), optF(h)
-		d.Ports, d.PoEBudget, d.Radios, d.Metrics = []specs.Port{}, []specs.PoEScenario{}, []specs.Radio{}, []specs.Metric{}
+		d.Ports, d.PoEBudget, d.Radios, d.Metrics, d.Power = []specs.Port{}, []specs.PoEScenario{}, []specs.Radio{}, []specs.Metric{}, []specs.PowerSource{}
 		if err := json.Unmarshal([]byte(issues), &d.Issues); err != nil || d.Issues == nil {
 			d.Issues = []specs.Issue{}
 		}
@@ -466,6 +472,25 @@ func (s *Store) loadDerivedLists(ctx context.Context, out []DerivedProduct, inde
 		m.AtLeast = atLeast == 1
 		if d := find(region, id); d != nil {
 			d.Metrics = append(d.Metrics, m)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	rows, err = s.db.QueryContext(ctx, `SELECT region, product_id, kind, poe_class, detail FROM product_power ORDER BY region, product_id, position`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var region, id string
+		var p specs.PowerSource
+		if err := rows.Scan(&region, &id, &p.Kind, &p.PoEClass, &p.Detail); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if d := find(region, id); d != nil {
+			d.Power = append(d.Power, p)
 		}
 	}
 	if err := rows.Close(); err != nil {

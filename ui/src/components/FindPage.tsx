@@ -7,6 +7,7 @@ import { matchesQuery, typeCounts, typeOf } from '../lib/filter'
 import { formatPrice } from '../lib/format'
 import { describeRequirement, judge, parseRequirements, serializeRequirement, type Judgement, type Requirement } from '../lib/requirements'
 import { statusInfo } from '../lib/status'
+import { AddToPlan } from './AddToPlan'
 import { PageNav } from './PageNav'
 import { RequirementForm } from './RequirementForm'
 import { TypeFilter } from './TypeFilter'
@@ -110,6 +111,7 @@ function ResultTable({ rows, columns, sort, dir, onSort, reqs, picked, onPick }:
                   <Link to="/p/$region/$slug" params={{ region: product.region, slug: product.slug }} className="font-medium text-accent underline-offset-2 hover:underline">
                     {product.title}
                   </Link>
+                  <AddToPlan product={product} className="ml-3" />
                   {reqs.length > 0 && (
                     <ul className="mt-0.5 text-xs text-muted">
                       {judgement.outcomes.map((o, i) => (

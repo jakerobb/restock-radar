@@ -1,6 +1,6 @@
 # UI, product finder, and system builder: plan
 
-Status: built so far are the router, product pages, the finder (spec table, requirement chips, URL state, three-outcome matching, price-per-unit value sorts), the compare view, the on-demand product refresh, AP coverage as a derived metric, the access-control seam (permissions, proxy-header identity, override attribution and history), and the override editor on the product page. Everything after that is still plan. The backend half (raw specs,
+Status: built so far are the router, product pages, the finder (spec table, requirement chips, URL state, three-outcome matching, price-per-unit value sorts), the compare view, the first build plan (browser-only), the on-demand product refresh, AP coverage as a derived metric, the access-control seam (permissions, proxy-header identity, override attribution and history), and the override editor on the product page. Everything after that is still plan. The backend half (raw specs,
 derived specs, overrides) is described in [DESIGN.md](../DESIGN.md#derived-specifications-and-overrides).
 
 The goal is to turn the collected data into something people can use:
@@ -110,6 +110,10 @@ system, and the name says so.
   hand-picked watch list to needs.
 - Distinct from the existing watch list (config-driven items the poller
   tracks).
+- **Built so far:** one plan, kept in the browser, with product lines (variant and
+  quantity), live prices, totals, a link that carries the plan, and checks
+  (PoE power and ports, rack space) worked out from derived specs. Still to do:
+  named plans, saved searches as lines, server-side storage and alerts.
 - Anonymous visitors keep a build plan in the browser (localStorage), shareable
   as a link. Signed-in users get one stored on the server, which saved-search
   alerts require, since an alert needs to know where to send itself. Per-user
@@ -200,7 +204,7 @@ and not for a public one.
 
 ## Order of work
 
-Done: items 1, 2, 3, 4 and 5 below, plus the value sorts and the compare view from phases 2 and 5. (The data work's camera-bitrate experiments are still to do; the editor is where their findings go.)
+Done: items 1, 2, 3, 4 and 5 below, plus the value sorts and the compare view from phases 2 and 5, and the browser-only part of the build plan (phase 4). (The data work's camera-bitrate experiments are still to do; the editor is where their findings go.)
 
 1. Data work: AP coverage metric; start camera bitrate experiments (overrides).
 2. Access seam: permission middleware, principal, config modes; override

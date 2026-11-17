@@ -57,6 +57,18 @@ describe('buildComparison', () => {
   })
 })
 
+describe('power in a comparison', () => {
+  it('shows how each is powered, flags a difference, and leaves the line out when nobody says', () => {
+    const power = (kind: 'ac' | 'poe', c = '') => [{ kind, poe_class: c, detail: '' }]
+    const r = buildCatalog([product({ slug: 'a' }), product({ slug: 'b' })], [derived({ slug: 'a', known, power: power('ac') }), derived({ slug: 'b', known, power: power('poe', 'PoE+') })])
+    const l = buildComparison(r).flatMap((s) => s.lines).find((x) => x.id === 'power')!
+    expect(l.cells).toEqual([['AC'], ['PoE+']])
+    expect(l.differs).toBe(true)
+    expect(l.best).toEqual([false, false]) // text has no better or worse
+    expect(buildComparison(rows()).flatMap((s) => s.lines).find((x) => x.id === 'power')).toBeUndefined()
+  })
+})
+
 describe('cleanRefs', () => {
   it('keeps well-formed references once each, up to the limit', () => {
     expect(cleanRefs(['us/a', 'us/a', 'nonsense', 'us/b/c', '', 'eu/d', 'us/e', 'us/f', 'us/g'])).toEqual(['us/a', 'eu/d', 'us/e', 'us/f'])

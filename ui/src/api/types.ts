@@ -244,6 +244,16 @@ export interface Overridden {
   metrics: OverriddenMetric[]
 }
 
+export type PowerKind = 'poe' | 'passive_poe' | 'ac' | 'dc' | 'usb' | 'battery' | 'rps' | 'other'
+
+export interface PowerSource {
+  kind: PowerKind
+  /** For kind 'poe': the lowest PoE class that powers it. */
+  poe_class: string
+  /** The line of the specification it was read from. */
+  detail: string
+}
+
 export interface Derived {
   region: string
   product_id: string
@@ -256,6 +266,8 @@ export interface Derived {
   poe_budget: PoEScenario[]
   poe_max_class: string
   radios: Radio[]
+  /** The ways it can be powered; empty when the specification doesn't say. */
+  power: PowerSource[]
   metrics: Metric[]
   rack: Rack
   dims: Dims

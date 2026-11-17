@@ -27,6 +27,10 @@ const specsResponse = (o: Partial<ProductSpecsResponse> = {}): ProductSpecsRespo
     known: { ports: true, poe: true, radios: true, rack: true, dims: true },
     ports: [port({ label: '10 GbE RJ45', count: 2, max_speed_mbps: 10000, speeds_mbps: [10000, 1000], poe_class: 'PoE++', poe_direction: 'out', poe_watts: 60 })],
     rack: { mountable: true, units: 1, full_depth: false },
+    power: [
+      { kind: 'ac', poe_class: '', detail: 'Universal input, 100–240V AC' },
+      { kind: 'poe', poe_class: 'PoE+', detail: 'PoE+' },
+    ],
     dims: { min_mm: 44, mid_mm: 300, max_mm: 442, round: false },
     metrics: [{ name: 'ids_ips_throughput_mbps', value: 8000, unit: 'Mbps', at_least: true, raw: '8+ Gbps' }],
     overridden: { ports: false, poe_budget: false, radios: false, rack: false, dims: false, metrics: [{ name: 'ids_ips_throughput_mbps', published: { name: 'ids_ips_throughput_mbps', value: 5000, unit: 'Mbps', at_least: false, raw: '5 Gbps' } }] },
@@ -47,6 +51,9 @@ describe('ProductPage', () => {
     const glance = await screen.findByRole('region', { name: 'At a glance' })
     expect(glance).toHaveTextContent('2 × 10 GbE RJ45 (10 GbE / 1 GbE) · PoE++ out, 60 W')
     expect(glance).toHaveTextContent('Rack-mount, 1U')
+    expect(glance).toHaveTextContent('Powered by')
+    expect(glance).toHaveTextContent('AC · Universal input, 100–240V AC') // the published line, when it says more than the label
+    expect(glance).toHaveTextContent('PoE+') // and nothing repeated when it says no more
     expect(glance).toHaveTextContent('44 × 300 × 442 mm')
     expect(glance).toHaveTextContent('IDS/IPS throughput: ≥ 8000 Mbps')
     expect(glance).toHaveTextContent('overridden, published 5000 Mbps')

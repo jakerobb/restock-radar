@@ -69,6 +69,10 @@ func TestApplyDerivesTheSpecification(t *testing.T) {
 	if !d.Rack.Mountable || d.Rack.Units != 1 || d.Dims.WidthMM == nil || *d.Dims.WidthMM != 442 {
 		t.Errorf("rack %+v dims %+v", d.Rack, d.Dims)
 	}
+	// How it is powered comes back too, in the order the specification lists it.
+	if len(d.Power) != 2 || d.Power[0].Kind != specs.PowerAC || d.Power[1].Kind != specs.PowerRPS || d.Power[1].Detail == "" {
+		t.Errorf("power = %+v", d.Power)
+	}
 }
 
 // TestDerivedRoundTrips checks that what comes back from the database is exactly
@@ -256,7 +260,7 @@ func TestDerivedRowsGoWithTheProduct(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM products WHERE id = 'id-u7-pro'`); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"product_derived", "product_ports", "product_radios", "product_metrics", "product_poe_budget", "product_specs"} {
+	for _, table := range []string{"product_derived", "product_ports", "product_radios", "product_metrics", "product_poe_budget", "product_power", "product_specs"} {
 		var n int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil || n != 0 {
 			t.Errorf("%s: %d rows left (%v)", table, n, err)

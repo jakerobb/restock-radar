@@ -170,3 +170,23 @@ describe('price-per-unit columns', () => {
     expect(col('per_sqft').lowerIsBetter).toBe(true)
   })
 })
+
+describe('power method column', () => {
+  const row = (power: Parameters<typeof derived>[0]) => buildCatalog([product()], [derived(power)])[0]!
+  const col = columnById('power')!
+
+  it('lists how a product is powered, and is unknown when the specification doesn’t say', () => {
+    const r = row({ power: [{ kind: 'ac', poe_class: '', detail: 'AC' }, { kind: 'poe', poe_class: 'PoE+', detail: 'PoE+' }] })
+    expect(col.value(r)).toBe('AC, PoE+')
+    expect(col.value(row({ power: [] }))).toBeNull()
+    expect(col.value(buildCatalog([product()], [])[0]!)).toBeNull()
+  })
+
+  it('sorts alphabetically, unknowns last', () => {
+    const rows = buildCatalog(
+      [product({ slug: 'a', title: 'A' }), product({ slug: 'b', title: 'B' }), product({ slug: 'c', title: 'C' })],
+      [derived({ slug: 'a', power: [{ kind: 'usb', poe_class: '', detail: '' }] }), derived({ slug: 'b', power: [{ kind: 'ac', poe_class: '', detail: '' }] })],
+    )
+    expect(sortRows(rows, 'power', 'asc').map((r) => r.product.title)).toEqual(['B', 'A', 'C'])
+  })
+})
