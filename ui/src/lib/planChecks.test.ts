@@ -123,6 +123,30 @@ describe('planChecks', () => {
     })
   })
 
+  describe('dividing devices among switches', () => {
+    const e7 = (qty: number) => item('e7', qty, { ports: [port({ count: 1, max_speed_mbps: 10000 })], metrics: [metric('power_draw_max_w', 43)], power: [src('poe', 'PoE++')], known: { ...known, poe: false } })
+    const xg = item('xg', 1, { ports: [port({ count: 10, max_speed_mbps: 10000, poe_class: 'PoE+++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 400)] })
+    const hd = item('hd', 1, { ports: [port({ count: 24, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 600)] })
+
+    it('puts the load where the budget is, instead of filling the first switch', () => {
+      const c = byId([e7(12), xg, hd])
+      expect(c['poe-power']?.verdict).toBe('ok')
+      expect(c['poe-layout']).toMatchObject({ verdict: 'info' })
+    })
+
+    it('says so when the total budget is enough but no division of the devices is', () => {
+      const small = item('small', 1, { ports: [port({ count: 24, max_speed_mbps: 10000, poe_class: 'PoE+++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] })
+      const other = item('other', 1, { ports: [port({ count: 24, max_speed_mbps: 10000, poe_class: 'PoE+++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] })
+      const big = item('big', 1, { ports: [port({ count: 1, max_speed_mbps: 10000 })], metrics: [metric('power_draw_max_w', 150)], power: [src('poe', 'PoE++')], known: { ...known, poe: false } })
+      const c = byId([big, small, other]) // 200 W supplied, 150 W drawn, but no switch can carry it
+      expect(c['poe-power']).toMatchObject({ verdict: 'bad', text: expect.stringContaining('each switch has its own budget') })
+    })
+
+    it('does not need a layout for a single switch', () => {
+      expect(byId([e7(4), hd])['poe-layout']).toBeUndefined()
+    })
+  })
+
   describe('port speed', () => {
     const e7 = (qty: number, speed = 10000) => item('e7', qty, { ports: [port({ count: 1, max_speed_mbps: speed })], metrics: [metric('power_draw_max_w', 43)], power: [src('poe', 'PoE++')], known: { ...known, poe: false } })
     const hd = (qty = 1) => item('hd', qty, {
