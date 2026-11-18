@@ -142,8 +142,18 @@ describe('planChecks', () => {
       expect(c['poe-power']).toMatchObject({ verdict: 'bad', text: expect.stringContaining('each switch has its own budget') })
     })
 
-    it('does not need a layout for a single switch', () => {
-      expect(byId([e7(4), hd])['poe-layout']).toBeUndefined()
+    it('spells out which ports each device takes, how many are spare, and which run slower', () => {
+      const detail = byId([e7(12), hd])['poe-layout']?.detail
+      expect(detail).toHaveLength(1)
+      expect(detail![0]).toMatchObject({ title: 'hd: 516 of 600 W', rows: ['24 × 10 GbE PoE++ ports: 12 × e7, 12 spare'] })
+      const mixed = item('mixed', 1, { ports: [port({ count: 2, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'out' }), port({ count: 4, max_speed_mbps: 2500, poe_class: 'PoE++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 600)] })
+      expect(byId([e7(3), mixed])['poe-layout']?.detail?.[0]?.rows).toEqual(['2 × 10 GbE PoE++ ports: 2 × e7', '4 × 2.5 GbE PoE++ ports: 1 × e7 (runs at 2.5 GbE), 3 spare'])
+    })
+
+    it('lists devices that fit nowhere', () => {
+      const tiny = item('tiny', 1, { ports: [port({ count: 24, max_speed_mbps: 10000, poe_class: 'PoE+++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] })
+      const detail = byId([e7(3), tiny])['poe-layout']?.detail
+      expect(detail?.at(-1)).toEqual({ title: 'No port or power left for', rows: ['1 × e7'] })
     })
   })
 

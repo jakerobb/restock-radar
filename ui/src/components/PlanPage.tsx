@@ -254,7 +254,25 @@ export default function PlanPage() {
                     </span>
                     <span>
                       <span className="font-medium">{c.label}: </span>
-                      {c.text}
+                      {c.detail ? (
+                        <details className="inline-block align-top">
+                          <summary className="cursor-pointer">{c.text}</summary>
+                          <div className="mt-1 space-y-2 text-muted">
+                            {c.detail.map((b) => (
+                              <div key={b.title}>
+                                <div className="font-medium text-ink">{b.title}</div>
+                                <ul className="list-disc pl-5">
+                                  {b.rows.map((r) => (
+                                    <li key={r}>{r}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : (
+                        c.text
+                      )}
                     </span>
                   </li>
                 ))}

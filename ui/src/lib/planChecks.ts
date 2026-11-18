@@ -10,6 +10,8 @@ export interface PlanCheck {
   label: string
   verdict: CheckVerdict
   text: string
+  /** A breakdown to show on request, as blocks of lines (one block per switch, say). */
+  detail?: { title: string; rows: string[] }[]
 }
 
 /** A line with what is derived from its product's specification. */
@@ -64,6 +66,8 @@ interface Socket {
   speed: number
   /** Which switch (one unit of a line) the port is on; each has its own PoE budget. */
   unit: number
+  /** Index of the port group (a count of alike ports on one switch) the port belongs to. */
+  group: number
 }
 
 interface Device {
@@ -77,6 +81,7 @@ interface Placement {
   /** The speed the device ends up at on its port. */
   speed: number
   unit: number
+  group: number
 }
 
 /**
@@ -95,7 +100,7 @@ function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Pla
     const idx = devices.map((_, i) => i)
     const put = (i: number, k: number) => {
       const f = free[k]!
-      result[i] = { speed: Math.min(f.speed, devices[i]!.speed), unit: f.unit }
+      result[i] = { speed: Math.min(f.speed, devices[i]!.speed), unit: f.unit, group: f.group }
       left[f.unit] = left[f.unit]! - devices[i]!.draw
       free.splice(k, 1)
     }
@@ -220,28 +225,53 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: metric(l.derived, 'power_draw_max_w') ?? 0 })
   const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
   const budgets = units.map((u) => metric(u.line.derived, 'poe_budget_w') ?? Infinity)
-  const socketList: Socket[] = units.flatMap((u, unit) => poePortsOut(u.line.derived!).flatMap((p) => Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit }))))
+  const groups: { unit: number; label: string; count: number }[] = []
+  const socketList: Socket[] = units.flatMap((u, unit) =>
+    poePortsOut(u.line.derived!).flatMap((p) => {
+      const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count }) - 1
+      return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group }))
+    }),
+  )
   const placed = allocate(placing, socketList, budgets)
   const stranded = placing.filter((_, i) => placed[i] === null)
+
+  // Each device on a port group, spelled out: one valid arrangement, not the only one.
+  const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
+  const detail = units.map((u, k) => {
+    const used = placing.reduce((n, d, i) => n + (placed[i]?.unit === k ? d.draw : 0), 0)
+    const rows = groups.flatMap((g, gi) => {
+      if (g.unit !== k) return []
+      const on = new Map<string, number>()
+      let taken = 0
+      placing.forEach((d, i) => {
+        const at = placed[i]
+        if (at?.group !== gi) return
+        taken++
+        const key = `${name(d.line)}${at.speed < d.speed ? ` (runs at ${formatSpeed(at.speed)})` : ''}`
+        on.set(key, (on.get(key) ?? 0) + 1)
+      })
+      const what = [...on].map(([nm, c]) => `${c} × ${nm}`)
+      if (taken < g.count) what.push(`${g.count - taken} spare`)
+      return [`${g.count} × ${g.label} ports: ${what.join(', ')}`]
+    })
+    return { title: `${label(u)}: ${used} of ${budgets[k] === Infinity ? '?' : budgets[k]} W`, rows }
+  })
+  if (stranded.length > 0) {
+    const counts = new Map<string, number>()
+    for (const d of stranded) counts.set(name(d.line), (counts.get(name(d.line)) ?? 0) + 1)
+    detail.push({ title: 'No port or power left for', rows: [...counts].map(([nm, c]) => `${c} × ${nm}`) })
+  }
+  const layout: PlanCheck = { id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to put each device on a port${units.length > 1 ? `, across ${units.length} switches` : ''}.`, detail }
+
   if (stranded.length > 0 && demand <= supply) {
     const names = [...new Set(stranded.map((d) => name(d.line)))].join(', ')
     const at = out.findIndex((c) => c.id === 'poe-power')
     const bad: PlanCheck = { id: 'poe-power', label: 'PoE power', verdict: 'bad', text: `The ${supply} W adds up, but each switch has its own budget, and no way of dividing the devices among them powers all: ${stranded.length} of ${names} ${stranded.length === 1 ? 'is' : 'are'} left without.` }
     if (out[at]?.verdict === 'ok') out[at] = bad
+    out.push(layout)
     return out
   }
-  if (units.length > 1 && stranded.length === 0) {
-    const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
-    const parts = units.flatMap((u, k) => {
-      const mine = placing.filter((_, i) => placed[i]?.unit === k)
-      if (mine.length === 0) return []
-      const counts = new Map<string, number>()
-      for (const d of mine) counts.set(name(d.line), (counts.get(name(d.line)) ?? 0) + 1)
-      const used = mine.reduce((n, d) => n + d.draw, 0)
-      return [`${label(u)}: ${[...counts].map(([nm, c]) => `${c} × ${nm}`).join(', ')} (${used} of ${budgets[k] === Infinity ? '?' : budgets[k]} W)`]
-    })
-    out.push({ id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to divide them: ${parts.join('; ')}.` })
-  }
+  out.push(layout)
   out.push(...speedCheck(placing, placed))
   return out
 }
