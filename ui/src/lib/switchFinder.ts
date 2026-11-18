@@ -154,11 +154,20 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   return { fits, pairs, replaces }
 }
 
+const price = (f: Fit) => f.cents ?? Infinity
+
+/** Every fit worth listing, cheapest first: pairs only when no one model does, or they undercut the cheapest that does (in stock or not). */
+function listAll(fits: Fit[], pairs: Fit[], replaces: DerivedLine[]): ListedSwitch[] {
+  const cheapest = Math.min(...fits.map(price))
+  return [...fits, ...pairs.filter((f) => price(f) < cheapest)]
+    .map((f) => ({ ...f, replaces }))
+    .sort((a, b) => price(a) - price(b) || a.row.product.title.localeCompare(b.row.product.title) || (a.also?.row.product.title ?? '').localeCompare(b.also?.row.product.title ?? ''))
+}
+
 /** From the fits that run on an accepted power method, the few worth a look and the full list; and how many were left out. */
 export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, accepted: ReadonlySet<PowerMethod>): SwitchSuggestions {
   const fits = every.filter((f) => acceptsPower(f.row, accepted))
   const pairs = everyPair.filter((f) => acceptsPower(f.row, accepted) && !!f.also && acceptsPower(f.also.row, accepted))
-  const price = (f: Fit) => f.cents ?? Infinity
   const room = (f: Fit) => (f.stats.spareWatts ?? 0) + f.stats.sparePorts
   const best = (xs: Fit[], by: (f: Fit) => number): Fit | undefined => xs.reduce<Fit | undefined>((a, b) => (a === undefined || by(b) < by(a) ? b : a), undefined)
 
@@ -181,11 +190,10 @@ export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, a
     if (same) continue
     options.push({ ...fit, label, replaces })
   }
-  // A pair is listed only when no one model does, or it undercuts the cheapest one that does (in stock or not).
-  const cheapestAny = best(fits, price)
-  const worthListing = pairs.filter((f) => cheapestAny === undefined || price(f) < price(cheapestAny))
-  const all = [...fits, ...worthListing].map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.row.product.title.localeCompare(b.row.product.title) || (a.also?.row.product.title ?? '').localeCompare(b.also?.row.product.title ?? ''))
-  return { options, all, hidden: every.length - fits.length }
+  const all = listAll(fits, pairs, replaces)
+  // What the power filter hides: everything that would be listed with every method accepted.
+  const everything = listAll(every, everyPair, replaces)
+  return { options, all, hidden: everything.length - all.length }
 }
 
 /** Both steps at once, for when the power methods are settled. */
