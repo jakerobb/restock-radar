@@ -81,6 +81,16 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
     return [{ id: 'nvr', label: 'NVR', verdict: 'warn', nvrShortfall: true, text: `${cameras} camera${s(cameras)} in the plan, and no NVR to record ${cameras === 1 ? 'it' : 'them'}.` }]
   }
 
+  // An NVR that can't be bought now gives no capacity to count on.
+  const unavailable = lines.filter((l) => isNvr(l.derived) && l.view.state !== 'in')
+  const stock: PlanCheck[] = unavailable.length === 0 ? [] : [{
+    id: 'nvr-stock',
+    label: 'NVR stock',
+    verdict: 'warn',
+    nvrShortfall: true,
+    text: `${unavailable.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')} ${unavailable.length === 1 && unavailable[0]!.view.line.qty === 1 ? "isn't" : "aren't"} in stock, so the camera capacity ${unavailable.length === 1 ? 'it gives' : 'they give'} can't be had now.`,
+  }]
+
   let unplaced = 0
   for (const c of CAMERA_CLASSES) {
     for (let i = 0; i < counts[c]; i++) {
@@ -105,12 +115,12 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
   })
 
   if (unplaced > 0) {
-    return [{ id: 'nvr', label: 'NVR', verdict: 'bad', nvrShortfall: true, nvr: stats, detail, text: `${unplaced} of ${cameras} cameras have no room on the plan's ${many ? 'NVRs' : 'NVR'}.` }]
+    return [...stock, { id: 'nvr', label: 'NVR', verdict: 'bad', nvrShortfall: true, nvr: stats, detail, text: `${unplaced} of ${cameras} cameras have no room on the plan's ${many ? 'NVRs' : 'NVR'}.` }]
   }
   const used = units.length - spare
   const text = `${cameras} camera${s(cameras)} use${cameras === 1 ? 's' : ''} ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.`
   if (unknown > 0) {
-    return [{ id: 'nvr', label: 'NVR', verdict: 'unknown', nvr: stats, detail, text: `Can't tell for ${unknown} camera${s(unknown)} whose resolution isn't known. The other ${known} use ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.` }]
+    return [...stock, { id: 'nvr', label: 'NVR', verdict: 'unknown', nvr: stats, detail, text: `Can't tell for ${unknown} camera${s(unknown)} whose resolution isn't known. The other ${known} use ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.` }]
   }
-  return [{ id: 'nvr', label: 'NVR', verdict: 'ok', nvr: stats, detail, text }]
+  return [...stock, { id: 'nvr', label: 'NVR', verdict: 'ok', nvr: stats, detail, text }]
 }

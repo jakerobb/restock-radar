@@ -53,6 +53,12 @@ describe('cameraClass', () => {
 })
 
 describe('the NVR check', () => {
+  it('warns when an NVR in the plan cannot be bought now', () => {
+    const s = setup([nvr('gone', 10000, [60, 30, 18], {}, 'SoldOut'), cam('c4k', 8.3)])
+    const checks = planChecks(s.plan(['gone', 1], ['c4k', 2]))
+    expect(checks.find((c) => c.id === 'nvr-stock')).toMatchObject({ verdict: 'warn', nvrShortfall: true, text: expect.stringContaining("gone isn't in stock") })
+  })
+
   it('says nothing without cameras', () => {
     expect(find(setup([UNVR, cam('c4k', 8.3)]), ['unvr', 1])).toBeUndefined()
   })
@@ -122,6 +128,22 @@ describe('findNvrs', () => {
     const s = setup([small, UNVR, cam('c4k', 8.3)])
     expect(findNvrs(s.plan(['c4k', 7]), s.rows, s.map).all.map((o) => `${o.qty} × ${o.row.product.slug}`)).toEqual(['1 × unvr', '2 × small'])
     expect(findNvrs(s.plan(['c4k', 99]), s.rows, s.map)).toEqual({ options: [], all: [] })
+  })
+
+  it('checks the plan without an NVR that is sold out, and offers stand-ins for it', () => {
+    const s = setup([gone, small, cam('c4k', 8.3)])
+    const { options } = findNvrs(s.plan(['gone', 1], ['c4k', 5]), s.rows, s.map)
+    expect(options[0]?.row.product.slug).toBe('small')
+    expect(options[0]?.replaces.map((l) => l.view.line.ref)).toEqual(['us/gone'])
+    expect(options.every((o) => o.row.product.slug !== 'gone')).toBe(true) // the sold-out one isn't offered back
+  })
+
+  it('also suggests a gateway that records, one of it, and says so', () => {
+    const udr = { ...nvr('udr', 20000, [5, 2, 1]), category: 'cloud-gateways-wifi-integrated' }
+    const s = setup([udr, cam('c4k', 8.3)])
+    const { options } = findNvrs(s.plan(['c4k', 1]), s.rows, s.map)
+    expect(options).toMatchObject([{ qty: 1, alsoGateway: true }])
+    expect(findNvrs(s.plan(['c4k', 2]), s.rows, s.map).options).toEqual([]) // two of a gateway aren't suggested
   })
 
   it('takes part in the PoE checks when the NVR has a switch built in', () => {

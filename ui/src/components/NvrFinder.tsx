@@ -24,7 +24,7 @@ function facts(o: ListedNvr): string {
     .join(' · ')
 }
 
-function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (line: PlanLine) => void }) {
+function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (line: PlanLine, replacing: PlanLine[]) => void }) {
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0 text-sm">
@@ -40,6 +40,8 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
           </Badge>
         </div>
         <div className="mt-0.5 text-muted">{facts(o)}</div>
+        {o.alsoGateway && <div className="mt-0.5 text-muted">Also a gateway or console, so it takes on the network too; its camera capacity is lower when it also runs other applications.</div>}
+        {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
       </div>
       <Button
         variant="secondary"
@@ -47,7 +49,7 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
         aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
         onClick={() => {
           const line = lineFor(o.row.product, o.qty)
-          if (line) onAdd(line)
+          if (line) onAdd(line, o.replaces.map((l) => l.view.line))
         }}
       >
         Add to plan
@@ -57,7 +59,7 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
 }
 
 /** NVRs that, added to the plan, have room for its cameras. */
-export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine) => void; onClose: () => void }) {
+export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine, replacing: PlanLine[]) => void; onClose: () => void }) {
   const found = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
     return findNvrs(plan, buildCatalog(products, derived), byRef)

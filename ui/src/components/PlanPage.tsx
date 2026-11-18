@@ -318,7 +318,10 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
-          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={mine.add} onClose={() => setFindingNvr(false)} />}
+          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l, replacing) => {
+            for (const r of replacing) mine.remove(lineKey(r))
+            mine.add(l)
+          }} onClose={() => setFindingNvr(false)} />}
 
           <div className="mt-5 space-y-3">
             <ShareLink lines={lines} products={productData?.products ?? []} />
