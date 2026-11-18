@@ -137,6 +137,19 @@ describe('findSwitches', () => {
       expect(all.map((o) => `${o.qty} × ${o.row.product.slug}${o.also ? ` + ${o.also.qty} × ${o.also.row.product.slug}` : ''}`)).toEqual(['1 × tenG + 1 × gig', '2 × gig'])
     })
 
+    it('only pairs switches that both run on an accepted power method, and counts the pairs left out', () => {
+      const dcTen = mixed.map((m) => (m.slug === 'tenG' ? { ...m, d: { ...m.d, power: [{ kind: 'dc' as const, poe_class: '', detail: 'DC' }] } } : m))
+      const c = catalog(dcTen)
+      const items: [string, number][] = [['e7', 2], ['cam', 8]]
+      const ac = findSwitches(plan(c, ...items), c.rows, c.map, new Set(['ac', 'poe']))
+      expect(ac.options.every((o) => !o.also)).toBe(true)
+      expect(ac.all.every((o) => !o.also)).toBe(true)
+      expect(ac.hidden).toBeGreaterThan(0) // the pair with the DC switch is said to work on another method
+      const all = findSwitches(plan(c, ...items), c.rows, c.map, new Set(['ac', 'dc', 'poe']))
+      expect(all.options.some((o) => o.also)).toBe(true)
+      expect(all.hidden).toBe(0)
+    })
+
     it('does not offer a pair when one model, or the same model again, does the job', () => {
       const c = catalog(mixed)
       const { options } = findSwitches(plan(c, ['e7', 1], ['cam', 1]), c.rows, c.map)

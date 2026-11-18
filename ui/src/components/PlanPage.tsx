@@ -131,10 +131,19 @@ function ShareLink({ lines, products }: { lines: PlanLine[]; products: Product[]
     }
   }
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex min-w-0 flex-1 items-center gap-2">
       <TextInput readOnly className="min-w-0 flex-1 py-1 text-sm" value={url} aria-label="Link to this plan" onFocus={(e) => e.currentTarget.select()} />
-      <Button variant="secondary" className="py-1 text-sm" onClick={() => void copy()}>
-        {copied ? 'Copied' : 'Copy link'}
+      <Button variant="secondary" className="px-2 py-1" onClick={() => void copy()} aria-label={copied ? 'Copied' : 'Copy link'} title={copied ? 'Copied' : 'Copy link'}>
+        <svg aria-hidden viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {copied ? (
+            <path d="M5 13l4 4L19 7" />
+          ) : (
+            <>
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </>
+          )}
+        </svg>
       </Button>
     </div>
   )
@@ -163,6 +172,28 @@ export default function PlanPage() {
   const [finding, setFinding] = useState(false)
   const [searching, setSearching] = useState(false)
   const shortfall = checks.some((c) => c.shortfall)
+  const clearControl = confirmClear ? (
+    <div className="flex items-center gap-3">
+      <span>Remove every line?</span>
+      <Button
+        variant="secondary"
+        className="py-1 text-sm"
+        onClick={() => {
+          mine.replace([])
+          setConfirmClear(false)
+        }}
+      >
+        Yes, clear the plan
+      </Button>
+      <button type="button" className="cursor-pointer underline underline-offset-2" onClick={() => setConfirmClear(false)}>
+        Keep it
+      </button>
+    </div>
+  ) : (
+    <button type="button" className="cursor-pointer text-muted underline underline-offset-2 hover:text-ink" onClick={() => setConfirmClear(true)}>
+      Clear the plan
+    </button>
+  )
   const leaveShared = () => void navigate({ to: '/plan', replace: true })
 
   return (
@@ -170,11 +201,14 @@ export default function PlanPage() {
       <PageNav title="Build plan" />
       <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
 
-      {productData && !shared && (
-        <div className="mt-3">
-          <Button variant="secondary" className="py-1 text-sm" onClick={() => setSearching(true)}>
-            Add product
-          </Button>
+      {productData && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {!shared && (
+            <Button variant="secondary" className="py-1 text-sm" onClick={() => setSearching(true)}>
+              Add product
+            </Button>
+          )}
+          <ShareLink lines={lines} products={productData.products} />
         </div>
       )}
       {searching && productData && (
@@ -250,7 +284,8 @@ export default function PlanPage() {
                 </div>
               ))}
               {totals.unpriced > 0 && <div className="text-sm text-muted">{totals.unpriced === 1 ? '1 line has' : `${totals.unpriced} lines have`} no price and isn't counted.</div>}
-              <div className="text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+                {shared ? <span /> : clearControl}
                 {totals.notInStock.length === 0 ? (
                   <span className="text-ok">Everything is in stock.</span>
                 ) : (
@@ -306,33 +341,6 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
-
-          <div className="mt-5 space-y-3">
-            <ShareLink lines={lines} products={productData?.products ?? []} />
-            {!shared &&
-              (confirmClear ? (
-                <div className="flex items-center gap-3 text-sm">
-                  <span>Remove every line?</span>
-                  <Button
-                    variant="secondary"
-                    className="py-1 text-sm"
-                    onClick={() => {
-                      mine.replace([])
-                      setConfirmClear(false)
-                    }}
-                  >
-                    Yes, clear the plan
-                  </Button>
-                  <button type="button" className="cursor-pointer underline underline-offset-2" onClick={() => setConfirmClear(false)}>
-                    Keep it
-                  </button>
-                </div>
-              ) : (
-                <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" onClick={() => setConfirmClear(true)}>
-                  Clear the plan
-                </button>
-              ))}
-          </div>
         </>
       )}
     </main>
