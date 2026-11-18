@@ -137,6 +137,28 @@ describe('PlanPage', () => {
     expect(checks).toHaveTextContent('6 PoE+ devices for 8 PoE+ ports.')
   })
 
+  it('offers to find a switch when the plan lacks power or ports, and adds the one chosen', async () => {
+    catalog()
+    const user = userEvent.setup()
+    // Six access points draw 120 W; the one switch in the plan supplies 100 W.
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', qty: 6, addedCents: 15000 })])
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Find a switch' }))
+    const finder = await screen.findByLabelText('Find a switch')
+    expect(finder).toHaveTextContent('Cheapest that fits')
+    await user.click(within(finder).getByRole('button', { name: /^Add .*PoE Switch to the plan$/ }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('of the 200 W supplied'))
+    expect(screen.queryByRole('button', { name: 'Find a switch' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer a switch when the plan already has the power and ports', async () => {
+    catalog()
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', qty: 2, addedCents: 15000 })])
+    renderRoute('/plan')
+    await screen.findByLabelText('Checks')
+    expect(screen.queryByRole('button', { name: 'Find a switch' })).not.toBeInTheDocument()
+  })
+
   it('says so when the plan is empty', async () => {
     catalog()
     renderRoute('/plan')

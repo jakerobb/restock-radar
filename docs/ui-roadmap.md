@@ -112,7 +112,8 @@ system, and the name says so.
   tracks).
 - **Built so far:** one plan, kept in the browser, with product lines (variant and
   quantity), live prices, totals, a link that carries the plan, and checks
-  (PoE power and ports, rack space) worked out from derived specs. Still to do:
+  (PoE power and ports placed per switch, port speed, rack space) worked out from
+  derived specs, and "Find a switch", which suggests switches that cover a PoE shortfall. Still to do:
   named plans, saved searches as lines, server-side storage and alerts.
 - Anonymous visitors keep a build plan in the browser (localStorage), shareable
   as a link. Signed-in users get one stored on the server, which saved-search
