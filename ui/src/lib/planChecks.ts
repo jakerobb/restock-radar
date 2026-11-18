@@ -62,43 +62,73 @@ interface Socket {
   rank: number
   /** Infinity when the store doesn't say, so an unknown speed never causes a warning. */
   speed: number
+  /** Which switch (one unit of a line) the port is on; each has its own PoE budget. */
+  unit: number
+}
+
+interface Device {
+  rank: number
+  speed: number
+  /** Watts; 0 when not known, which the power check reports separately. */
+  draw: number
+}
+
+interface Placement {
+  /** The speed the device ends up at on its port. */
+  speed: number
+  unit: number
 }
 
 /**
- * Gives as many devices as possible a port at least as fast as their own (and of a high enough class), then
- * puts the rest on the fastest port left that can power them. Devices are taken fastest first, each on the
- * lowest class of port that is fast enough, so faster and higher-class ports stay free for those that need them.
- * Returns, per device (in the order given), the speed it ends up at; null when no port could take it.
+ * Gives every device a port on a switch: of a high enough class, on a switch with enough budget left. Two
+ * orders are tried and the one that places more devices wins. The first favours speed: devices fastest
+ * first, each on the lowest class of port that is fast enough (so faster and higher-class ports stay free for
+ * those that need them), with the rest put on the fastest port left. The second is by demand: highest class
+ * and heaviest draw first. Where ports are otherwise alike, the switch with the least budget left that still
+ * fits the device is used, so large budgets stay whole for heavy loads. Returns null for a device that fits nowhere.
  */
-function placeBySpeed(devices: { rank: number; speed: number }[], sockets: Socket[]): (number | null)[] {
-  const free = [...sockets]
-  const result: (number | null)[] = devices.map(() => null)
-  const order = devices.map((_, i) => i).sort((a, b) => devices[b]!.speed - devices[a]!.speed || devices[b]!.rank - devices[a]!.rank)
-  const slowed: number[] = []
-  for (const i of order) {
-    const d = devices[i]!
-    let best = -1
-    free.forEach((f, k) => {
-      if (f.rank < d.rank || f.speed < d.speed) return
-      if (best < 0 || f.rank < free[best]!.rank || (f.rank === free[best]!.rank && f.speed < free[best]!.speed)) best = k
-    })
-    if (best < 0) slowed.push(i)
-    else {
-      result[i] = d.speed
-      free.splice(best, 1)
+function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Placement | null)[] {
+  const attempt = (speedFirst: boolean): (Placement | null)[] => {
+    const free = [...sockets]
+    const left = [...budgets]
+    const result: (Placement | null)[] = devices.map(() => null)
+    const idx = devices.map((_, i) => i)
+    const put = (i: number, k: number) => {
+      const f = free[k]!
+      result[i] = { speed: Math.min(f.speed, devices[i]!.speed), unit: f.unit }
+      left[f.unit] = left[f.unit]! - devices[i]!.draw
+      free.splice(k, 1)
     }
-  }
-  for (const i of slowed.sort((a, b) => devices[b]!.rank - devices[a]!.rank)) {
-    let best = -1
-    free.forEach((f, k) => {
-      if (f.rank >= devices[i]!.rank && (best < 0 || f.speed > free[best]!.speed)) best = k
-    })
-    if (best >= 0) {
-      result[i] = free[best]!.speed
-      free.splice(best, 1)
+    const pick = (i: number, ok: (f: Socket) => boolean, better: (f: Socket, g: Socket) => number): number => {
+      const d = devices[i]!
+      let best = -1
+      free.forEach((f, k) => {
+        if (f.rank < d.rank || left[f.unit]! < d.draw || !ok(f)) return
+        if (best < 0 || better(f, free[best]!) < 0) best = k
+      })
+      return best
     }
+    const demand = (a: number, b: number) => devices[b]!.rank - devices[a]!.rank || devices[b]!.draw - devices[a]!.draw
+    let rest = idx.sort(demand)
+    if (speedFirst) {
+      rest = []
+      for (const i of [...idx].sort((a, b) => devices[b]!.speed - devices[a]!.speed || demand(a, b))) {
+        const k = pick(i, (f) => f.speed >= devices[i]!.speed, (f, g) => f.rank - g.rank || f.speed - g.speed || left[f.unit]! - left[g.unit]!)
+        if (k < 0) rest.push(i)
+        else put(i, k)
+      }
+      rest.sort(demand)
+    }
+    for (const i of rest) {
+      const k = pick(i, () => true, (f, g) => g.speed - f.speed || f.rank - g.rank || left[f.unit]! - left[g.unit]!)
+      if (k >= 0) put(i, k)
+    }
+    return result
   }
-  return result
+  const first = attempt(true)
+  if (!first.includes(null)) return first
+  const second = attempt(false)
+  return second.filter((x) => x === null).length < first.filter((x) => x === null).length ? second : first
 }
 
 /** "6 PoE++ and 2 PoE", highest class first. */
@@ -122,22 +152,13 @@ function unplaced(need: Map<string, number>, have: Map<string, number>): number 
   return lost
 }
 
-/** Warns when a device has a faster network port than the PoE ports it can be given, so it can't run at full speed. */
-function speedCheck(consumers: DerivedLine[], needs: Map<DerivedLine, string | null>, suppliers: DerivedLine[]): PlanCheck[] {
-  const devices: { line: DerivedLine; rank: number; speed: number }[] = []
-  for (const l of consumers) {
-    const speed = deviceSpeed(l.derived!)
-    if (speed === null) continue
-    for (let i = 0; i < l.view.line.qty; i++) devices.push({ line: l, rank: rank(needs.get(l)!), speed })
-  }
-  const sockets: Socket[] = suppliers.flatMap((l) => poePortsOut(l.derived!).flatMap((p) => Array.from({ length: l.view.line.qty * p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity }))))
-  const got = placeBySpeed(devices, sockets)
-
+/** Warns when a device has a faster network port than the PoE port it was given, so it can't run at full speed. */
+function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Placement | null)[]): PlanCheck[] {
   const slow = new Map<DerivedLine, { n: number; of: number; speed: number; at: number }>()
   devices.forEach((d, i) => {
-    const at = got[i]
+    const at = placed[i]?.speed
     const row = slow.get(d.line) ?? { n: 0, of: d.line.view.line.qty, speed: d.speed, at: Infinity }
-    if (at !== null && at !== undefined && at < d.speed) {
+    if (at !== undefined && at < d.speed) {
       row.n++
       row.at = Math.min(row.at, at)
     }
@@ -192,7 +213,36 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     verdict: lost === 0 ? 'ok' : 'bad',
     text: `${byClass(need)} ${devices === 1 ? 'device' : 'devices'} for ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}${lost > 0 ? `: ${lost} can't be given a port of a high enough class` : ''}.`,
   })
-  if (lost === 0) out.push(...speedCheck(consumers, needs, suppliers))
+  if (lost > 0) return out
+
+  // Which device goes on which switch: each switch has a budget of its own, so the total isn't enough.
+  const placing: { line: DerivedLine; rank: number; speed: number; draw: number }[] = []
+  for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: metric(l.derived, 'power_draw_max_w') ?? 0 })
+  const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
+  const budgets = units.map((u) => metric(u.line.derived, 'poe_budget_w') ?? Infinity)
+  const socketList: Socket[] = units.flatMap((u, unit) => poePortsOut(u.line.derived!).flatMap((p) => Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit }))))
+  const placed = allocate(placing, socketList, budgets)
+  const stranded = placing.filter((_, i) => placed[i] === null)
+  if (stranded.length > 0 && demand <= supply) {
+    const names = [...new Set(stranded.map((d) => name(d.line)))].join(', ')
+    const at = out.findIndex((c) => c.id === 'poe-power')
+    const bad: PlanCheck = { id: 'poe-power', label: 'PoE power', verdict: 'bad', text: `The ${supply} W adds up, but each switch has its own budget, and no way of dividing the devices among them powers all: ${stranded.length} of ${names} ${stranded.length === 1 ? 'is' : 'are'} left without.` }
+    if (out[at]?.verdict === 'ok') out[at] = bad
+    return out
+  }
+  if (units.length > 1 && stranded.length === 0) {
+    const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
+    const parts = units.flatMap((u, k) => {
+      const mine = placing.filter((_, i) => placed[i]?.unit === k)
+      if (mine.length === 0) return []
+      const counts = new Map<string, number>()
+      for (const d of mine) counts.set(name(d.line), (counts.get(name(d.line)) ?? 0) + 1)
+      const used = mine.reduce((n, d) => n + d.draw, 0)
+      return [`${label(u)}: ${[...counts].map(([nm, c]) => `${c} × ${nm}`).join(', ')} (${used} of ${budgets[k] === Infinity ? '?' : budgets[k]} W)`]
+    })
+    out.push({ id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to divide them: ${parts.join('; ')}.` })
+  }
+  out.push(...speedCheck(placing, placed))
   return out
 }
 
