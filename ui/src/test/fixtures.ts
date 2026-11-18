@@ -3,6 +3,7 @@ import type { Derived, HistoryResponse, Port, Product, ProductsResponse, Variant
 export function variant(overrides: Partial<Variant> = {}): Variant {
   return {
     id: 'v1',
+    num: 1,
     sku: 'SKU-1',
     title: 'Black',
     status: 'Available',

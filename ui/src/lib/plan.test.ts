@@ -22,29 +22,45 @@ describe('serialising lines', () => {
 })
 
 describe('plan slugs', () => {
+  const catalogue = [
+    product({ region: 'us', slug: 'usw-pro-max-24-poe', variants: [variant({ num: 12, sku: 'USW-Pro-Max-24-PoE' })] }),
+    product({ region: 'us', slug: 'u7-pro', variants: [variant({ num: 130, sku: 'U7-Pro-W' }), variant({ num: 131, sku: 'U7-Pro-B' })] }),
+    product({ region: 'eu', slug: 'odd', variants: [variant({ num: 20000, sku: 'A B/C:D' })] }),
+  ]
   const lines: PlanLine[] = [
     { ref: 'us/usw-pro-max-24-poe', sku: 'USW-Pro-Max-24-PoE', qty: 2, addedCents: 79900 },
-    { ref: 'us/u7-pro', sku: 'U7-Pro', qty: 5, addedCents: null },
-    { ref: 'eu/odd', sku: 'A B/C:D', qty: 1, addedCents: 100 },
+    { ref: 'us/u7-pro', sku: 'U7-Pro-B', qty: 5, addedCents: null },
+    { ref: 'eu/odd', sku: 'A B/C:D', qty: 99, addedCents: 100 },
   ]
 
-  it('round-trips, in order, and is URL-safe', () => {
-    const slug = encodePlan(lines)
+  it('round-trips, in order, without the price, and is URL-safe', () => {
+    const slug = encodePlan(lines, catalogue)
     expect(slug).toMatch(/^[A-Za-z0-9_-]+$/)
-    expect(decodePlan(slug)).toEqual(lines)
+    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0 })
   })
 
-  it('is shorter than the lines written out', () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({ ref: `us/usw-pro-max-24-poe`, sku: `SKU-${i}`, qty: 1, addedCents: 79900 }))
-    expect(encodePlan(many).length).toBeLessThan(many.map(serializeLine).join('&').length / 2)
+  it('takes two bytes a line while numbers are small', () => {
+    // 12 and 2: 2 bytes. 131 and 5: 3 (131 needs two). 20000 and 99: 4 (20000 needs three). 9 bytes = 12 characters.
+    expect(encodePlan(lines, catalogue)).toHaveLength(12)
+    expect(encodePlan(lines.slice(0, 1), catalogue)).toHaveLength(3)
   })
 
-  it('holds an empty plan', () => {
-    expect(decodePlan(encodePlan([]))).toEqual([])
+  it('leaves out lines that are not in the catalogue, and counts the ones it cannot place', () => {
+    const slug = encodePlan([...lines, { ref: 'us/gone', sku: 'G', qty: 1, addedCents: null }], catalogue)
+    expect(decodePlan(slug, catalogue)!.lines).toHaveLength(3)
+    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1 })
+  })
+
+  it('merges a repeated variant and holds an empty plan', () => {
+    const once = { ...lines[0]!, qty: 1 }
+    expect(decodePlan(encodePlan([once, once], catalogue), catalogue)!.lines).toHaveLength(1)
+    expect(encodePlan([], catalogue)).toBe('')
   })
 
   it('refuses what it did not make', () => {
-    for (const bad of ['', 'not a slug', '!!!!', 'AAAA', 'a'.repeat(MAX_SLUG + 1)]) expect(decodePlan(bad)).toBeNull()
+    // A bare number with no quantity, a quantity of 0 or 100, a number of 0, and a number running off the end.
+    const bad = ['', 'not a slug', '!!!!', 'a'.repeat(MAX_SLUG + 1), btoa('\x0c'), btoa('\x0c\x00'), btoa('\x0c\x64'), btoa('\x00\x01'), btoa('\x0c\x01\x80')].map((s) => s.replace(/=+$/, ''))
+    for (const slug of bad) expect(decodePlan(slug, catalogue), slug).toBeNull()
   })
 })
 
