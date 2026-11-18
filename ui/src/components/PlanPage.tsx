@@ -27,6 +27,7 @@ const STATE: Record<LineState, { label: string; tone: Tone }> = {
 const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
   ok: { mark: '✓', tone: 'text-ok' },
   bad: { mark: '✕', tone: 'text-bad' },
+  warn: { mark: '!', tone: 'text-warn' },
   unknown: { mark: '?', tone: 'text-muted' },
   info: { mark: '•', tone: 'text-muted' },
 }

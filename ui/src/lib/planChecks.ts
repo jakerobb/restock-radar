@@ -1,9 +1,9 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
-import { POE_CLASSES } from './requirements'
+import { formatSpeed, POE_CLASSES } from './requirements'
 
-/** What a check found. 'info' is a fact with nothing to judge it against. */
-export type CheckVerdict = 'ok' | 'bad' | 'unknown' | 'info'
+/** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
+export type CheckVerdict = 'ok' | 'bad' | 'warn' | 'unknown' | 'info'
 
 export interface PlanCheck {
   id: string
@@ -47,6 +47,60 @@ function poeNeed(d: Derived): string | null {
   return onlyPoE && classes.length > 0 ? lowest(classes) : null
 }
 
+/**
+ * How fast a PoE-powered device's network port is: its PoE-in port if the store marks one, else its fastest
+ * copper port (the one a PoE cable would plug into). Null when that isn't known.
+ */
+function deviceSpeed(d: Derived): number | null {
+  const inPorts = d.known.ports ? poePortsIn(d) : []
+  const candidates = inPorts.length > 0 ? inPorts : d.known.ports ? dataPorts(d).filter((p) => p.media === 'rj45' && p.poe_direction !== 'out') : []
+  const best = Math.max(0, ...candidates.map((p) => p.max_speed_mbps))
+  return best > 0 ? best : null
+}
+
+interface Socket {
+  rank: number
+  /** Infinity when the store doesn't say, so an unknown speed never causes a warning. */
+  speed: number
+}
+
+/**
+ * Gives as many devices as possible a port at least as fast as their own (and of a high enough class), then
+ * puts the rest on the fastest port left that can power them. Devices are taken fastest first, each on the
+ * lowest class of port that is fast enough, so faster and higher-class ports stay free for those that need them.
+ * Returns, per device (in the order given), the speed it ends up at; null when no port could take it.
+ */
+function placeBySpeed(devices: { rank: number; speed: number }[], sockets: Socket[]): (number | null)[] {
+  const free = [...sockets]
+  const result: (number | null)[] = devices.map(() => null)
+  const order = devices.map((_, i) => i).sort((a, b) => devices[b]!.speed - devices[a]!.speed || devices[b]!.rank - devices[a]!.rank)
+  const slowed: number[] = []
+  for (const i of order) {
+    const d = devices[i]!
+    let best = -1
+    free.forEach((f, k) => {
+      if (f.rank < d.rank || f.speed < d.speed) return
+      if (best < 0 || f.rank < free[best]!.rank || (f.rank === free[best]!.rank && f.speed < free[best]!.speed)) best = k
+    })
+    if (best < 0) slowed.push(i)
+    else {
+      result[i] = d.speed
+      free.splice(best, 1)
+    }
+  }
+  for (const i of slowed.sort((a, b) => devices[b]!.rank - devices[a]!.rank)) {
+    let best = -1
+    free.forEach((f, k) => {
+      if (f.rank >= devices[i]!.rank && (best < 0 || f.speed > free[best]!.speed)) best = k
+    })
+    if (best >= 0) {
+      result[i] = free[best]!.speed
+      free.splice(best, 1)
+    }
+  }
+  return result
+}
+
 /** "6 PoE++ and 2 PoE", highest class first. */
 const byClass = (counts: Map<string, number>): string =>
   [...counts]
@@ -66,6 +120,33 @@ function unplaced(need: Map<string, number>, have: Map<string, number>): number 
     }
   }
   return lost
+}
+
+/** Warns when a device has a faster network port than the PoE ports it can be given, so it can't run at full speed. */
+function speedCheck(consumers: DerivedLine[], needs: Map<DerivedLine, string | null>, suppliers: DerivedLine[]): PlanCheck[] {
+  const devices: { line: DerivedLine; rank: number; speed: number }[] = []
+  for (const l of consumers) {
+    const speed = deviceSpeed(l.derived!)
+    if (speed === null) continue
+    for (let i = 0; i < l.view.line.qty; i++) devices.push({ line: l, rank: rank(needs.get(l)!), speed })
+  }
+  const sockets: Socket[] = suppliers.flatMap((l) => poePortsOut(l.derived!).flatMap((p) => Array.from({ length: l.view.line.qty * p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity }))))
+  const got = placeBySpeed(devices, sockets)
+
+  const slow = new Map<DerivedLine, { n: number; of: number; speed: number; at: number }>()
+  devices.forEach((d, i) => {
+    const at = got[i]
+    const row = slow.get(d.line) ?? { n: 0, of: d.line.view.line.qty, speed: d.speed, at: Infinity }
+    if (at !== null && at !== undefined && at < d.speed) {
+      row.n++
+      row.at = Math.min(row.at, at)
+    }
+    slow.set(d.line, row)
+  })
+  const limited = [...slow].filter(([, r]) => r.n > 0)
+  if (limited.length === 0) return []
+  const parts = limited.map(([l, r]) => `${r.n === r.of ? (r.of === 1 ? '' : 'all ') : `${r.n} of `}${r.of === 1 ? '' : `${r.of} `}${name(l)} (${formatSpeed(r.speed)} port) would run at ${r.at === Infinity ? 'a lower speed' : `${formatSpeed(r.at)}`}`)
+  return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
 }
 
 function poeCheck(lines: DerivedLine[]): PlanCheck[] {
@@ -111,22 +192,33 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     verdict: lost === 0 ? 'ok' : 'bad',
     text: `${byClass(need)} ${devices === 1 ? 'device' : 'devices'} for ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}${lost > 0 ? `: ${lost} can't be given a port of a high enough class` : ''}.`,
   })
+  if (lost === 0) out.push(...speedCheck(consumers, needs, suppliers))
   return out
 }
 
+/** The product types that could go in a rack, so a desktop one is worth a mention. An access point or camera never would. */
+const RACKABLE_TYPES = new Set(['Switches', 'Gateways', 'Storage'])
+
 function rackCheck(lines: DerivedLine[]): PlanCheck[] {
+  const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '')
   const mounted = lines.filter((l) => l.derived?.known.rack && l.derived.rack.mountable)
-  if (mounted.length === 0) return []
+  // Equipment that sits on a shelf or desk, and equipment whose mounting isn't known (not the same thing).
+  const desktop = lines.filter((l) => rackable(l) && l.derived?.known.rack && !l.derived.rack.mountable)
+  const unsureMounting = lines.filter((l) => rackable(l) && !l.derived?.known.rack)
+  if (mounted.length === 0 && desktop.length === 0 && unsureMounting.length === 0) return []
+
   const unitsOf = (l: DerivedLine) => l.derived!.rack.units
-  const unsure = mounted.filter((l) => unitsOf(l) <= 0)
+  const unsureHeight = mounted.filter((l) => unitsOf(l) <= 0)
   const total = mounted.reduce((n, l) => n + l.view.line.qty * Math.max(0, unitsOf(l)), 0)
   const parts = mounted.filter((l) => unitsOf(l) > 0).map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)} ${unitsOf(l)}U`)
-  const base = `${total}U of rack space${parts.length > 0 ? ` (${parts.join(', ')})` : ''}`
-  return [
-    unsure.length > 0
-      ? { id: 'rack', label: 'Rack space', verdict: 'unknown', text: `Can't tell: the height of ${list(unsure)} isn't known. ${base} so far.` }
-      : { id: 'rack', label: 'Rack space', verdict: 'info', text: base + '.' },
-  ]
+  const base = mounted.length > 0 ? `${total}U of rack space${parts.length > 0 ? ` (${parts.join(', ')})` : ''}` : 'Nothing in the plan goes in a rack'
+  const unsure = unsureHeight.length > 0 || unsureMounting.length > 0
+  const sentences = [
+    unsureHeight.length > 0 ? `Can't tell: the height of ${list(unsureHeight)} isn't known. ${base} so far.` : `${base}.`,
+    desktop.length > 0 && `Not rack-mount, so it needs a shelf or desk space: ${list(desktop)}.`,
+    unsureMounting.length > 0 && `Can't tell whether ${list(unsureMounting)} ${unsureMounting.length === 1 ? 'is' : 'are'} rack-mount.`,
+  ].filter(Boolean)
+  return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: sentences.join(' ') }]
 }
 
 /**
