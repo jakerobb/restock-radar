@@ -1,4 +1,4 @@
-import { addLine, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
+import { addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
 const line = (over: Partial<PlanLine> = {}): PlanLine => ({ ref: 'us/widget', sku: 'SKU-1', qty: 1, addedCents: 10900, ...over })
@@ -18,6 +18,33 @@ describe('serialising lines', () => {
     expect(parsePlan(['us/a:S:1:', 'junk', 'us/a:S:5:', 'us/b:S:2:100'])).toEqual([line({ ref: 'us/a', sku: 'S', addedCents: null }), line({ ref: 'us/b', sku: 'S', qty: 2, addedCents: 100 })])
     expect(parsePlan('not a list')).toEqual([])
     expect(parsePlan(Array.from({ length: 300 }, (_, i) => `us/p${i}:S:1:`))).toHaveLength(MAX_LINES)
+  })
+})
+
+describe('plan slugs', () => {
+  const lines: PlanLine[] = [
+    { ref: 'us/usw-pro-max-24-poe', sku: 'USW-Pro-Max-24-PoE', qty: 2, addedCents: 79900 },
+    { ref: 'us/u7-pro', sku: 'U7-Pro', qty: 5, addedCents: null },
+    { ref: 'eu/odd', sku: 'A B/C:D', qty: 1, addedCents: 100 },
+  ]
+
+  it('round-trips, in order, and is URL-safe', () => {
+    const slug = encodePlan(lines)
+    expect(slug).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(decodePlan(slug)).toEqual(lines)
+  })
+
+  it('is shorter than the lines written out', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ ref: `us/usw-pro-max-24-poe`, sku: `SKU-${i}`, qty: 1, addedCents: 79900 }))
+    expect(encodePlan(many).length).toBeLessThan(many.map(serializeLine).join('&').length / 2)
+  })
+
+  it('holds an empty plan', () => {
+    expect(decodePlan(encodePlan([]))).toEqual([])
+  })
+
+  it('refuses what it did not make', () => {
+    for (const bad of ['', 'not a slug', '!!!!', 'AAAA', 'a'.repeat(MAX_SLUG + 1)]) expect(decodePlan(bad)).toBeNull()
   })
 })
 

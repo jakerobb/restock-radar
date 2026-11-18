@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { serializeLine, type PlanLine } from '../lib/plan'
+import { encodePlan, serializeLine, type PlanLine } from '../lib/plan'
 import { setPlan } from '../lib/planStore'
 import { derived, port, product, productsResponse, variant } from '../test/fixtures'
 import { renderRoute, stubFetch } from '../test/render'
@@ -43,6 +43,15 @@ describe('adding to the plan', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add PoE Switch to the plan' }))
     expect(await screen.findByRole('link', { name: 'In plan (2)' })).toBeInTheDocument()
+  })
+
+  it('adds from a product card on the main page', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/')
+    await user.click(await screen.findByRole('button', { name: 'Add Access Point to the plan' }))
+    expect(await screen.findByRole('link', { name: 'Plan (1)' })).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
   })
 
   it('adds from a product page and a comparison', async () => {
@@ -153,12 +162,12 @@ describe('PlanPage', () => {
     setPlan([line({ qty: 2 })])
     renderRoute('/plan')
     const box = await screen.findByLabelText('Link to this plan')
-    expect(box).toHaveValue(`${window.location.origin}/plan?l=${encodeURIComponent(serializeLine(line({ qty: 2 })))}`)
+    expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })])}`)
   })
 })
 
 describe('a shared plan', () => {
-  const link = (lines: PlanLine[]) => '/plan?' + lines.map((l) => `l=${encodeURIComponent(serializeLine(l))}`).join('&')
+  const link = (lines: PlanLine[]) => `/plan/${encodePlan(lines)}`
 
   it('is shown read-only, apart from the visitor’s own plan', async () => {
     catalog()
@@ -178,7 +187,7 @@ describe('a shared plan', () => {
     setPlan([line({ ref: 'us/ap', sku: 'AP-1', addedCents: 15000 })])
     const { router } = renderRoute(link([line({ qty: 3 })]))
     await user.click(await screen.findByRole('button', { name: 'Replace my plan with it' }))
-    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('l'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/plan'))
     expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/switch:SW-8:3:20000'])
     expect(await screen.findByLabelText('Quantity of PoE Switch')).toHaveValue(3)
   })
@@ -191,6 +200,21 @@ describe('a shared plan', () => {
     await user.click(screen.getByRole('button', { name: 'Back to my plan' }))
     expect(await screen.findByText(/Nothing in the plan yet/)).toBeInTheDocument()
     expect(localStorage.getItem('restock-radar.plan')).toBeNull()
+  })
+
+  it('says so when the link holds no plan', async () => {
+    catalog()
+    renderRoute('/plan/not-a-plan')
+    expect(await screen.findByText(/doesn't hold a plan/)).toBeInTheDocument()
+    expect(screen.queryByText(/someone shared/)).not.toBeInTheDocument()
+  })
+
+  it('still opens the old ?l= links, as the new kind', async () => {
+    catalog()
+    const { router } = renderRoute('/plan?l=' + encodeURIComponent(serializeLine(line({ qty: 3 }))))
+    await screen.findByText(/someone shared with you/)
+    expect(router.state.location.pathname).toBe(`/plan/${encodePlan([line({ qty: 3 })])}`)
+    await waitFor(() => expect(rowFor('PoE Switch')).toHaveTextContent('$600'))
   })
 
   it('ignores lines in the URL that make no sense', async () => {

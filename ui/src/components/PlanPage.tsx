@@ -1,9 +1,9 @@
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import { usePlan } from '../hooks/usePlan'
 import { formatPrice } from '../lib/format'
-import { lineKey, MAX_QTY, parsePlan, planTotals, serializeLine, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
+import { decodePlan, encodePlan, lineKey, MAX_QTY, parsePlan, planTotals, serializeLine, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
@@ -15,7 +15,7 @@ import { Select } from './ui/Select'
 import { TextInput } from './ui/TextInput'
 import type { Tone } from './ui/tone'
 
-/** What the plan page keeps in the URL: a shared plan, as its lines in text form. */
+/** Old share links kept a plan in the query as `l`; /plan redirects them to /plan/{slug}. */
 export interface PlanSearch {
   l?: string[]
 }
@@ -126,7 +126,7 @@ function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
 
 function ShareLink({ lines }: { lines: PlanLine[] }) {
   const [copied, setCopied] = useState(false)
-  const url = `${window.location.origin}/plan?${lines.map((l) => `l=${encodeURIComponent(serializeLine(l))}`).join('&')}`
+  const url = `${window.location.origin}/plan/${encodePlan(lines)}`
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url)
@@ -146,15 +146,16 @@ function ShareLink({ lines }: { lines: PlanLine[] }) {
 }
 
 export default function PlanPage() {
-  const search = useSearch({ strict: false }) as PlanSearch
+  const { slug } = useParams({ strict: false }) as { slug?: string }
   const navigate = useNavigate()
   const mine = usePlan()
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived } = useDerived()
   const [confirmClear, setConfirmClear] = useState(false)
 
-  const shared = search.l !== undefined
-  const lines = useMemo(() => (shared ? parsePlan(search.l) : mine.lines), [shared, search.l, mine.lines])
+  const shared = slug !== undefined
+  const sharedLines = useMemo(() => (slug === undefined ? null : decodePlan(slug)), [slug])
+  const lines = useMemo(() => (shared ? (sharedLines ?? []) : mine.lines), [shared, sharedLines, mine.lines])
   const products = useMemo(() => new Map((productData?.products ?? []).map((p) => [`${p.region}/${p.slug}`, p])), [productData?.products])
   const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
   const totals = useMemo(() => planTotals(views), [views])
@@ -162,14 +163,22 @@ export default function PlanPage() {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
     return planChecks(views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null })))
   }, [views, derived])
-  const leaveShared = () => void navigate({ to: '/plan', search: {}, replace: true })
+  const leaveShared = () => void navigate({ to: '/plan', replace: true })
 
   return (
     <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
       <PageNav title="Build plan" />
       <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
 
-      {shared && (
+      {shared && sharedLines === null && (
+        <Notice tone="bad" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span>That link doesn't hold a plan; it may have been cut short.</span>
+          <button type="button" className="cursor-pointer text-sm underline underline-offset-2" onClick={leaveShared}>
+            Back to my plan
+          </button>
+        </Notice>
+      )}
+      {shared && sharedLines !== null && (
         <Notice tone="ok" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <span>This is a plan someone shared with you, not yours.</span>
           <Button

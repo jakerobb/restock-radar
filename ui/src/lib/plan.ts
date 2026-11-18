@@ -1,3 +1,4 @@
+import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate'
 import type { Product, Variant } from '../api/types'
 import { totalCents } from './format'
 import { cleanRefs, productRef } from './compare'
@@ -55,6 +56,30 @@ export function parsePlan(list: unknown): PlanLine[] {
     if (out.length >= MAX_LINES) break
   }
   return out
+}
+
+/** Longest plan slug we'll unpack. A plan of MAX_LINES lines needs far less; this bounds what a crafted one can inflate to. */
+export const MAX_SLUG = 3000
+
+const toBase64Url = (b: Uint8Array): string => {
+  let bin = ''
+  for (const x of b) bin += String.fromCharCode(x)
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+const fromBase64Url = (s: string): Uint8Array => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+
+/** A plan as a short URL-safe slug: its lines, one per row, compressed, then base64url. */
+export const encodePlan = (lines: PlanLine[]): string => toBase64Url(deflateSync(strToU8(lines.map(serializeLine).join('\n')), { level: 9 }))
+
+/** The inverse. Null when the slug isn't one we made; malformed lines inside it are dropped. */
+export function decodePlan(slug: string): PlanLine[] | null {
+  if (slug === '' || slug.length > MAX_SLUG || !/^[A-Za-z0-9_-]+$/.test(slug)) return null
+  try {
+    return parsePlan(strFromU8(inflateSync(fromBase64Url(slug))).split('\n'))
+  } catch {
+    return null
+  }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useCan, useProducts } from './api/queries'
+import { usePlan } from './hooks/usePlan'
 import { useHistoryDays } from './hooks/useHistoryDays'
 import { useSidebarOpen } from './hooks/useSidebarOpen'
 import { useSort } from './hooks/useSort'
@@ -18,6 +19,7 @@ import { groupProducts } from './lib/group'
 import { filterProducts, prefixCounts, tagCounts, typeCounts } from './lib/filter'
 
 export default function App() {
+  const planItems = usePlan().lines.reduce((n, l) => n + l.qty, 0)
   const { data, isPending, isError, refetch } = useProducts()
   const canAdd = useCan('watchlist:write')
   const [historyDays, setHistoryDays] = useHistoryDays()
@@ -63,6 +65,9 @@ export default function App() {
         <div className="flex items-center gap-2">
           <a href="/find" className="text-sm text-muted underline">
             Finder
+          </a>
+          <a href="/plan" className="text-sm text-muted underline">
+            Plan{planItems > 0 ? ` (${planItems})` : ''}
           </a>
           <a href="/status" className="text-sm text-muted underline">
             Status

@@ -1,6 +1,7 @@
 import type { Product } from '../api/types'
 import type { HistoryIndex } from '../lib/history'
 import { summarizeVariants } from '../lib/status'
+import { AddToPlan } from './AddToPlan'
 import { HistoryLegend } from './HistoryLegend'
 import { VariantHistoryChart } from './VariantHistoryChart'
 import { VariantTable } from './VariantTable'
@@ -28,7 +29,8 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
           <Badge tone={tone}>{label}</Badge>
           {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
         </h2>
-        <div className="flex shrink-0 gap-3 text-sm">
+        <div className="flex shrink-0 items-baseline gap-3 text-sm">
+          <AddToPlan product={product} />
           {/* A merged group has no page of its own: each member has its own specification. */}
           {!product.id.startsWith('collection:') && (
             <a className="text-accent underline-offset-2 hover:underline" href={`/p/${encodeURIComponent(product.region)}/${encodeURIComponent(product.slug)}`}>
