@@ -23,16 +23,45 @@ export interface SwitchOption {
   partial: boolean
 }
 
+/** A switch that works, without the reason it was picked. */
+export type ListedSwitch = Omit<SwitchOption, 'label'>
+
 export interface SwitchSuggestions {
   options: SwitchOption[]
-  /** How many switches in the catalogue would work, in stock or not. */
-  fitting: number
+  /** Every acceptable switch that would work, in stock or not, cheapest first. */
+  all: ListedSwitch[]
+  /** Switches that would work but run on a power method that isn't accepted. */
+  hidden: number
 }
+
+/** The ways of powering a switch a buyer can accept or rule out. Backup supplies (RPS, battery) aren't one. */
+export type PowerMethod = 'ac' | 'dc' | 'poe'
+export const POWER_METHODS: readonly { id: PowerMethod; label: string }[] = [
+  { id: 'ac', label: 'AC' },
+  { id: 'dc', label: 'DC' },
+  { id: 'poe', label: 'PoE' },
+]
+/** What most people have to hand: mains and a PoE injector or switch upstream. */
+export const DEFAULT_POWER_METHODS: readonly PowerMethod[] = ['ac', 'poe']
+
+const METHOD_OF: Record<string, PowerMethod | undefined> = { ac: 'ac', dc: 'dc', poe: 'poe', passive_poe: 'poe' }
+
+/** True when the switch can run on at least one of the accepted methods. One that doesn't say how it is powered is not accepted. */
+export const acceptsPower = (r: CatalogRow, accepted: ReadonlySet<PowerMethod>): boolean => (r.derived?.power ?? []).some((s) => {
+  const m = METHOD_OF[s.kind]
+  return m !== undefined && accepted.has(m)
+})
 
 const hasPoeOut = (r: CatalogRow): boolean => !!r.derived?.known.ports && r.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out')
 const hasBudget = (r: CatalogRow): boolean => (r.derived?.metrics.find((m) => m.name === 'poe_budget_w')?.value ?? 0) > 0
 
 type Fit = Omit<SwitchOption, 'label' | 'replaces'>
+
+export interface Fits {
+  fits: Fit[]
+  /** The plan's switches that can't be bought now; the fits were worked out without them. */
+  replaces: DerivedLine[]
+}
 
 /**
  * Tries each PoE switch in the catalogue added to the plan, one at a time and then a few of the same,
@@ -43,7 +72,7 @@ type Fit = Omit<SwitchOption, 'label' | 'replaces'>
  * below 1 GbE (or below its own speed, if lower), and when the plan only falls short on speed, one that doesn't
  * speed anything up.
  */
-export function findSwitches(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): SwitchSuggestions {
+export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): Fits {
   // A switch that can't be bought now gives nothing to count on, so it is checked without and its stand-ins offered.
   const replaces = fullPlan.filter((l) => l.view.state !== 'in' && !!l.derived?.known.ports && l.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out'))
   const plan = fullPlan.filter((l) => !replaces.includes(l))
@@ -72,6 +101,12 @@ export function findSwitches(fullPlan: DerivedLine[], rows: CatalogRow[], produc
     }
   }
 
+  return { fits, replaces }
+}
+
+/** From the fits that run on an accepted power method, the few worth a look and the full list; and how many were left out. */
+export function pickOptions({ fits: every, replaces }: Fits, accepted: ReadonlySet<PowerMethod>): SwitchSuggestions {
+  const fits = every.filter((f) => acceptsPower(f.row, accepted))
   const price = (f: Fit) => f.cents ?? Infinity
   const room = (f: Fit) => (f.stats.spareWatts ?? 0) + f.stats.sparePorts
   const best = (xs: Fit[], by: (f: Fit) => number): Fit | undefined => xs.reduce<Fit | undefined>((a, b) => (a === undefined || by(b) < by(a) ? b : a), undefined)
@@ -92,5 +127,9 @@ export function findSwitches(fullPlan: DerivedLine[], rows: CatalogRow[], produc
     if (same) continue
     options.push({ ...fit, label, replaces })
   }
-  return { options, fitting: fits.length }
+  const all = fits.map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.row.product.title.localeCompare(b.row.product.title))
+  return { options, all, hidden: every.length - fits.length }
 }
+
+/** Both steps at once, for when the power methods are settled. */
+export const findSwitches = (plan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, accepted: ReadonlySet<PowerMethod> = new Set<PowerMethod>(['ac', 'dc', 'poe'])): SwitchSuggestions => pickOptions(findFits(plan, rows, products), accepted)

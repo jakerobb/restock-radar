@@ -16,7 +16,7 @@ function catalog(specs: { slug: string; type: string; cents: number; status?: 'A
 }
 
 const e7 = (): Partial<Derived> => ({ ports: [port({ count: 1, max_speed_mbps: 10000 })], metrics: [metric('power_draw_max_w', 43)], power: [{ kind: 'poe', poe_class: 'PoE++', detail: 'PoE++' }], known: { ...known, poe: false } })
-const sw = (ports: number, cls: string, budget: number, speed = 1000): Partial<Derived> => ({ ports: [port({ count: ports, max_speed_mbps: speed, poe_class: cls, poe_direction: 'out' })], metrics: [metric('poe_budget_w', budget)] })
+const sw = (ports: number, cls: string, budget: number, speed = 1000): Partial<Derived> => ({ ports: [port({ count: ports, max_speed_mbps: speed, poe_class: cls, poe_direction: 'out' })], metrics: [metric('poe_budget_w', budget)], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] })
 
 function plan(c: ReturnType<typeof catalog>, ...items: [string, number][]): DerivedLine[] {
   return items.map(([slug, qty]) => {
@@ -72,7 +72,7 @@ describe('findSwitches', () => {
 
   it('says nothing fits when even several of the same do not', () => {
     const c = catalog(base)
-    expect(findSwitches(plan(c, ['e7', 99]), c.rows, c.map)).toEqual({ options: [], fitting: 0 })
+    expect(findSwitches(plan(c, ['e7', 99]), c.rows, c.map)).toMatchObject({ options: [], all: [], hidden: 0 })
   })
 
   it('has nothing to suggest for a plan with no PoE devices', () => {
@@ -107,5 +107,33 @@ describe('findSwitches', () => {
     const { options } = findSwitches(plan(c, ['e7', 6], ['mid', 1]), c.rows, c.map)
     expect(options[0]!.replaces.map((l) => l.view.line.ref)).toEqual(['us/mid'])
     expect(options[0]!.row.product.slug).not.toBe('mid')
+  })
+
+  describe('power methods', () => {
+    const dc = { slug: 'dc', type: 'Switches', cents: 10000, d: { ...sw(24, 'PoE++', 600, 10000), power: [{ kind: 'dc' as const, poe_class: '', detail: 'DC' }] } }
+    const poeFed = { slug: 'poefed', type: 'Switches', cents: 12000, d: { ...sw(24, 'PoE++', 600, 10000), power: [{ kind: 'ac' as const, poe_class: '', detail: 'AC' }, { kind: 'poe' as const, poe_class: 'PoE++', detail: 'PoE++' }] } }
+    const unsaid = { slug: 'unsaid', type: 'Switches', cents: 9000, d: { ...sw(24, 'PoE++', 600, 10000), power: [] } }
+
+    it('leaves out switches that can only run on a method that is not accepted, and says how many', () => {
+      const c = catalog([...base, dc, unsaid])
+      const found = findSwitches(plan(c, ['e7', 6]), c.rows, c.map, new Set(['ac', 'poe']))
+      expect(found.all.map((o) => o.row.product.slug)).not.toContain('dc')
+      expect(found.hidden).toBe(2) // the DC one, and the one that doesn't say how it is powered
+      const withDc = findSwitches(plan(c, ['e7', 6]), c.rows, c.map, new Set(['dc']))
+      expect(withDc.all.map((o) => o.row.product.slug)).toEqual(['dc'])
+    })
+
+    it('accepts a switch that can use any one of the accepted methods', () => {
+      const c = catalog([...base, poeFed])
+      const found = findSwitches(plan(c, ['e7', 6]), c.rows, c.map, new Set(['poe']))
+      expect(found.all.map((o) => o.row.product.slug)).toEqual(['poefed'])
+    })
+
+    it('lists every acceptable switch, cheapest first', () => {
+      const c = catalog(base)
+      const { all, options } = findSwitches(plan(c, ['e7', 6]), c.rows, c.map)
+      expect(all.length).toBeGreaterThanOrEqual(options.length)
+      expect(all.map((o) => o.cents)).toEqual([...all.map((o) => o.cents)].sort((a, b) => a! - b!))
+    })
   })
 })
