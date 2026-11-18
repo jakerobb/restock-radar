@@ -109,6 +109,35 @@ describe('findSwitches', () => {
     expect(options[0]!.row.product.slug).not.toBe('mid')
   })
 
+  describe('two different switches', () => {
+    const cam = (): Partial<Derived> => ({ ports: [port({ count: 1, max_speed_mbps: 1000 })], metrics: [metric('power_draw_max_w', 15)], power: [{ kind: 'poe', poe_class: 'PoE+', detail: 'PoE+' }], known: { ...known, poe: false } })
+    const mixed = [
+      { slug: 'e7', type: 'WiFi', cents: 54900, d: e7() },
+      { slug: 'cam', type: 'Cameras', cents: 10000, d: cam() },
+      { slug: 'tenG', type: 'Switches', cents: 30000, d: sw(2, 'PoE++', 100, 10000) },
+      { slug: 'gig', type: 'Switches', cents: 40000, d: sw(8, 'PoE++', 150) },
+    ]
+
+    it('pairs a 10G switch with a gigabit one when that beats any one model', () => {
+      const c = catalog(mixed)
+      // 2 E7 and 8 cameras: 10 ports and 206 W. Two gig switches have the ports but slow the E7s; the pair is cheaper and full speed.
+      const { options } = findSwitches(plan(c, ['e7', 2], ['cam', 8]), c.rows, c.map)
+      expect(options.map((o) => `${o.label}: ${o.qty} × ${o.row.product.slug}${o.also ? ` + ${o.also.qty} × ${o.also.row.product.slug}` : ''}`)).toEqual([
+        'Cheapest that fits: 2 × gig',
+        'Two switches, cheapest: 1 × tenG + 1 × gig',
+      ])
+      const pair = options[1]!
+      expect(pair.cents).toBe(70000)
+      expect(pair.stats.slowed).toBe(0)
+    })
+
+    it('does not offer a pair when one model, or the same model again, does the job', () => {
+      const c = catalog(mixed)
+      const { options } = findSwitches(plan(c, ['e7', 1], ['cam', 1]), c.rows, c.map)
+      expect(options.every((o) => !o.also)).toBe(true)
+    })
+  })
+
   describe('power methods', () => {
     const dc = { slug: 'dc', type: 'Switches', cents: 10000, d: { ...sw(24, 'PoE++', 600, 10000), power: [{ kind: 'dc' as const, poe_class: '', detail: 'DC' }] } }
     const poeFed = { slug: 'poefed', type: 'Switches', cents: 12000, d: { ...sw(24, 'PoE++', 600, 10000), power: [{ kind: 'ac' as const, poe_class: '', detail: 'AC' }, { kind: 'poe' as const, poe_class: 'PoE++', detail: 'PoE++' }] } }
