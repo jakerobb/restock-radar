@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -580,5 +581,73 @@ func TestTechSpecsDueOldestFirst(t *testing.T) {
 	}
 	if got := slugs(cutoff); len(got) != 2 {
 		t.Fatalf("a product without a category isn't due, got %v", got)
+	}
+}
+
+func TestVariantsGetPermanentNumbers(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	p := product("Available", 10900)
+	p.Variants = append(p.Variants, unistore.Variant{ID: "v2", SKU: "W-2", Title: "EU", Status: "Available", Price: &unistore.Money{Amount: 12900, Currency: "USD"}})
+	_, _ = s.Apply(ctx, "us", p, now)
+	_, _ = s.Apply(ctx, "us", p, now.Add(time.Hour)) // seeing it again must not renumber
+	other := product("Available", 10900)
+	other.ID, other.Slug = "p2", "gadget"
+	other.Variants[0].ID, other.Variants[0].SKU = "v3", "G-1"
+	_, _ = s.Apply(ctx, "us", other, now.Add(2*time.Hour))
+
+	vs, err := s.Variants(ctx, "us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, v := range vs {
+		got[v.SKU] = v.Num
+	}
+	if len(got) != 3 || got["W-1"] != 1 || got["W-2"] != 2 || got["G-1"] != 3 {
+		t.Fatalf("numbers = %v, want W-1:1 W-2:2 G-1:3", got)
+	}
+}
+
+func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := len(migrations) - 1
+	for i := 0; i < prior; i++ {
+		if _, err := raw.Exec(migrations[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		fmt.Sprintf(`PRAGMA user_version = %d`, prior),
+		`INSERT INTO products (region, id, slug, name, title) VALUES ('us', 'p1', 'widget', 'W', 'Widget')`,
+		`INSERT INTO variants (region, id, product_id, sku, title, status, first_seen, last_checked, last_changed) VALUES
+			('us', 'late', 'p1', 'W-2', 'B', 'Available', '2026-02-01T00:00:00Z', '', ''),
+			('us', 'early', 'p1', 'W-1', 'A', 'Available', '2026-01-01T00:00:00Z', '', '')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	_ = raw.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	vs, err := s.Variants(context.Background(), "us")
+	if err != nil || len(vs) != 2 {
+		t.Fatalf("variants = %+v, err = %v", vs, err)
+	}
+	got := map[string]int{}
+	for _, v := range vs {
+		got[v.SKU] = v.Num
+	}
+	if got["W-1"] != 1 || got["W-2"] != 2 {
+		t.Fatalf("numbers = %v, want the earlier variant first", got)
 	}
 }

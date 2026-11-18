@@ -141,6 +141,8 @@ serialized with `BEGIN IMMEDIATE`. Tables: `products`, `variants` (latest
 state), `events` (history, with `notified_at`). Schema is versioned with
 `PRAGMA user_version`. Needs a single replica and a persistent volume.
 
+`variant_numbers` gives every variant a permanent small integer (`num`, served on each variant by `/v1/products`). It is `AUTOINCREMENT`, so a number is never reused, and it identifies the region, product and variant at once. Shared build-plan links are made of these numbers.
+
 `product_specs` holds each product's specification, one row per entry in the
 store's order: its section (id, label, and type, `Standard` or the grid's
 `Overview`), the feature's id and label, its parent group's feature id, the kind

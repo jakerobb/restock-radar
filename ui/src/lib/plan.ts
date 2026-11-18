@@ -1,4 +1,3 @@
-import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate'
 import type { Product, Variant } from '../api/types'
 import { totalCents } from './format'
 import { cleanRefs, productRef } from './compare'
@@ -58,28 +57,99 @@ export function parsePlan(list: unknown): PlanLine[] {
   return out
 }
 
-/** Longest plan slug we'll unpack. A plan of MAX_LINES lines needs far less; this bounds what a crafted one can inflate to. */
-export const MAX_SLUG = 3000
+// ---- Share links ----
+//
+// A shared plan is a slug: for each line, the variant's permanent number (which says which product, in
+// which region, and which variant) and the quantity, each as a variable-length integer, in base64url.
+// Prices don't travel; whoever opens the link sees today's.
 
-const toBase64Url = (b: Uint8Array): string => {
-  let bin = ''
-  for (const x of b) bin += String.fromCharCode(x)
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+/** Longest slug we'll read; MAX_LINES lines need well under this. */
+export const MAX_SLUG = 600
+
+const toBase64Url = (b: number[]): string => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+const fromBase64Url = (s: string): number[] => [...atob(s.replace(/-/g, '+').replace(/_/g, '/'))].map((c) => c.charCodeAt(0))
+
+function writeVarint(out: number[], n: number): void {
+  while (n >= 0x80) {
+    out.push((n & 0x7f) | 0x80)
+    n = Math.floor(n / 128)
+  }
+  out.push(n)
 }
 
-const fromBase64Url = (s: string): Uint8Array => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+/** Reads one integer starting at bytes[at]; null when the bytes run out or it is implausibly long. */
+function readVarint(bytes: number[], at: number): { value: number; next: number } | null {
+  let value = 0
+  for (let i = 0; i < 5; i++) {
+    const b = bytes[at + i]
+    if (b === undefined) return null
+    value += (b & 0x7f) * 128 ** i
+    if (b < 0x80) return { value, next: at + i + 1 }
+  }
+  return null
+}
 
-/** A plan as a short URL-safe slug: its lines, one per row, compressed, then base64url. */
-export const encodePlan = (lines: PlanLine[]): string => toBase64Url(deflateSync(strToU8(lines.map(serializeLine).join('\n')), { level: 9 }))
+/** The variants by number: which product (as "region/slug") and which SKU each is. */
+export function variantsByNum(products: Iterable<Product>): Map<number, { ref: string; sku: string }> {
+  const out = new Map<number, { ref: string; sku: string }>()
+  for (const p of products) for (const v of p.variants) out.set(v.num, { ref: productRef(p), sku: v.sku })
+  return out
+}
 
-/** The inverse. Null when the slug isn't one we made; malformed lines inside it are dropped. */
-export function decodePlan(slug: string): PlanLine[] | null {
+/**
+ * A plan as a short URL-safe slug. Lines whose variant isn't in the catalogue have no number and
+ * are left out, so there may be nothing to share (an empty slug).
+ */
+export function encodePlan(lines: PlanLine[], products: Iterable<Product>): string {
+  const numByKey = new Map<string, number>()
+  for (const [num, { ref, sku }] of variantsByNum(products)) numByKey.set(lineKey({ ref, sku }), num)
+  const bytes: number[] = []
+  for (const l of lines) {
+    const num = numByKey.get(lineKey(l))
+    if (num === undefined) continue
+    writeVarint(bytes, num)
+    writeVarint(bytes, l.qty)
+  }
+  return toBase64Url(bytes)
+}
+
+/** What a slug holds: its lines, and how many of them name a variant the catalogue doesn't have. */
+export interface DecodedPlan {
+  lines: PlanLine[]
+  unknown: number
+}
+
+/** The inverse. Null when the slug isn't one we made. */
+export function decodePlan(slug: string, products: Iterable<Product>): DecodedPlan | null {
   if (slug === '' || slug.length > MAX_SLUG || !/^[A-Za-z0-9_-]+$/.test(slug)) return null
+  let bytes: number[]
   try {
-    return parsePlan(strFromU8(inflateSync(fromBase64Url(slug))).split('\n'))
+    bytes = fromBase64Url(slug)
   } catch {
     return null
   }
+  const byNum = variantsByNum(products)
+  const seen = new Set<string>()
+  const lines: PlanLine[] = []
+  let unknown = 0
+  for (let at = 0; at < bytes.length; ) {
+    const num = readVarint(bytes, at)
+    const qty = num && readVarint(bytes, num.next)
+    if (!num || !qty || num.value < 1 || qty.value < 1 || qty.value > MAX_QTY) return null
+    at = qty.next
+    const target = byNum.get(num.value)
+    if (!target) {
+      unknown++
+      continue
+    }
+    const line: PlanLine = { ...target, qty: qty.value, addedCents: null }
+    if (seen.has(lineKey(line))) continue
+    seen.add(lineKey(line))
+    lines.push(line)
+    if (lines.length + unknown >= MAX_LINES) break
+  }
+  return { lines, unknown }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */

@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { encodePlan, serializeLine, type PlanLine } from '../lib/plan'
+import { encodePlan, type PlanLine } from '../lib/plan'
 import { setPlan } from '../lib/planStore'
 import { derived, port, product, productsResponse, variant } from '../test/fixtures'
 import { renderRoute, stubFetch } from '../test/render'
@@ -8,17 +8,18 @@ import { renderRoute, stubFetch } from '../test/render'
 const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
 const metric = (name: string, value: number) => ({ name, value, unit: 'W', at_least: false, raw: '' })
 
+let products: ReturnType<typeof product>[] = []
 const catalog = () => {
-  const products = [
+  products = [
     product({
       id: '1',
       slug: 'switch',
       title: 'PoE Switch',
       type: 'Switches',
-      variants: [variant({ id: 'a', sku: 'SW-8', title: '8 port', price_cents: 20000 }), variant({ id: 'b', sku: 'SW-16', title: '16 port', price_cents: 35000 })],
+      variants: [variant({ id: 'a', num: 1, sku: 'SW-8', title: '8 port', price_cents: 20000 }), variant({ id: 'b', num: 2, sku: 'SW-16', title: '16 port', price_cents: 35000 })],
     }),
-    product({ id: '2', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'c', sku: 'AP-1', price_cents: 15000 })] }),
-    product({ id: '3', slug: 'gone-stock', title: 'Sold Out Thing', type: 'Switches', variants: [variant({ id: 'd', sku: 'SO-1', status: 'SoldOut', price_cents: 5000 })] }),
+    product({ id: '2', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'c', num: 3, sku: 'AP-1', price_cents: 15000 })] }),
+    product({ id: '3', slug: 'gone-stock', title: 'Sold Out Thing', type: 'Switches', variants: [variant({ id: 'd', num: 4, sku: 'SO-1', status: 'SoldOut', price_cents: 5000 })] }),
   ]
   const ds = [
     derived({ slug: 'switch', known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] }),
@@ -162,12 +163,12 @@ describe('PlanPage', () => {
     setPlan([line({ qty: 2 })])
     renderRoute('/plan')
     const box = await screen.findByLabelText('Link to this plan')
-    expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })])}`)
+    expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })], products)}`)
   })
 })
 
 describe('a shared plan', () => {
-  const link = (lines: PlanLine[]) => `/plan/${encodePlan(lines)}`
+  const link = (lines: PlanLine[]) => `/plan/${encodePlan(lines, products)}`
 
   it('is shown read-only, apart from the visitor’s own plan', async () => {
     catalog()
@@ -204,23 +205,16 @@ describe('a shared plan', () => {
 
   it('says so when the link holds no plan', async () => {
     catalog()
-    renderRoute('/plan/not-a-plan')
+    renderRoute('/plan/!!!')
     expect(await screen.findByText(/doesn't hold a plan/)).toBeInTheDocument()
     expect(screen.queryByText(/someone shared/)).not.toBeInTheDocument()
   })
 
-  it('still opens the old ?l= links, as the new kind', async () => {
+  it('says how many items it holds that are not tracked here', async () => {
     catalog()
-    const { router } = renderRoute('/plan?l=' + encodeURIComponent(serializeLine(line({ qty: 3 }))))
-    await screen.findByText(/someone shared with you/)
-    expect(router.state.location.pathname).toBe(`/plan/${encodePlan([line({ qty: 3 })])}`)
-    await waitFor(() => expect(rowFor('PoE Switch')).toHaveTextContent('$600'))
-  })
-
-  it('ignores lines in the URL that make no sense', async () => {
-    catalog()
-    renderRoute('/plan?l=nonsense&l=us/x:S:999:1')
-    expect(await screen.findByText(/Nothing in the plan yet/)).toBeInTheDocument()
-    expect(screen.queryByText(/someone shared/)).not.toBeInTheDocument()
+    const stray = encodePlan([line({}), line({ ref: 'us/x', sku: 'X' })], [product({ id: 'x', slug: 'x', variants: [variant({ num: 99, sku: 'X' })] }), ...products])
+    renderRoute(`/plan/${stray}`)
+    expect(await screen.findByText(/1 item in it isn’t tracked here/)).toBeInTheDocument()
+    await waitFor(() => expect(rowFor('PoE Switch')).toBeInTheDocument())
   })
 })

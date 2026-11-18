@@ -1,9 +1,10 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useDerived, useProducts } from '../api/queries'
+import type { Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
 import { formatPrice } from '../lib/format'
-import { decodePlan, encodePlan, lineKey, MAX_QTY, parsePlan, planTotals, serializeLine, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
+import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
@@ -14,17 +15,6 @@ import { Notice } from './ui/Notice'
 import { Select } from './ui/Select'
 import { TextInput } from './ui/TextInput'
 import type { Tone } from './ui/tone'
-
-/** Old share links kept a plan in the query as `l`; /plan redirects them to /plan/{slug}. */
-export interface PlanSearch {
-  l?: string[]
-}
-
-export function validatePlanSearch(raw: Record<string, unknown>): PlanSearch {
-  const list = Array.isArray(raw.l) ? raw.l : raw.l === undefined ? [] : [raw.l]
-  const lines = parsePlan(list.map(String))
-  return { l: lines.length > 0 ? lines.map(serializeLine) : undefined }
-}
 
 const STATE: Record<LineState, { label: string; tone: Tone }> = {
   in: statusInfo('Available'),
@@ -124,9 +114,11 @@ function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
   )
 }
 
-function ShareLink({ lines }: { lines: PlanLine[] }) {
+function ShareLink({ lines, products }: { lines: PlanLine[]; products: Product[] }) {
   const [copied, setCopied] = useState(false)
-  const url = `${window.location.origin}/plan/${encodePlan(lines)}`
+  const slug = encodePlan(lines, products)
+  if (slug === '') return null
+  const url = `${window.location.origin}/plan/${slug}`
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url)
@@ -154,8 +146,9 @@ export default function PlanPage() {
   const [confirmClear, setConfirmClear] = useState(false)
 
   const shared = slug !== undefined
-  const sharedLines = useMemo(() => (slug === undefined ? null : decodePlan(slug)), [slug])
-  const lines = useMemo(() => (shared ? (sharedLines ?? []) : mine.lines), [shared, sharedLines, mine.lines])
+  // Numbers in a link mean something only next to the catalogue, so a shared plan waits for it.
+  const decoded = useMemo(() => (slug === undefined || !productData ? undefined : decodePlan(slug, productData.products)), [slug, productData])
+  const lines = useMemo(() => (shared ? (decoded?.lines ?? []) : mine.lines), [shared, decoded, mine.lines])
   const products = useMemo(() => new Map((productData?.products ?? []).map((p) => [`${p.region}/${p.slug}`, p])), [productData?.products])
   const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
   const totals = useMemo(() => planTotals(views), [views])
@@ -170,7 +163,7 @@ export default function PlanPage() {
       <PageNav title="Build plan" />
       <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
 
-      {shared && sharedLines === null && (
+      {shared && decoded === null && (
         <Notice tone="bad" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <span>That link doesn't hold a plan; it may have been cut short.</span>
           <button type="button" className="cursor-pointer text-sm underline underline-offset-2" onClick={leaveShared}>
@@ -178,14 +171,17 @@ export default function PlanPage() {
           </button>
         </Notice>
       )}
-      {shared && sharedLines !== null && (
+      {shared && decoded && (
         <Notice tone="ok" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span>This is a plan someone shared with you, not yours.</span>
+          <span>
+            This is a plan someone shared with you, not yours.
+            {decoded.unknown > 0 && ` ${decoded.unknown === 1 ? '1 item in it isn’t' : `${decoded.unknown} items in it aren’t`} tracked here, so ${decoded.unknown === 1 ? 'it is' : 'they are'} left out.`}
+          </span>
           <Button
             variant="secondary"
             className="py-1 text-sm"
             onClick={() => {
-              mine.replace(lines)
+              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })))
               leaveShared()
             }}
           >
@@ -267,7 +263,7 @@ export default function PlanPage() {
           )}
 
           <div className="mt-5 space-y-3">
-            <ShareLink lines={lines} />
+            <ShareLink lines={lines} products={productData?.products ?? []} />
             {!shared &&
               (confirmClear ? (
                 <div className="flex items-center gap-3 text-sm">

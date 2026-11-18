@@ -2,6 +2,8 @@
 
 export interface Variant {
   id: string
+  /** A permanent small number for the variant; it identifies the region, product and variant in shared build-plan links. */
+  num: number
   sku: string
   title: string
   /** Store status: Available, SoldOut, ComingSoon, ... */

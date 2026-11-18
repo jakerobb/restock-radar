@@ -19,7 +19,9 @@ import (
 
 // variantJSON is one variant's latest state, as the UI sees it.
 type variantJSON struct {
-	ID                string `json:"id"`
+	ID string `json:"id"`
+	// Num is a permanent small number for the variant, used in shared build-plan links.
+	Num               int    `json:"num"`
 	SKU               string `json:"sku"`
 	Title             string `json:"title"`
 	Status            string `json:"status"`
@@ -111,7 +113,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 			index[key] = i
 		}
 		resp.Products[i].Variants = append(resp.Products[i].Variants, variantJSON{
-			ID: v.VariantID, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,
+			ID: v.VariantID, Num: v.Num, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,
 			PriceCents: v.PriceCents, RegularPriceCents: v.RegularPriceCents,
 			PriceWithSurchargesCents: v.PriceWithSurchargesCents, SurchargeTypes: v.SurchargeTypes, Currency: v.Currency,
 			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, FirstSeen: v.FirstSeen,

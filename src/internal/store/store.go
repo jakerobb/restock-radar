@@ -296,6 +296,16 @@ var migrations = []string{
 		PRIMARY KEY (region, product_id, position),
 		FOREIGN KEY (region, product_id) REFERENCES products (region, id) ON DELETE CASCADE
 	);`,
+	// A small, stable number for every variant, for links that must be short (a shared build plan).
+	// AUTOINCREMENT, so a number is never given to a second variant, whatever is deleted. Existing
+	// variants are numbered oldest first.
+	`CREATE TABLE variant_numbers (
+		num        INTEGER PRIMARY KEY AUTOINCREMENT,
+		region     TEXT NOT NULL,
+		variant_id TEXT NOT NULL,
+		UNIQUE (region, variant_id)
+	);
+	INSERT INTO variant_numbers (region, variant_id) SELECT region, id FROM variants ORDER BY first_seen, region, id;`,
 }
 
 type Store struct {
@@ -412,11 +422,13 @@ type VariantState struct {
 	// ProductTechSpecsURL is the product's page on the tech specs site; empty when it has none or isn't checked yet.
 	ProductTechSpecsURL string `json:"product_techspecs_url"`
 	VariantID           string `json:"variant_id"`
-	SKU                 string `json:"sku"`
-	VariantTitle        string `json:"variant_title"`
-	Status              string `json:"status"`
-	PriceCents          *int64 `json:"price_cents"`
-	RegularPriceCents   *int64 `json:"regular_price_cents"`
+	// Num is the variant's permanent number, small enough to put in a link.
+	Num               int    `json:"num"`
+	SKU               string `json:"sku"`
+	VariantTitle      string `json:"variant_title"`
+	Status            string `json:"status"`
+	PriceCents        *int64 `json:"price_cents"`
+	RegularPriceCents *int64 `json:"regular_price_cents"`
 	// PriceWithSurchargesCents is PriceCents plus surcharges; null until a poll has seen it.
 	PriceWithSurchargesCents *int64 `json:"price_with_surcharges_cents"`
 	// SurchargeTypes are the kinds of surcharge on the product ("Memory", ...); empty when none.
@@ -619,6 +631,9 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 			if err != nil {
 				return nil, fmt.Errorf("inserting variant: %w", err)
 			}
+			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO variant_numbers (region, variant_id) VALUES (?, ?)`, region, v.ID); err != nil {
+				return nil, fmt.Errorf("numbering variant: %w", err)
+			}
 			continue
 		}
 		if err != nil {
@@ -795,10 +810,11 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 // Variants lists the latest state of every variant. An empty region means all.
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.techspecs_url, p.category, p.tags, p.collection, v.id, v.sku, v.title, v.status, v.price_cents,
+		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.techspecs_url, p.category, p.tags, p.collection, v.id, n.num, v.sku, v.title, v.status, v.price_cents,
 			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
+		JOIN variant_numbers n ON n.region = v.region AND n.variant_id = v.id
 		WHERE ? = '' OR v.region = ?
 		ORDER BY v.region, p.slug, v.sku`, region, region)
 	if err != nil {
@@ -810,7 +826,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 	for rows.Next() {
 		var v VariantState
 		var checked, changed, first, tags, surcharges string
-		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductTechSpecsURL, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.SKU,
+		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductTechSpecsURL, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.Num, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.PriceWithSurchargesCents, &surcharges, &v.Currency, &v.RestockETA,
 			&checked, &changed, &first); err != nil {
 			return nil, err
