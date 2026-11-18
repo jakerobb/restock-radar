@@ -131,6 +131,12 @@ describe('findSwitches', () => {
       expect(pair.stats.slowed).toBe(0)
     })
 
+    it('lists pairs in the full list too, in price order, when they undercut any one model', () => {
+      const c = catalog(mixed)
+      const { all } = findSwitches(plan(c, ['e7', 2], ['cam', 8]), c.rows, c.map)
+      expect(all.map((o) => `${o.qty} × ${o.row.product.slug}${o.also ? ` + ${o.also.qty} × ${o.also.row.product.slug}` : ''}`)).toEqual(['1 × tenG + 1 × gig', '2 × gig'])
+    })
+
     it('does not offer a pair when one model, or the same model again, does the job', () => {
       const c = catalog(mixed)
       const { options } = findSwitches(plan(c, ['e7', 1], ['cam', 1]), c.rows, c.map)

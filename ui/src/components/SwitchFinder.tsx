@@ -115,12 +115,12 @@ export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan
       {extra > 0 ? (
         <details className="mt-2 text-sm">
           <summary className="cursor-pointer text-muted">
-            {found.all.length} switches would work in all
+            {found.all.length} {found.all.some((o) => o.also) ? 'options' : 'switches'} would work in all
             {found.hidden > 0 && `; ${found.hidden} more on other power methods`}
           </summary>
           <ul className="mt-1 divide-y divide-line">
             {found.all.map((o) => (
-              <SwitchRow key={`${o.row.product.region}/${o.row.product.slug}`} o={o} onAdd={onAdd} />
+              <SwitchRow key={`${o.row.product.region}/${o.row.product.slug}/${o.qty}/${o.also?.row.product.slug ?? ''}/${o.also?.qty ?? ''}`} o={o} onAdd={onAdd} />
             ))}
           </ul>
         </details>
