@@ -23,6 +23,11 @@ export interface PoeStats {
   stranded: number
   /** Devices on a port slower than their own. */
   slowed: number
+  /** Of those, the ones left below 1 GbE (or below their own speed, for a device slower than that). */
+  crawling: number
+  /** The slowest speed any device ends up at, and the speed that device could do; null when none is slowed. */
+  slowestMbps: number | null
+  slowedFromMbps: number | null
   /** Watts of budget left over; null when a switch's budget isn't known. */
   spareWatts: number | null
   /** PoE ports with nothing on them. */
@@ -187,7 +192,7 @@ function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Pl
   const limited = [...slow].filter(([, r]) => r.n > 0)
   if (limited.length === 0) return []
   const parts = limited.map(([l, r]) => `${r.n === r.of ? (r.of === 1 ? '' : 'all ') : `${r.n} of `}${r.of === 1 ? '' : `${r.of} `}${name(l)} (${formatSpeed(r.speed)} port) would run at ${r.at === Infinity ? 'a lower speed' : `${formatSpeed(r.at)}`}`)
-  return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
+  return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', shortfall: true, text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
 }
 
 function poeCheck(lines: DerivedLine[]): PlanCheck[] {
@@ -216,6 +221,12 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   if (consumers.length === 0) {
     out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${supply} W of PoE budget and ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}, and no PoE-powered device in the plan yet.` })
     return out
+  }
+
+  // Switches that can't be bought now don't really supply anything.
+  const unavailable = suppliers.filter((l) => l.view.state !== 'in')
+  if (consumers.length > 0 && unavailable.length > 0) {
+    out.push({ id: 'poe-stock', label: 'PoE switches', verdict: 'warn', shortfall: true, text: `${list(unavailable)} ${unavailable.length === 1 && qty(unavailable[0]!) === 1 ? "isn't" : "aren't"} in stock, so the PoE power and ports it gives can't be had now.` })
   }
 
   // Power. Known demand already over the known supply is bad whatever the unknowns are.
@@ -278,9 +289,14 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     detail.push({ title: 'No port or power left for', rows: [...counts].map(([nm, c]) => `${c} × ${nm}`) })
   }
   const finite = budgets.every((b) => b !== Infinity)
+  const slowedDevices = placing.map((d, i) => ({ d, i })).filter(({ d, i }) => placed[i] !== null && placed[i]!.speed < d.speed)
+  const slowest = slowedDevices.reduce<(typeof slowedDevices)[number] | undefined>((a, b) => (a === undefined || placed[b.i]!.speed < placed[a.i]!.speed ? b : a), undefined)
   const stats: PoeStats = {
     stranded: stranded.length,
-    slowed: placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < d.speed).length,
+    slowed: slowedDevices.length,
+    crawling: placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < Math.min(1000, d.speed)).length,
+    slowestMbps: slowest ? placed[slowest.i]!.speed : null,
+    slowedFromMbps: slowest ? slowest.d.speed : null,
     spareWatts: finite ? budgets.reduce((n, b) => n + b, 0) - placing.reduce((n, d, i) => n + (placed[i] ? d.draw : 0), 0) : null,
     sparePorts: socketList.length - placing.filter((_, i) => placed[i] !== null).length,
   }
