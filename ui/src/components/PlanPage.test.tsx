@@ -22,7 +22,7 @@ const catalog = () => {
     product({ id: '3', slug: 'gone-stock', title: 'Sold Out Thing', type: 'Switches', variants: [variant({ id: 'd', num: 4, sku: 'SO-1', status: 'SoldOut', price_cents: 5000 })] }),
   ]
   const ds = [
-    derived({ slug: 'switch', known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] }),
+    derived({ slug: 'switch', known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] }),
     derived({ slug: 'ap', known, ports: [port({ count: 1, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 20)] }),
     derived({ slug: 'gone-stock', known }),
   ]
@@ -149,6 +149,22 @@ describe('PlanPage', () => {
     await user.click(within(finder).getByRole('button', { name: /^Add .*PoE Switch to the plan$/ }))
     await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('of the 200 W supplied'))
     expect(screen.queryByRole('button', { name: 'Find a switch' })).not.toBeInTheDocument()
+  })
+
+  it('shows how each suggested switch is powered, with AC and PoE accepted and DC not by default', async () => {
+    catalog()
+    const user = userEvent.setup()
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', qty: 6, addedCents: 15000 })])
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Find a switch' }))
+    const finder = await screen.findByLabelText('Find a switch')
+    expect(within(finder).getByRole('checkbox', { name: 'AC' })).toBeChecked()
+    expect(within(finder).getByRole('checkbox', { name: 'PoE' })).toBeChecked()
+    expect(within(finder).getByRole('checkbox', { name: 'DC' })).not.toBeChecked()
+    expect(finder).toHaveTextContent('Powered by AC')
+    await user.click(within(finder).getByRole('checkbox', { name: 'AC' }))
+    expect(finder).toHaveTextContent('No switch we track')
+    expect(finder).toHaveTextContent('would work on others')
   })
 
   it('does not offer a switch when the plan already has the power and ports', async () => {

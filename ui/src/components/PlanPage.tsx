@@ -281,7 +281,7 @@ export default function PlanPage() {
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-muted">Worked out from published specifications and any corrections. A number that isn't known is said so, not guessed.</p>
+              <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown status are labeled as such, not guessed.</p>
               {shortfall && !shared && !finding && (
                 <Button variant="secondary" className="mt-3 py-1 text-sm" onClick={() => setFinding(true)}>
                   Find a switch

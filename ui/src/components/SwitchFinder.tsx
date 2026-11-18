@@ -1,18 +1,19 @@
 import { Link } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Derived, Product } from '../api/types'
 import { buildCatalog } from '../lib/catalog'
 import { productRef } from '../lib/compare'
 import { formatPrice } from '../lib/format'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
+import { powerSummary } from '../lib/power'
 import { formatSpeed } from '../lib/requirements'
-import { findSwitches, MAX_SWITCHES, type SwitchOption } from '../lib/switchFinder'
+import { DEFAULT_POWER_METHODS, findFits, MAX_SWITCHES, pickOptions, POWER_METHODS, type ListedSwitch, type PowerMethod } from '../lib/switchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 
-function facts(o: SwitchOption): string {
+function facts(o: ListedSwitch): string {
   const { stats } = o
   const parts = [
     stats.spareWatts !== null && `${stats.spareWatts} W of PoE budget to spare`,
@@ -22,12 +23,54 @@ function facts(o: SwitchOption): string {
   return parts.filter(Boolean).join(' · ')
 }
 
+/** One switch (or a few of the same) with its price, stock, how it is powered, how it would sit in the plan, and a way to add it. */
+function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd: (line: PlanLine, replacing: PlanLine[]) => void }) {
+  const power = powerSummary(o.row.derived?.power)
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
+      <div className="min-w-0 text-sm">
+        {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
+        <div className="mt-0.5">
+          {o.qty > 1 && `${o.qty} × `}
+          <Link to="/p/$region/$slug" params={{ region: o.row.product.region, slug: o.row.product.slug }} className="text-accent underline-offset-2 hover:underline">
+            {o.row.product.title}
+          </Link>
+          <span className="ml-2 font-medium tabular-nums">{o.cents === null ? 'n/a' : formatPrice(o.cents, o.currency)}</span>
+          <Badge tone={o.inStock ? 'ok' : 'bad'} className="ml-2">
+            {o.inStock ? 'In stock' : 'Not in stock'}
+          </Badge>
+        </div>
+        <div className="mt-0.5 text-muted">{facts(o)}</div>
+        <div className="mt-0.5 text-muted">{power ? `Powered by ${power}` : 'Power method not specified'}</div>
+        {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
+        {o.partial && <div className="mt-0.5 text-muted">Some devices have no known power draw, so this counts only those that do.</div>}
+      </div>
+      <Button
+        variant="secondary"
+        className="py-1 text-sm"
+        aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
+        onClick={() => {
+          const line = lineFor(o.row.product, o.qty)
+          if (line) onAdd(line, o.replaces.map((l) => l.view.line))
+        }}
+      >
+        Add to plan
+      </Button>
+    </li>
+  )
+}
+
 /** Switches that, added to the plan, give its PoE devices the power and ports they need. */
 export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine, replacing: PlanLine[]) => void; onClose: () => void }) {
-  const found = useMemo(() => {
+  const [methods, setMethods] = useState<ReadonlySet<PowerMethod>>(new Set(DEFAULT_POWER_METHODS))
+  // Trying every switch is the costly part; the power filter only narrows what it found.
+  const fits = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
-    return findSwitches(plan, buildCatalog(products, derived), byRef)
+    return findFits(plan, buildCatalog(products, derived), byRef)
   }, [plan, products, derived])
+  const found = useMemo(() => pickOptions(fits, methods), [fits, methods])
+  const toggle = (m: PowerMethod) => setMethods((cur) => new Set(cur.has(m) ? [...cur].filter((x) => x !== m) : [...cur, m]))
+  const extra = found.all.length - found.options.length
 
   return (
     <Card className="mt-5" aria-label="Find a switch">
@@ -38,44 +81,45 @@ export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget counted, so a switch you have already chosen still helps.</p>
+      <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <legend className="sr-only">Power methods you can use</legend>
+        <span className="text-muted" aria-hidden>
+          Switch can be powered by:
+        </span>
+        {POWER_METHODS.map((m) => (
+          <label key={m.id} className="inline-flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" checked={methods.has(m.id)} onChange={() => toggle(m.id)} />
+            {m.label}
+          </label>
+        ))}
+      </fieldset>
       {found.options.length === 0 ? (
-        <p className="mt-3 text-sm">No switch we track, even {MAX_SWITCHES} of one, gives these devices the power and ports they need. A device may want a higher PoE class than any switch offers.</p>
+        <p className="mt-3 text-sm">
+          No switch we track, even {MAX_SWITCHES} of one, gives these devices the power and ports they need
+          {found.hidden > 0 ? ` on the power methods you've chosen (${found.hidden} would work on others)` : ''}. A device may want a higher PoE class than any switch offers.
+        </p>
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {found.options.map((o) => (
-            <li key={o.label} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
-              <div className="min-w-0 text-sm">
-                <div className="text-xs font-medium tracking-wide text-muted uppercase">{o.label}</div>
-                <div className="mt-0.5">
-                  {o.qty > 1 && `${o.qty} × `}
-                  <Link to="/p/$region/$slug" params={{ region: o.row.product.region, slug: o.row.product.slug }} className="text-accent underline-offset-2 hover:underline">
-                    {o.row.product.title}
-                  </Link>
-                  <span className="ml-2 font-medium tabular-nums">{o.cents === null ? 'n/a' : formatPrice(o.cents, o.currency)}</span>
-                  <Badge tone={o.inStock ? 'ok' : 'bad'} className="ml-2">
-                    {o.inStock ? 'In stock' : 'Not in stock'}
-                  </Badge>
-                </div>
-                <div className="mt-0.5 text-muted">{facts(o)}</div>
-                {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
-                {o.partial && <div className="mt-0.5 text-muted">Some devices have no known power draw, so this counts only those that do.</div>}
-              </div>
-              <Button
-                variant="secondary"
-                className="py-1 text-sm"
-                aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
-                onClick={() => {
-                  const line = lineFor(o.row.product, o.qty)
-                  if (line) onAdd(line, o.replaces.map((l) => l.view.line))
-                }}
-              >
-                Add to plan
-              </Button>
-            </li>
+            <SwitchRow key={o.label} o={o} label={o.label} onAdd={onAdd} />
           ))}
         </ul>
       )}
-      {found.fitting > found.options.length && <p className="text-xs text-muted">{found.fitting} switches would work in all; these are the ones worth a look.</p>}
+      {extra > 0 ? (
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-muted">
+            {found.all.length} switches would work in all
+            {found.hidden > 0 && `; ${found.hidden} more on other power methods`}
+          </summary>
+          <ul className="mt-1 divide-y divide-line">
+            {found.all.map((o) => (
+              <SwitchRow key={`${o.row.product.region}/${o.row.product.slug}`} o={o} onAdd={onAdd} />
+            ))}
+          </ul>
+        </details>
+      ) : (
+        found.options.length > 0 && found.hidden > 0 && <p className="mt-2 text-sm text-muted">{found.hidden} more would work on other power methods.</p>
+      )}
     </Card>
   )
 }
