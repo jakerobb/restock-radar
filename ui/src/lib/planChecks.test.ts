@@ -94,4 +94,75 @@ describe('planChecks', () => {
     expect(byId([rack('sw', 2, 2), rack('gw', 1, 1), item('ap', 1, { rack: { mountable: false, units: 0, full_depth: false } })]).rack).toMatchObject({ verdict: 'info', text: '5U of rack space (2 × sw 2U, gw 1U).' })
     expect(byId([rack('sw', 1, 2), rack('odd', 1, 0)]).rack).toMatchObject({ verdict: 'unknown', text: expect.stringContaining("height of odd isn't known") })
   })
+  describe('rack space', () => {
+    const typed = (slug: string, type: string, d: Parameters<typeof derived>[0] | null, qty = 1): DerivedLine => {
+      const l: PlanLine = { ref: `us/${slug}`, sku: 'S', qty, addedCents: null }
+      return { view: viewLine(l, new Map([[l.ref, product({ slug, title: slug, type })]])), derived: d === null ? null : derived({ slug, known, ...d }) }
+    }
+    const racked = (slug: string, units: number) => typed(slug, 'Switches', { rack: { mountable: true, units, full_depth: false } })
+    const desk = (slug: string, type = 'Switches') => typed(slug, type, { rack: { mountable: false, units: 0, full_depth: false } })
+
+    it('says which equipment is not rack-mount, and needs a shelf', () => {
+      expect(byId([racked('sw', 1), desk('xg8')]).rack).toMatchObject({ verdict: 'info', text: '1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: xg8.' })
+    })
+
+    it('mentions desktop equipment even when nothing else is racked', () => {
+      expect(byId([desk('xg8')]).rack).toMatchObject({ verdict: 'info', text: 'Nothing in the plan goes in a rack. Not rack-mount, so it needs a shelf or desk space: xg8.' })
+    })
+
+    it('leaves out things that never go in a rack', () => {
+      expect(byId([racked('sw', 1), desk('ap', 'WiFi'), desk('cam', 'Cameras & Security')]).rack?.text).toBe('1U of rack space (sw 1U).')
+      expect(byId([desk('ap', 'WiFi')]).rack).toBeUndefined()
+    })
+
+    it('says it can’t tell, rather than leaving out, when a rackable product’s mounting is unknown', () => {
+      const unknownRack = typed('odd', 'Switches', { known: { ...known, rack: false } })
+      expect(byId([racked('sw', 1), unknownRack]).rack).toMatchObject({ verdict: 'unknown', text: '1U of rack space (sw 1U). Can\'t tell whether odd is rack-mount.' })
+      expect(byId([racked('sw', 1), typed('nodata', 'Gateways', null)]).rack).toMatchObject({ verdict: 'unknown', text: expect.stringContaining('whether nodata is rack-mount') })
+      expect(byId([typed('ap', 'WiFi', { known: { ...known, rack: false } })]).rack).toBeUndefined()
+    })
+  })
+
+  describe('port speed', () => {
+    const e7 = (qty: number, speed = 10000) => item('e7', qty, { ports: [port({ count: 1, max_speed_mbps: speed })], metrics: [metric('power_draw_max_w', 43)], power: [src('poe', 'PoE++')], known: { ...known, poe: false } })
+    const hd = (qty = 1) => item('hd', qty, {
+      ports: [port({ count: 2, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'out' }), port({ count: 22, max_speed_mbps: 2500, poe_class: 'PoE++', poe_direction: 'out' })],
+      metrics: [metric('poe_budget_w', 600)],
+    })
+
+    it('warns when devices have a faster port than the switch can give them, and says how many and at what speed', () => {
+      const c = byId([e7(10), hd()])
+      expect(c['poe-ports']?.verdict).toBe('ok')
+      expect(c['poe-speed']).toMatchObject({ verdict: 'warn', text: expect.stringContaining('8 of 10 e7 (10 GbE port) would run at 2.5 GbE') })
+    })
+
+    it('says nothing when every device gets a port as fast as its own', () => {
+      expect(byId([e7(2), hd()])['poe-speed']).toBeUndefined()
+      expect(byId([e7(10, 2500), hd()])['poe-speed']).toBeUndefined()
+    })
+
+    it('gives the fast ports to the fast devices', () => {
+      const fast = e7(1)
+      const slow = item('slow', 20, { ports: [port({ count: 1, max_speed_mbps: 2500 })], metrics: [metric('power_draw_max_w', 10)], power: [src('poe', 'PoE++')], known: { ...known, poe: false } })
+      expect(byId([slow, fast, hd()])['poe-speed']).toBeUndefined() // one 10G port for the one device that wants it
+    })
+
+    it('does not guess when a speed is unknown, on either side', () => {
+      expect(byId([e7(10, 0), hd()])['poe-speed']).toBeUndefined()
+      const unsure = item('hd', 1, { ports: [port({ count: 24, max_speed_mbps: 0, poe_class: 'PoE++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 600)] })
+      expect(byId([e7(10), unsure])['poe-speed']).toBeUndefined()
+    })
+
+    it('leaves it to the ports check when the devices cannot all be powered', () => {
+      const weak = item('weak', 1, { ports: [port({ count: 24, max_speed_mbps: 1000, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 600)] })
+      const c = byId([e7(4), weak])
+      expect(c['poe-ports']?.verdict).toBe('bad')
+      expect(c['poe-speed']).toBeUndefined()
+    })
+
+    it('uses the PoE-in port’s speed when the store marks one', () => {
+      const cam = item('cam', 3, { ports: [port({ count: 1, max_speed_mbps: 10000, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 10)] })
+      expect(byId([cam, sw(1, 100)])['poe-speed']).toMatchObject({ verdict: 'warn', text: expect.stringContaining('all 3 cam (10 GbE port) would run at 1 GbE') })
+    })
+  })
 })
