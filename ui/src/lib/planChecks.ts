@@ -1,5 +1,6 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
+import { nvrCheck, type NvrStats } from './nvrChecks'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
 /** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
@@ -14,6 +15,10 @@ export interface PlanCheck {
   detail?: { title: string; rows: string[] }[]
   /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
   shortfall?: boolean
+  /** True when there are cameras and no NVR with room for them, which an NVR could fix. */
+  nvrShortfall?: boolean
+  /** On the NVR check: how the cameras came out. */
+  nvr?: NvrStats
   /** On the layout check: how the placement came out, for comparing switches. */
   stats?: PoeStats
 }
@@ -346,5 +351,5 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
 export function planChecks(lines: DerivedLine[]): PlanCheck[] {
-  return [...poeCheck(lines), ...rackCheck(lines)]
+  return [...poeCheck(lines), ...nvrCheck(lines), ...rackCheck(lines)]
 }

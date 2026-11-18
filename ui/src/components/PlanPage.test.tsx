@@ -70,6 +70,34 @@ describe('adding to the plan', () => {
   })
 })
 
+describe('Find an NVR', () => {
+  const nvrCatalog = () => {
+    const prods = [
+      product({ id: 'c', slug: 'cam', title: 'Dome Camera', type: 'Cameras & Security', category: 'physical-security-dome-turret', variants: [variant({ id: 'c', num: 1, sku: 'CAM-1', price_cents: 15000 })] }),
+      product({ id: 'n', slug: 'nvr', title: 'The NVR', type: 'Cameras & Security', category: 'physical-security-nvr', variants: [variant({ id: 'n', num: 2, sku: 'NVR-1', price_cents: 30000 })] }),
+    ]
+    const ds = [
+      derived({ slug: 'cam', known, metrics: [metric('camera_megapixels', 8), metric('power_draw_max_w', 8)], power: [{ kind: 'poe', poe_class: 'PoE', detail: 'PoE' }] }),
+      derived({ slug: 'nvr', known, metrics: [metric('nvr_cameras_hd', 60), metric('nvr_cameras_2k', 30), metric('nvr_cameras_4k', 18)] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products: prods }) }, 'GET /v1/derived': { body: ds } })
+  }
+
+  it('notes there is no NVR for the cameras and adds one', async () => {
+    nvrCatalog()
+    const user = userEvent.setup()
+    setPlan([line({ ref: 'us/cam', sku: 'CAM-1', qty: 4, addedCents: 15000 })])
+    renderRoute('/plan')
+    expect(await screen.findByLabelText('Checks')).toHaveTextContent('4 cameras in the plan, and no NVR to record them.')
+    await user.click(screen.getByRole('button', { name: 'Find an NVR' }))
+    const finder = await screen.findByLabelText('Find an NVR')
+    expect(finder).toHaveTextContent('Cheapest that fits')
+    await user.click(within(finder).getByRole('button', { name: 'Add The NVR to the plan' }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('4 cameras use 22% of the NVR’s capacity.'))
+    expect(screen.queryByRole('button', { name: 'Find an NVR' })).not.toBeInTheDocument()
+  })
+})
+
 describe('Add product on the plan page', () => {
   it('searches by name or SKU, and adds the result you click', async () => {
     catalog()

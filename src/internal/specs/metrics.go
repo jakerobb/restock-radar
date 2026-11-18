@@ -107,6 +107,7 @@ func deriveMetrics(ix *index, r *Result) {
 	}
 
 	deriveCoverage(ix, r)
+	deriveCameras(ix, r)
 
 	if e, ok := ix.scalar("WiFi Standard", "WiFi Standards"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
@@ -403,4 +404,81 @@ func firstNumber(re *regexp.Regexp, text string) (float64, bool) {
 		return 0, false
 	}
 	return num(m[1])
+}
+
+var (
+	// "(15) HD", "(8) 2K", "(6) 4K": how many cameras of each class an NVR manages.
+	nvrCapRe = regexp.MustCompile(`(?i)\((\d+)\)\s*(HD|2K|4K)\b`)
+	// "(2) 8MP 3840 x 2160 (16:9)": one sensor's resolution, with how many sensors when more than one.
+	sensorRe = regexp.MustCompile(`(?i)(?:\((\d+)\)\s*)?` + numRe + `\s*MP\s+\d+\s*[x×]\s*\d+`)
+	// "4K", "2K", "FHD", "5MP": the headline resolution, for products with no pixel dimensions.
+	headlineRe = regexp.MustCompile(`(?i)\b(?:(4K|2K|FHD|HD)|` + numRe + `\s*MP)\b`)
+)
+
+// Megapixels of the headline names the store uses.
+var headlineMP = map[string]float64{"4K": 8.3, "2K": 4, "FHD": 2.1, "HD": 2.1}
+
+// deriveCameras reads what a camera records at and what an NVR can manage.
+//
+// For an NVR, "Managed Cameras" lists a count per class: "(60) HD (30) 2K
+// (18) 4K". Some give a second list for another configuration ("With built-in
+// HDMI Viewport in use"); only the first, the usual one, is read.
+//
+// For a camera, camera_megapixels is the resolution of one sensor (a multi-sensor
+// camera is still one camera), from the pixel dimensions where given, else from
+// the headline ("4K", "5MP").
+func deriveCameras(ix *index, r *Result) {
+	if e, ok := ix.scalar("Managed Cameras"); ok {
+		found := map[string]float64{}
+		for _, line := range Lines(e.Value) {
+			ms := nvrCapRe.FindAllStringSubmatch(line, -1)
+			if len(ms) == 0 {
+				if len(found) > 0 {
+					break // a heading for the next configuration
+				}
+				continue
+			}
+			for _, m := range ms {
+				n, _ := num(m[1])
+				found[strings.ToLower(m[2])] = n
+			}
+		}
+		raw := strings.Join(Lines(e.Value), " | ")
+		if len(found) == 0 {
+			ix.issue("metrics", e, "no camera counts")
+		}
+		for _, class := range []string{"hd", "2k", "4k"} {
+			if n, ok := found[class]; ok {
+				r.Metrics = append(r.Metrics, Metric{Name: "nvr_cameras_" + class, Value: n, Unit: "cameras", Raw: raw})
+			}
+		}
+		return
+	}
+
+	best, raw, have := 0.0, "", false
+	for _, e := range ix.all("Resolution") {
+		text := strings.Join(Lines(e.Value), " | ")
+		for _, m := range sensorRe.FindAllStringSubmatch(text, -1) {
+			if mp, ok := num(m[2]); ok && (!have || mp > best) {
+				best, raw, have = mp, text, true
+			}
+		}
+	}
+	if !have {
+		for _, e := range ix.all("Resolution") {
+			text := strings.Join(Lines(e.Value), " | ")
+			for _, m := range headlineRe.FindAllStringSubmatch(text, -1) {
+				mp := headlineMP[strings.ToUpper(m[1])]
+				if m[2] != "" {
+					mp, _ = num(m[2])
+				}
+				if mp > best {
+					best, raw, have = mp, text, true
+				}
+			}
+		}
+	}
+	if have {
+		r.Metrics = append(r.Metrics, Metric{Name: "camera_megapixels", Value: best, Unit: "MP", Raw: raw})
+	}
 }

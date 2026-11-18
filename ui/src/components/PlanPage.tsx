@@ -8,6 +8,7 @@ import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type Li
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
+import { NvrFinder } from './NvrFinder'
 import { PlanSearch } from './PlanSearch'
 import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
@@ -170,8 +171,10 @@ export default function PlanPage() {
   }, [views, derived])
   const checks = useMemo(() => planChecks(derivedLines), [derivedLines])
   const [finding, setFinding] = useState(false)
+  const [findingNvr, setFindingNvr] = useState(false)
   const [searching, setSearching] = useState(false)
   const shortfall = checks.some((c) => c.shortfall)
+  const nvrShortfall = checks.some((c) => c.nvrShortfall)
   const clearControl = confirmClear ? (
     <div className="flex items-center gap-3">
       <span>Remove every line?</span>
@@ -330,10 +333,19 @@ export default function PlanPage() {
                 ))}
               </ul>
               <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown status are labeled as such, not guessed.</p>
-              {shortfall && !shared && !finding && (
-                <Button variant="secondary" className="mt-3 py-1 text-sm" onClick={() => setFinding(true)}>
-                  Find a switch
-                </Button>
+              {!shared && ((shortfall && !finding) || (nvrShortfall && !findingNvr)) && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {shortfall && !finding && (
+                    <Button variant="secondary" className="py-1 text-sm" onClick={() => setFinding(true)}>
+                      Find a switch
+                    </Button>
+                  )}
+                  {nvrShortfall && !findingNvr && (
+                    <Button variant="secondary" className="py-1 text-sm" onClick={() => setFindingNvr(true)}>
+                      Find an NVR
+                    </Button>
+                  )}
+                </div>
               )}
             </Card>
           )}
@@ -341,6 +353,10 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
+          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l, replacing) => {
+            for (const r of replacing) mine.remove(lineKey(r))
+            mine.add(l)
+          }} onClose={() => setFindingNvr(false)} />}
         </>
       )}
     </main>

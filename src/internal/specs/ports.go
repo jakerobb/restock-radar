@@ -303,7 +303,8 @@ func poeWattsByClass(ix *index) map[string]float64 {
 }
 
 var (
-	ifaceItemRe = regexp.MustCompile(`\((\d+)\)\s*(?:(Data[ -]in|Data[ -]out):\s*)?([^()]*?)\s*(RJ45|SFP28|QSFP28|SFP\+|SFP)\s+ports?\b(?:\s*\(([0-9./GM]+)\))?`)
+	ifaceItemRe = regexp.MustCompile(`\((\d+)\)\s*(?:(Data[ -]in|Data[ -]out):\s*)?([^()]*?)\s*(RJ45|SFP28|QSFP28|SFP\+|SFP)\s+(?:(uplink|downlink)\s+)?ports?\b(?:\s*\(([0-9./GM]+)\))?`)
+	ifaceClass  = regexp.MustCompile(`PoE\+{0,3}`)
 	ifaceSpd    = regexp.MustCompile(`(?i)^([0-9.]+(?:/[0-9.]+)*)?\s*(Gbps|Mbps|GbE|MbE|G|M|FE|GE)?$`)
 	ifaceSplit  = regexp.MustCompile(`\s*[,&]\s*`)
 	ifaceWords  = regexp.MustCompile(`(?i)\b(MGMT|management)\b`)
@@ -329,7 +330,10 @@ func portsFromInterface(ix *index, e Effective) []Port {
 
 // interfacePort builds a Port from one match of ifaceItemRe: count, direction
 // ("Data in"), the words before the media ("1/2.5 GbE", "GbE MGMT"), the media,
-// and optionally a list of speeds after it.
+// "uplink" or "downlink", and optionally a list of speeds after it. A "PoE" among
+// the words before the media gives power out on a "downlink" port (an NVR's PoE
+// ports) and in on an "uplink" one; with neither word it is not said which way
+// the power goes, so no class is claimed.
 func interfacePort(ix *index, e Effective, m []string) (Port, bool) {
 	spec := strings.TrimSpace(m[3])
 	if strings.Contains(strings.ToUpper(spec), "DC") {
@@ -348,12 +352,21 @@ func interfacePort(ix *index, e Effective, m []string) (Port, bool) {
 		p.Role = "mgmt"
 		spec = strings.TrimSpace(ifaceWords.ReplaceAllString(spec, ""))
 	}
-	if m[5] != "" {
-		p.SpeedsMbps = parseSpeeds(m[5])
+	if class := ifaceClass.FindString(spec); class != "" {
+		spec = strings.TrimSpace(ifaceClass.ReplaceAllString(spec, ""))
+		switch m[5] {
+		case "downlink":
+			p.PoEClass, p.PoEDirection = class, "out"
+		case "uplink":
+			p.PoEClass, p.PoEDirection = class, "in"
+		}
+	}
+	if m[6] != "" {
+		p.SpeedsMbps = parseSpeeds(m[6])
 	} else if spec != "" {
 		p.SpeedsMbps = speedsFromWords(spec)
 	}
-	if len(p.SpeedsMbps) == 0 && (spec != "" || m[5] != "") {
+	if len(p.SpeedsMbps) == 0 && (spec != "" || m[6] != "") {
 		ix.issue("ports", e, "unrecognised port speed: "+spec)
 	}
 	if len(p.SpeedsMbps) > 0 {
