@@ -289,9 +289,9 @@ export default function PlanPage() {
               )}
             </Card>
           )}
-          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l, replacing) => {
+          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
-            mine.add(l)
+            for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
 
           <div className="mt-5 space-y-3">

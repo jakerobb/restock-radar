@@ -24,17 +24,24 @@ function facts(o: ListedSwitch): string {
 }
 
 /** One switch (or a few of the same) with its price, stock, how it is powered, how it would sit in the plan, and a way to add it. */
-function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd: (line: PlanLine, replacing: PlanLine[]) => void }) {
-  const power = powerSummary(o.row.derived?.power)
+function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void }) {
+  const parts = [{ row: o.row, qty: o.qty }, ...(o.also ? [o.also] : [])]
+  const powers = parts.map((p) => powerSummary(p.row.derived?.power))
+  const power = powers.every(Boolean) ? powers.join(' / ') : null
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0 text-sm">
         {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
         <div className="mt-0.5">
-          {o.qty > 1 && `${o.qty} × `}
-          <Link to="/p/$region/$slug" params={{ region: o.row.product.region, slug: o.row.product.slug }} className="text-accent underline-offset-2 hover:underline">
-            {o.row.product.title}
-          </Link>
+          {parts.map((p, i) => (
+            <span key={p.row.product.slug}>
+              {i > 0 && ' + '}
+              {p.qty > 1 && `${p.qty} × `}
+              <Link to="/p/$region/$slug" params={{ region: p.row.product.region, slug: p.row.product.slug }} className="text-accent underline-offset-2 hover:underline">
+                {p.row.product.title}
+              </Link>
+            </span>
+          ))}
           <span className="ml-2 font-medium tabular-nums">{o.cents === null ? 'n/a' : formatPrice(o.cents, o.currency)}</span>
           <Badge tone={o.inStock ? 'ok' : 'bad'} className="ml-2">
             {o.inStock ? 'In stock' : 'Not in stock'}
@@ -48,10 +55,10 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
       <Button
         variant="secondary"
         className="py-1 text-sm"
-        aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
+        aria-label={`Add ${parts.map((p) => `${p.qty > 1 ? `${p.qty} × ` : ''}${p.row.product.title}`).join(' and ')} to the plan`}
         onClick={() => {
-          const line = lineFor(o.row.product, o.qty)
-          if (line) onAdd(line, o.replaces.map((l) => l.view.line))
+          const lines = parts.flatMap((p) => lineFor(p.row.product, p.qty) ?? [])
+          if (lines.length === parts.length) onAdd(lines, o.replaces.map((l) => l.view.line))
         }}
       >
         Add to plan
@@ -61,7 +68,7 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
 }
 
 /** Switches that, added to the plan, give its PoE devices the power and ports they need. */
-export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine, replacing: PlanLine[]) => void; onClose: () => void }) {
+export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onClose: () => void }) {
   const [methods, setMethods] = useState<ReadonlySet<PowerMethod>>(new Set(DEFAULT_POWER_METHODS))
   // Trying every switch is the costly part; the power filter only narrows what it found.
   const fits = useMemo(() => {
