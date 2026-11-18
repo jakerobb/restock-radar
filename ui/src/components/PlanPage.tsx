@@ -8,6 +8,7 @@ import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type Li
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
+import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
@@ -153,10 +154,13 @@ export default function PlanPage() {
   const products = useMemo(() => new Map((productData?.products ?? []).map((p) => [`${p.region}/${p.slug}`, p])), [productData?.products])
   const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
   const totals = useMemo(() => planTotals(views), [views])
-  const checks = useMemo(() => {
+  const derivedLines = useMemo(() => {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
-    return planChecks(views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null })))
+    return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null }))
   }, [views, derived])
+  const checks = useMemo(() => planChecks(derivedLines), [derivedLines])
+  const [finding, setFinding] = useState(false)
+  const shortfall = checks.some((c) => c.shortfall)
   const leaveShared = () => void navigate({ to: '/plan', replace: true })
 
   return (
@@ -278,8 +282,14 @@ export default function PlanPage() {
                 ))}
               </ul>
               <p className="mt-2 text-xs text-muted">Worked out from published specifications and any corrections. A number that isn't known is said so, not guessed.</p>
+              {shortfall && !shared && !finding && (
+                <Button variant="secondary" className="mt-3 py-1 text-sm" onClick={() => setFinding(true)}>
+                  Find a switch
+                </Button>
+              )}
             </Card>
           )}
+          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l) => mine.add(l)} onClose={() => setFinding(false)} />}
 
           <div className="mt-5 space-y-3">
             <ShareLink lines={lines} products={productData?.products ?? []} />

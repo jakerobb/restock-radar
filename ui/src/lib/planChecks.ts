@@ -12,6 +12,21 @@ export interface PlanCheck {
   text: string
   /** A breakdown to show on request, as blocks of lines (one block per switch, say). */
   detail?: { title: string; rows: string[] }[]
+  /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
+  shortfall?: boolean
+  /** On the layout check: how the placement came out, for comparing switches. */
+  stats?: PoeStats
+}
+
+export interface PoeStats {
+  /** Devices with no port and budget to go on. */
+  stranded: number
+  /** Devices on a port slower than their own. */
+  slowed: number
+  /** Watts of budget left over; null when a switch's budget isn't known. */
+  spareWatts: number | null
+  /** PoE ports with nothing on them. */
+  sparePorts: number
 }
 
 /** A line with what is derived from its product's specification. */
@@ -195,7 +210,7 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   const out: PlanCheck[] = []
 
   if (suppliers.length === 0) {
-    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
+    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', shortfall: true, text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
     return out
   }
   if (consumers.length === 0) {
@@ -204,11 +219,11 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   }
 
   // Power. Known demand already over the known supply is bad whatever the unknowns are.
-  if (demand > supply && noBudget.length === 0) out.push({ id: 'poe-power', label: 'PoE power', verdict: 'bad', text: `Devices can draw up to ${demand} W, over the ${supply} W the plan supplies.` })
+  if (demand > supply && noBudget.length === 0) out.push({ id: 'poe-power', label: 'PoE power', verdict: 'bad', shortfall: true, text: `Devices can draw up to ${demand} W, over the ${supply} W the plan supplies.` })
   else if (noDraw.length > 0 || noBudget.length > 0) {
     const why = [noDraw.length > 0 && `no power draw is known for ${list(noDraw)}`, noBudget.length > 0 && `no PoE budget is known for ${list(noBudget)}`].filter(Boolean).join('; ')
     out.push({ id: 'poe-power', label: 'PoE power', verdict: 'unknown', text: `Can't tell: ${why}. Known so far: ${demand} W drawn, ${supply} W supplied.` })
-  } else out.push({ id: 'poe-power', label: 'PoE power', verdict: demand <= supply ? 'ok' : 'bad', text: `Devices draw up to ${demand} W of the ${supply} W supplied.` })
+  } else out.push({ id: 'poe-power', label: 'PoE power', verdict: demand <= supply ? 'ok' : 'bad', shortfall: demand > supply, text: `Devices draw up to ${demand} W of the ${supply} W supplied.` })
 
   // Ports: a device needs a port of at least its class.
   const lost = unplaced(need, have)
@@ -216,6 +231,7 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     id: 'poe-ports',
     label: 'PoE ports',
     verdict: lost === 0 ? 'ok' : 'bad',
+    shortfall: lost > 0,
     text: `${byClass(need)} ${devices === 1 ? 'device' : 'devices'} for ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}${lost > 0 ? `: ${lost} can't be given a port of a high enough class` : ''}.`,
   })
   if (lost > 0) return out
@@ -261,12 +277,19 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     for (const d of stranded) counts.set(name(d.line), (counts.get(name(d.line)) ?? 0) + 1)
     detail.push({ title: 'No port or power left for', rows: [...counts].map(([nm, c]) => `${c} × ${nm}`) })
   }
-  const layout: PlanCheck = { id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to put each device on a port${units.length > 1 ? `, across ${units.length} switches` : ''}.`, detail }
+  const finite = budgets.every((b) => b !== Infinity)
+  const stats: PoeStats = {
+    stranded: stranded.length,
+    slowed: placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < d.speed).length,
+    spareWatts: finite ? budgets.reduce((n, b) => n + b, 0) - placing.reduce((n, d, i) => n + (placed[i] ? d.draw : 0), 0) : null,
+    sparePorts: socketList.length - placing.filter((_, i) => placed[i] !== null).length,
+  }
+  const layout: PlanCheck = { id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to put each device on a port${units.length > 1 ? `, across ${units.length} switches` : ''}.`, detail, stats }
 
   if (stranded.length > 0 && demand <= supply) {
     const names = [...new Set(stranded.map((d) => name(d.line)))].join(', ')
     const at = out.findIndex((c) => c.id === 'poe-power')
-    const bad: PlanCheck = { id: 'poe-power', label: 'PoE power', verdict: 'bad', text: `The ${supply} W adds up, but each switch has its own budget, and no way of dividing the devices among them powers all: ${stranded.length} of ${names} ${stranded.length === 1 ? 'is' : 'are'} left without.` }
+    const bad: PlanCheck = { id: 'poe-power', label: 'PoE power', verdict: 'bad', shortfall: true, text: `The ${supply} W adds up, but each switch has its own budget, and no way of dividing the devices among them powers all: ${stranded.length} of ${names} ${stranded.length === 1 ? 'is' : 'are'} left without.` }
     if (out[at]?.verdict === 'ok') out[at] = bad
     out.push(layout)
     return out

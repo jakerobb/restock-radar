@@ -1,0 +1,88 @@
+import type { Derived, Product } from '../api/types'
+import { buildCatalog } from './catalog'
+import { viewLine, type PlanLine } from './plan'
+import type { DerivedLine } from './planChecks'
+import { findSwitches } from './switchFinder'
+import { derived, port, product, variant } from '../test/fixtures'
+
+const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
+const metric = (name: string, value: number) => ({ name, value, unit: 'W', at_least: false, raw: '' })
+
+function catalog(specs: { slug: string; type: string; cents: number; status?: 'Available' | 'SoldOut'; d: Partial<Derived> }[]) {
+  const products: Product[] = specs.map((s, i) => product({ id: s.slug, slug: s.slug, title: s.slug, type: s.type, variants: [variant({ id: s.slug, num: i + 1, sku: s.slug.toUpperCase(), price_cents: s.cents, status: s.status ?? 'Available' })] }))
+  const ds = specs.map((s) => derived({ slug: s.slug, known, ...s.d }))
+  const map = new Map(products.map((p) => [`${p.region}/${p.slug}`, p]))
+  return { rows: buildCatalog(products, ds), map, ds }
+}
+
+const e7 = (): Partial<Derived> => ({ ports: [port({ count: 1, max_speed_mbps: 10000 })], metrics: [metric('power_draw_max_w', 43)], power: [{ kind: 'poe', poe_class: 'PoE++', detail: 'PoE++' }], known: { ...known, poe: false } })
+const sw = (ports: number, cls: string, budget: number, speed = 1000): Partial<Derived> => ({ ports: [port({ count: ports, max_speed_mbps: speed, poe_class: cls, poe_direction: 'out' })], metrics: [metric('poe_budget_w', budget)] })
+
+function plan(c: ReturnType<typeof catalog>, ...items: [string, number][]): DerivedLine[] {
+  return items.map(([slug, qty]) => {
+    const l: PlanLine = { ref: `us/${slug}`, sku: slug.toUpperCase(), qty, addedCents: null }
+    return { view: viewLine(l, c.map), derived: c.ds.find((d) => d.slug === slug) ?? null }
+  })
+}
+
+describe('findSwitches', () => {
+  const base = [
+    { slug: 'e7', type: 'WiFi', cents: 54900, d: e7() },
+    { slug: 'small', type: 'Switches', cents: 30000, d: sw(8, 'PoE++', 150) },
+    { slug: 'mid', type: 'Switches', cents: 55000, d: sw(24, 'PoE++', 400) },
+    { slug: 'fast', type: 'Switches', cents: 110000, d: sw(24, 'PoE++', 600, 10000) },
+    { slug: 'weak', type: 'Switches', cents: 10000, d: sw(8, 'PoE', 120) },
+    { slug: 'nobudget', type: 'Switches', cents: 5000, d: { ports: [port({ count: 8, poe_class: 'PoE++', poe_direction: 'out' })] } },
+    { slug: 'dumb', type: 'Switches', cents: 5000, d: { ports: [port({ count: 8 })] } },
+  ]
+  const slugs = (c: ReturnType<typeof catalog>, ...items: [string, number][]) => findSwitches(plan(c, ...items), c.rows, c.map).options.map((o) => `${o.label}: ${o.qty} × ${o.row.product.slug}`)
+
+  it('suggests the cheapest that works and the cheapest that keeps every device at full speed', () => {
+    // 6 E7 draw 258 W. One small (150 W) is not enough and the weak one has too low a class; two small cost more than one mid.
+    expect(slugs(catalog(base), ['e7', 6])).toEqual(['Cheapest that fits: 1 × mid', 'Cheapest at full speed: 1 × fast'])
+  })
+
+  it('never suggests a switch with no PoE, no known budget, or ports of too low a class', () => {
+    const c = catalog(base)
+    const all = findSwitches(plan(c, ['e7', 2]), c.rows, c.map).options.map((o) => o.row.product.slug)
+    for (const bad of ['weak', 'nobudget', 'dumb']) expect(all).not.toContain(bad)
+  })
+
+  it('suggests several of one switch when that is the cheapest way', () => {
+    const c = catalog(base.filter((b) => b.slug !== 'mid' && b.slug !== 'fast'))
+    const [first] = findSwitches(plan(c, ['e7', 12]), c.rows, c.map).options // 516 W and 12 ports: two small switches have neither
+    expect(first).toMatchObject({ qty: 4, cents: 120000 }) // four small: 600 W, 32 ports
+  })
+
+  it('counts a switch already in the plan, so only the shortfall is made up', () => {
+    const c = catalog(base)
+    // One small is in the plan (150 W, 8 ports) for 6 E7; a second small covers it.
+    const { options } = findSwitches(plan(c, ['e7', 6], ['small', 1]), c.rows, c.map)
+    expect(options[0]).toMatchObject({ label: 'Cheapest that fits', qty: 1 })
+    expect(options[0]!.row.product.slug).toBe('small') // 2 small = 300 W ≥ 258 W and 16 ports, for $300
+  })
+
+  it('offers a cheaper switch that is out of stock as such', () => {
+    const c = catalog([...base, { slug: 'gone', type: 'Switches', cents: 20000, status: 'SoldOut' as const, d: sw(24, 'PoE++', 400) }])
+    const { options } = findSwitches(plan(c, ['e7', 6]), c.rows, c.map)
+    expect(options.map((o) => o.label)).toContain('Cheaper, but not in stock')
+    expect(options.find((o) => o.label === 'Cheaper, but not in stock')).toMatchObject({ inStock: false, cents: 20000 })
+    expect(options[0]!.inStock).toBe(true)
+  })
+
+  it('says nothing fits when even several of the same do not', () => {
+    const c = catalog(base)
+    expect(findSwitches(plan(c, ['e7', 99]), c.rows, c.map)).toEqual({ options: [], fitting: 0 })
+  })
+
+  it('has nothing to suggest for a plan with no PoE devices', () => {
+    const c = catalog(base)
+    expect(findSwitches([], c.rows, c.map).options).toEqual([])
+  })
+
+  it('says when a device’s draw is unknown, so the fit counts only the rest', () => {
+    const c = catalog([...base, { slug: 'cam', type: 'Cameras', cents: 10000, d: { ports: [port({ count: 1, poe_class: 'PoE+', poe_direction: 'in' })] } }])
+    const { options } = findSwitches(plan(c, ['e7', 2], ['cam', 1]), c.rows, c.map)
+    expect(options[0]!.partial).toBe(true)
+  })
+})
