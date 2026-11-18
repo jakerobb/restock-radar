@@ -17,6 +17,8 @@ export interface SwitchOption {
   currency: string
   inStock: boolean
   stats: PoeStats
+  /** Switches in the plan that can't be bought now, which this one stands in for (the plan is checked without them). */
+  replaces: DerivedLine[]
   /** True when some device's power draw isn't known, so the fit counts only those that are. */
   partial: boolean
 }
@@ -30,16 +32,25 @@ export interface SwitchSuggestions {
 const hasPoeOut = (r: CatalogRow): boolean => !!r.derived?.known.ports && r.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out')
 const hasBudget = (r: CatalogRow): boolean => (r.derived?.metrics.find((m) => m.name === 'poe_budget_w')?.value ?? 0) > 0
 
-type Fit = Omit<SwitchOption, 'label'>
+type Fit = Omit<SwitchOption, 'label' | 'replaces'>
 
 /**
  * Tries each PoE switch in the catalogue added to the plan, one at a time and then a few of the same,
  * and keeps those after which the plan's PoE power and ports check out (worked out by the same placement
  * the plan page uses, so each switch's own budget counts). Suggests the cheapest that is in stock, the
  * cheapest that runs every device at full speed, and the one with the most room to spare, when those differ.
- * A switch with no known PoE budget is never suggested: unknown is not a fit.
+ * A switch with no known PoE budget is never suggested: unknown is not a fit. Nor is one that leaves a device
+ * below 1 GbE (or below its own speed, if lower), and when the plan only falls short on speed, one that doesn't
+ * speed anything up.
  */
-export function findSwitches(plan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): SwitchSuggestions {
+export function findSwitches(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): SwitchSuggestions {
+  // A switch that can't be bought now gives nothing to count on, so it is checked without and its stand-ins offered.
+  const replaces = fullPlan.filter((l) => l.view.state !== 'in' && !!l.derived?.known.ports && l.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out'))
+  const plan = fullPlan.filter((l) => !replaces.includes(l))
+  // When the plan only falls short on speed, a switch has to speed devices up to be worth suggesting.
+  const before = planChecks(plan)
+  const speedOnly = before.some((c) => c.id === 'poe-power' && c.verdict === 'ok') && before.some((c) => c.id === 'poe-ports' && c.verdict === 'ok')
+  const slowedBefore = speedOnly ? (before.find((c) => c.id === 'poe-layout')?.stats?.slowed ?? 0) : 0
   const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
   const fits: Fit[] = []
   for (const row of rows) {
@@ -54,6 +65,8 @@ export function findSwitches(plan: DerivedLine[], rows: CatalogRow[], products: 
       const ports = checks.find((c) => c.id === 'poe-ports')
       const stats = checks.find((c) => c.id === 'poe-layout')?.stats
       if (!power || !ports || !stats || power.verdict === 'bad' || ports.verdict === 'bad' || stats.stranded > 0) continue
+      // Never recommend a switch that leaves devices crawling (an access point on a 100 Mbps port), however cheap.
+      if (stats.crawling > 0 || (slowedBefore > 0 && stats.slowed >= slowedBefore)) continue
       fits.push({ row, qty, cents: view.totalCents, currency: view.currency, inStock: view.state === 'in', stats, partial: power.verdict === 'unknown' })
       break
     }
@@ -77,7 +90,7 @@ export function findSwitches(plan: DerivedLine[], rows: CatalogRow[], products: 
     if (!fit) continue
     const same = options.find((o) => o.row === fit.row && o.qty === fit.qty)
     if (same) continue
-    options.push({ ...fit, label })
+    options.push({ ...fit, label, replaces })
   }
   return { options, fitting: fits.length }
 }

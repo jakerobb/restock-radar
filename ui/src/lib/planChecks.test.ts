@@ -6,7 +6,7 @@ const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
 const metric = (name: string, value: number) => ({ name, value, unit: 'W', at_least: false, raw: '' })
 
 const item = (slug: string, qty: number, d: Parameters<typeof derived>[0] | null): DerivedLine => {
-  const l: PlanLine = { ref: `us/${slug}`, sku: 'S', qty, addedCents: null }
+  const l: PlanLine = { ref: `us/${slug}`, sku: 'SKU-1', qty, addedCents: null }
   return { view: viewLine(l, new Map([[l.ref, product({ slug, title: slug })]])), derived: d === null ? null : derived({ slug, known, ...d }) }
 }
 
@@ -154,6 +154,18 @@ describe('planChecks', () => {
       const tiny = item('tiny', 1, { ports: [port({ count: 24, max_speed_mbps: 10000, poe_class: 'PoE+++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] })
       const detail = byId([e7(3), tiny])['poe-layout']?.detail
       expect(detail?.at(-1)).toEqual({ title: 'No port or power left for', rows: ['1 × e7'] })
+    })
+  })
+
+  describe('shortfalls', () => {
+    it('flags a shortfall for power, ports, speed, and a PoE switch that is out of stock', () => {
+      expect(planChecks([ap(10, 13), sw(1, 100)]).some((c) => c.shortfall)).toBe(true)
+      expect(planChecks([ap(3)]).some((c) => c.shortfall)).toBe(true) // nothing supplies PoE
+      expect(planChecks([ap(4), sw(1, 100)]).some((c) => c.shortfall)).toBe(false)
+      const gone = item('gone', 1, { ports: [poeOut(8)], metrics: [metric('poe_budget_w', 100)] })
+      gone.view = { ...gone.view, state: 'out' }
+      const c = byId([ap(2), gone])
+      expect(c['poe-stock']).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
     })
   })
 

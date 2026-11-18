@@ -6,6 +6,7 @@ import { productRef } from '../lib/compare'
 import { formatPrice } from '../lib/format'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
+import { formatSpeed } from '../lib/requirements'
 import { findSwitches, MAX_SWITCHES, type SwitchOption } from '../lib/switchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -16,13 +17,13 @@ function facts(o: SwitchOption): string {
   const parts = [
     stats.spareWatts !== null && `${stats.spareWatts} W of PoE budget to spare`,
     `${stats.sparePorts} PoE ${stats.sparePorts === 1 ? 'port' : 'ports'} spare`,
-    stats.slowed === 0 ? 'every device at full speed' : `${stats.slowed} ${stats.slowed === 1 ? 'device' : 'devices'} on a slower port than its own`,
+    stats.slowed === 0 ? 'every device at full speed' : `${stats.slowed} ${stats.slowed === 1 ? 'device' : 'devices'} slowed to ${formatSpeed(stats.slowestMbps ?? 0)} (from ${formatSpeed(stats.slowedFromMbps ?? 0)})`,
   ]
   return parts.filter(Boolean).join(' · ')
 }
 
 /** Switches that, added to the plan, give its PoE devices the power and ports they need. */
-export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine) => void; onClose: () => void }) {
+export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine, replacing: PlanLine[]) => void; onClose: () => void }) {
   const found = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
     return findSwitches(plan, buildCatalog(products, derived), byRef)
@@ -56,6 +57,7 @@ export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan
                   </Badge>
                 </div>
                 <div className="mt-0.5 text-muted">{facts(o)}</div>
+                {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
                 {o.partial && <div className="mt-0.5 text-muted">Some devices have no known power draw, so this counts only those that do.</div>}
               </div>
               <Button
@@ -64,7 +66,7 @@ export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan
                 aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
                 onClick={() => {
                   const line = lineFor(o.row.product, o.qty)
-                  if (line) onAdd(line)
+                  if (line) onAdd(line, o.replaces.map((l) => l.view.line))
                 }}
               >
                 Add to plan

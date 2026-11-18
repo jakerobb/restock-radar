@@ -85,4 +85,27 @@ describe('findSwitches', () => {
     const { options } = findSwitches(plan(c, ['e7', 2], ['cam', 1]), c.rows, c.map)
     expect(options[0]!.partial).toBe(true)
   })
+
+  it('never suggests a switch that leaves a device crawling, however cheap, and says how slow the rest run', () => {
+    const c = catalog([...base, { slug: 'longrange', type: 'Switches', cents: 20000, d: sw(8, 'PoE++', 400, 100) }])
+    const { options } = findSwitches(plan(c, ['e7', 6]), c.rows, c.map)
+    expect(options.map((o) => o.row.product.slug)).not.toContain('longrange')
+    // The mid switch's 1 GbE ports are slow for a 10 GbE device, but not crawling; the stats say by how much.
+    expect(options[0]!.stats).toMatchObject({ slowed: 6, slowestMbps: 1000, slowedFromMbps: 10000, crawling: 0 })
+  })
+
+  it('suggests a faster switch when the plan only falls short on speed, and nothing that would not help', () => {
+    const c = catalog(base)
+    // One mid switch carries 6 E7 (258 W) but at 1 GbE. Another mid would not speed anything up; the fast one does.
+    const { options } = findSwitches(plan(c, ['e7', 6], ['mid', 1]), c.rows, c.map)
+    expect(options.map((o) => o.row.product.slug)).toEqual(['fast'])
+    expect(options[0]!.stats.slowed).toBe(0)
+  })
+
+  it('checks the plan without a switch that is sold out, and offers stand-ins for it', () => {
+    const c = catalog(base.map((b) => (b.slug === 'mid' ? { ...b, status: 'SoldOut' as const } : b)))
+    const { options } = findSwitches(plan(c, ['e7', 6], ['mid', 1]), c.rows, c.map)
+    expect(options[0]!.replaces.map((l) => l.view.line.ref)).toEqual(['us/mid'])
+    expect(options[0]!.row.product.slug).not.toBe('mid')
+  })
 })

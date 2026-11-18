@@ -289,7 +289,10 @@ export default function PlanPage() {
               )}
             </Card>
           )}
-          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l) => mine.add(l)} onClose={() => setFinding(false)} />}
+          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l, replacing) => {
+            for (const r of replacing) mine.remove(lineKey(r))
+            mine.add(l)
+          }} onClose={() => setFinding(false)} />}
 
           <div className="mt-5 space-y-3">
             <ShareLink lines={lines} products={productData?.products ?? []} />
