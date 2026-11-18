@@ -7,7 +7,6 @@ import { indexHistory } from '../lib/history'
 import { powerLabel } from '../lib/power'
 import { formatSpeed, metricInfo } from '../lib/requirements'
 import { useHistoryDays } from '../hooks/useHistoryDays'
-import { AddToPlan } from './AddToPlan'
 import { ProductCard } from './ProductCard'
 import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
 import { PageNav } from './PageNav'
@@ -224,7 +223,6 @@ export default function ProductPage() {
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <div className="flex flex-wrap items-center gap-3">
                 {canRefresh && <RefreshButton region={region} slug={slug} />}
-                <AddToPlan product={product} />
                 <Link to="/compare" search={{ p: [`${region}/${slug}`] }} className="text-sm text-muted underline underline-offset-2 hover:text-ink">
                   Compare with…
                 </Link>
