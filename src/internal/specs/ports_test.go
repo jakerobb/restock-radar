@@ -352,6 +352,25 @@ func TestNetworkingInterfacePorts(t *testing.T) {
 	}
 }
 
+func TestNetworkingInterfacePoEDownlinkPorts(t *testing.T) {
+	b := &builder{}
+	b.text("Overview", "Networking Interface", "(1) GbE RJ45 uplink port\n(6) GbE PoE RJ45 downlink ports\n(1) HDMI port (Viewport)")
+	r := b.derive()
+	if len(r.Ports) != 2 || len(r.Issues) != 0 {
+		t.Fatalf("ports %+v issues %+v", r.Ports, r.Issues)
+	}
+	up, down := r.Ports[0], r.Ports[1]
+	if up.Count != 1 || up.MaxSpeedMbps != 1000 || up.PoEClass != "" {
+		t.Errorf("uplink %+v", up)
+	}
+	if down.Count != 6 || down.MaxSpeedMbps != 1000 || down.PoEClass != "PoE" || down.PoEDirection != "out" {
+		t.Errorf("downlink %+v", down)
+	}
+	if !r.Known.PoE {
+		t.Error("an NVR with PoE downlink ports gives PoE")
+	}
+}
+
 func TestNetworkingInterfaceManagementPort(t *testing.T) {
 	b := &builder{}
 	b.text("Hardware", "Networking Interface", "(1) GbE MGMT RJ45 port (1G/100M)")

@@ -168,6 +168,19 @@ func (ix *index) scalar(labels ...string) (Effective, bool) {
 	return Effective{}, false
 }
 
+// all returns every text entry with the label, grouped or not, in order: some
+// labels are used in more than one place (a camera's "Resolution", a headline in
+// the overview and the pixels under "Video").
+func (ix *index) all(label string) []Effective {
+	var out []Effective
+	for _, e := range ix.std {
+		if e.Kind == unistore.SpecText && key(e.Label) == key(label) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func (ix *index) issue(area string, e Effective, problem string) {
 	if len(ix.res.Issues) >= 100 {
 		return

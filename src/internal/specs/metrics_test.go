@@ -461,3 +461,66 @@ func TestRealCoverage(t *testing.T) {
 		t.Error("a switch has coverage")
 	}
 }
+
+func TestNVRCameraCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		hd, k2, k4  float64
+	}{
+		{"a count per class", "(60) HD\n(30) 2K\n(18) 4K", 60, 30, 18},
+		{"only the first configuration of two", "With built-in HDMI Viewport disabled:\n(60) HD \n(50) 2K \n(30) 4K\n\nWith built-in HDMI Viewport in use:\n(40) HD\n(30) 2K\n(20) 4K", 60, 50, 30},
+		{"a class left out is left out", "(15) HD\n(6) 4K", 15, 0, 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{}
+			b.text("Overview", "Managed Cameras", tc.value)
+			r := b.derive()
+			for name, want := range map[string]float64{"nvr_cameras_hd": tc.hd, "nvr_cameras_2k": tc.k2, "nvr_cameras_4k": tc.k4} {
+				m := metric(r, name)
+				if want == 0 {
+					if m != nil {
+						t.Errorf("%s = %+v, want none", name, m)
+					}
+				} else if m == nil || m.Value != want {
+					t.Errorf("%s = %+v, want %v", name, m, want)
+				}
+			}
+			if len(r.Issues) != 0 {
+				t.Errorf("issues %+v", r.Issues)
+			}
+		})
+	}
+}
+
+func TestCameraResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  []string // the Resolution entries, in the order of the sections
+		want float64
+	}{
+		{"pixel dimensions are preferred", []string{"4K", "8MP 3840 x 2160 (16:9)"}, 8},
+		{"a 4 MP 2K camera", []string{"2K", "4MP 2688 x 1512 (16:9)"}, 4},
+		{"a multi-sensor camera is read per sensor", []string{"16 MP", "(2) 8MP 3840 x 2160 (16:9)"}, 8},
+		{"the larger of main and package cameras", []string{"FHD", "Main camera: 2MP 1600 x 1200 (4:3)\nPackage camera: 2MP 1600 x 1200 (4:3)"}, 2},
+		{"the headline when there are no dimensions", []string{"4K"}, 8.3},
+		{"megapixels as the headline", []string{"5MP"}, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{}
+			for i, v := range tc.res {
+				if i == 0 {
+					b.text("Overview", "Resolution", v)
+				} else {
+					b.group("Performance", "Video", "Resolution", v)
+				}
+			}
+			m := metric(b.derive(), "camera_megapixels")
+			if m == nil || m.Value != tc.want {
+				t.Errorf("camera_megapixels = %+v, want %v", m, tc.want)
+			}
+		})
+	}
+	if m := metric((&builder{}).derive(), "camera_megapixels"); m != nil {
+		t.Errorf("a product with no resolution has %+v", m)
+	}
+}
