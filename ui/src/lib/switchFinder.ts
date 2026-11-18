@@ -32,7 +32,7 @@ export type ListedSwitch = Omit<SwitchOption, 'label'>
 
 export interface SwitchSuggestions {
   options: SwitchOption[]
-  /** Every acceptable switch that would work, in stock or not, cheapest first. */
+  /** Every acceptable switch (or worthwhile pair of different ones) that would work, in stock or not, cheapest first. */
   all: ListedSwitch[]
   /** Switches that would work but run on a power method that isn't accepted. */
   hidden: number
@@ -181,7 +181,10 @@ export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, a
     if (same) continue
     options.push({ ...fit, label, replaces })
   }
-  const all = fits.map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.row.product.title.localeCompare(b.row.product.title))
+  // A pair is listed only when no one model does, or it undercuts the cheapest one that does (in stock or not).
+  const cheapestAny = best(fits, price)
+  const worthListing = pairs.filter((f) => cheapestAny === undefined || price(f) < price(cheapestAny))
+  const all = [...fits, ...worthListing].map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.row.product.title.localeCompare(b.row.product.title) || (a.also?.row.product.title ?? '').localeCompare(b.also?.row.product.title ?? ''))
   return { options, all, hidden: every.length - fits.length }
 }
 

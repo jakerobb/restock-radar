@@ -70,6 +70,49 @@ describe('adding to the plan', () => {
   })
 })
 
+describe('Add product on the plan page', () => {
+  it('searches by name or SKU, and adds the result you click', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    await user.type(screen.getByRole('combobox', { name: 'Search products to add' }), 'ap-1')
+    const options = screen.getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0]).toHaveTextContent('Access Point')
+    await user.click(options[0]!)
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
+    expect(screen.getByRole('status')).toHaveTextContent('Added Access Point')
+  })
+
+  it('moves through the results with the arrow keys and adds the selected one with Enter', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    const box = screen.getByRole('combobox', { name: 'Search products to add' })
+    await user.type(box, 'o') // PoE Switch, Access Point, Sold Out Thing: in stock first
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('PoE Switch'), expect.stringContaining('Access Point'), expect.stringContaining('Sold Out Thing')])
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true')
+    expect(box).toHaveAttribute('aria-activedescendant', screen.getAllByRole('option')[1]!.id)
+    await user.keyboard('{Enter}')
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
+    await user.keyboard('{ArrowUp}{ArrowUp}{Enter}') // wraps to the last
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toHaveLength(2)
+  })
+
+  it('says when nothing matches', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    await user.type(screen.getByRole('combobox', { name: 'Search products to add' }), 'zzzz')
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing matches')
+  })
+})
+
 describe('PlanPage', () => {
   it('lists lines with live prices, adds up the total and flags what is not in stock', async () => {
     catalog()

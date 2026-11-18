@@ -8,6 +8,7 @@ import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type Li
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
+import { PlanSearch } from './PlanSearch'
 import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -160,6 +161,7 @@ export default function PlanPage() {
   }, [views, derived])
   const checks = useMemo(() => planChecks(derivedLines), [derivedLines])
   const [finding, setFinding] = useState(false)
+  const [searching, setSearching] = useState(false)
   const shortfall = checks.some((c) => c.shortfall)
   const leaveShared = () => void navigate({ to: '/plan', replace: true })
 
@@ -167,6 +169,17 @@ export default function PlanPage() {
     <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
       <PageNav title="Build plan" />
       <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
+
+      {productData && !shared && (
+        <div className="mt-3">
+          <Button variant="secondary" className="py-1 text-sm" onClick={() => setSearching(true)}>
+            Add product
+          </Button>
+        </div>
+      )}
+      {searching && productData && (
+        <PlanSearch products={productData.products} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
+      )}
 
       {shared && decoded === null && (
         <Notice tone="bad" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
