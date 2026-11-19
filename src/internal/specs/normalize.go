@@ -15,7 +15,9 @@ import (
 )
 
 // Version identifies the derivation. A product derived with an older one is
-// derived again at startup.
+// derived again at startup. TestDerivationVersion fails when the derived output
+// for the captured products changes without a bump; after bumping, record the
+// new output with: go test ./internal/specs -run TestDerivationVersion -update
 const Version = 4
 
 var (
