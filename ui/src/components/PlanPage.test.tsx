@@ -303,6 +303,29 @@ describe('PlanPage', () => {
     expect(JSON.parse(localStorage.getItem('restock-radar.plan-power')!)).toEqual({ 'us/flex:FLEX': expect.any(Number) })
   })
 
+  it('makes a switch with a 60 W or 210 W adapter in the box a matter of which product it is, in place', async () => {
+    const budget = [{ name: 'PoE+ input', watts: 16, selected: false }, { name: '60W AC adapter input', watts: 52, selected: false }, { name: '210W AC adapter input', watts: 202, selected: true }]
+    products = [
+      product({ id: '1', slug: 'usw-ultra', title: 'Switch Ultra', type: 'Switches', collection: 'pro-ultra', variants: [variant({ id: 'a', num: 1, sku: 'U', price_cents: 12900 })] }),
+      product({ id: '2', slug: 'usw-ultra-60w', title: 'Switch Ultra 60W', type: 'Switches', collection: 'pro-ultra', variants: [variant({ id: 'b', num: 2, sku: 'U60', price_cents: 15900 })] }),
+      product({ id: '3', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'c', num: 3, sku: 'AP', price_cents: 15000 })] }),
+    ]
+    const ports = [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })]
+    const ds = [
+      derived({ slug: 'usw-ultra', known, ports, poe_budget: budget, power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }] }),
+      derived({ slug: 'usw-ultra-60w', known, ports, poe_budget: budget.map((s) => ({ ...s, selected: s.name.startsWith('60W') })), power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Included)' }] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: ds } })
+    setPlan([line({ ref: 'us/usw-ultra', sku: 'U', qty: 2, addedCents: 12900 }), line({ ref: 'us/ap', sku: 'AP', qty: 1, addedCents: 15000 })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    const choice = await screen.findByLabelText('Power for Switch Ultra')
+    expect(within(choice).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose how it is powered', 'PoE+: 16 W', '60W AC adapter: 52 W (as Switch Ultra 60W)', '210W AC adapter: 202 W (adapter added)']) // no 210 W product here, so that one is an adapter to buy
+    await user.selectOptions(choice, screen.getByRole('option', { name: /60W AC adapter/ }))
+    // The line becomes the product that comes with it, where it was and as many; no adapter is added.
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/usw-ultra-60w:U60:2:15900', 'us/ap:AP:1:15000'])
+  })
+
   it('shows a price that has changed since the line was added', async () => {
     catalog()
     setPlan([line({ addedCents: 25000 })])

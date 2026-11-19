@@ -2,7 +2,7 @@ import { derived } from '../test/fixtures'
 import { viewLine, type PlanLine } from './plan'
 import { product } from '../test/fixtures'
 import type { DerivedLine } from './planChecks'
-import { adapterOf, assumeBest, budgetOf, includedScenario, needsPowerChoice, powerOptions, scenarioCode } from './powering'
+import { adapterOf, assumeBest, poeBudgetAt, POE_CODE, withSiblings, budgetOf, includedScenario, needsPowerChoice, powerOptions, scenarioCode } from './powering'
 import { lineKey } from './plan'
 
 const scenario = (name: string, watts: number, selected = false) => ({ name, watts, selected })
@@ -36,22 +36,25 @@ describe('powering a switch', () => {
   })
 
   it('offers PoE and the adapter that can be had, and leaves out one sold only with another model', () => {
-    expect(powerOptions(flex().derived)!.map((o) => [o.scenario.name, o.adapter?.slug ?? null])).toEqual([
-      ['PoE+++ input', null], ['PoE++ input', null], ['PoE+ input', null], ['210W AC adapter input', 'uacc-adapter-ac-210w'],
-    ])
+    // Every PoE input is one option, whose budget is that of the port the switch is on.
+    const o = powerOptions(flex().derived)!
+    expect(o.map((x) => [x.poeInputs ? 'PoE' : x.scenario.name, x.adapter?.slug ?? null])).toEqual([['PoE', null], ['210W AC adapter input', 'uacc-adapter-ac-210w']])
+    expect(o[0]!.poeClass).toBe('PoE+')
+    expect([1, 2, 3, 4].map((rank) => poeBudgetAt(o[0]!, rank))).toEqual([null, 16, 46, 76])
     // The Ultra with no adapter in the box can't use the 60 W ones, which aren't sold alone.
     const bare = line('ultra', { poe_budget: ULTRA, power: [power('ac', '(1) AC/DC adapter (Excluded)')] })
-    expect(powerOptions(bare.derived)!.map((o) => o.scenario.name)).toEqual(['PoE++ input', 'PoE+ input', '210W AC adapter input'])
+    expect(powerOptions(bare.derived)!.map((o) => (o.poeInputs ? 'PoE' : o.scenario.name))).toEqual(['PoE', '210W AC adapter input'])
     // With the 60 W adapter in the box, it is on offer, free, and the 210 W one is still one to buy.
     const inBox = powerOptions(ultra60().derived)!
-    expect(inBox.map((o) => [o.scenario.name, o.adapter !== null])).toEqual([['PoE++ input', false], ['PoE+ input', false], ['60W AC adapter input', false], ['210W AC adapter input', true]])
+    expect(inBox.map((o) => [o.poeInputs ? 'PoE' : o.scenario.name, o.adapter !== null])).toEqual([['PoE', false], ['60W AC adapter input', false], ['210W AC adapter input', true]])
   })
 
   it('knows no budget until one is chosen, unless there is a power supply in the box', () => {
     const f = flex()
     expect(budgetOf(f, {})).toMatchObject({ watts: null, choose: true })
-    const code = scenarioCode('PoE+ input')
-    expect(budgetOf(f, { [lineKey(f.view.line)]: code })).toMatchObject({ watts: 16, choose: false })
+    // On PoE it is the best the ports can give that is known; the plan works out which port it is on. A choice made by class, before it was one option, is that choice.
+    expect(budgetOf(f, { [lineKey(f.view.line)]: POE_CODE })).toMatchObject({ watts: 76, choose: false })
+    expect(budgetOf(f, { [lineKey(f.view.line)]: scenarioCode('PoE+ input') })).toMatchObject({ watts: 76, choose: false })
     expect(budgetOf(ultra60(), {})).toMatchObject({ watts: 52, choose: false })
     expect(budgetOf(line('plain', { metrics: [{ name: 'poe_budget_w', value: 100, unit: 'W', at_least: false, raw: '' }] }), {}).watts).toBe(100)
   })
@@ -65,5 +68,29 @@ describe('powering a switch', () => {
     expect(scenarioCode('PoE+ input')).toBe(scenarioCode('poe+ input'))
     expect(scenarioCode('PoE+ input')).not.toBe(scenarioCode('PoE++ input'))
     for (const s of FLEX) expect(scenarioCode(s.name)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('the products of a range with an adapter in the box', () => {
+  const bare = () => line('ultra', { poe_budget: ULTRA, power: [power('ac', '(1) AC/DC adapter (Excluded)')] })
+  const w60 = () => line('ultra-60', { poe_budget: ULTRA.map((s) => ({ ...s, selected: s.name === '60W AC adapter input' })), power: [power('ac', '(1) AC/DC adapter (Included)')] })
+  const w210 = () => line('ultra-210', { poe_budget: ULTRA, power: [power('ac', '(1) AC/DC adapter (Included)')] })
+  const siblings = [{ slug: 'ultra-60', derived: w60().derived! }, { slug: 'ultra-210', derived: w210().derived! }]
+
+  it('makes the 60 W and 210 W adapters a matter of which product it is, on the one without', () => {
+    const o = withSiblings(powerOptions(bare().derived)!, bare().derived!, siblings)
+    expect(o.map((x) => [x.poeInputs ? 'PoE' : x.scenario.name, x.swapSlug ?? null, x.adapter?.slug ?? null])).toEqual([
+      ['PoE', null, null], ['60W AC adapter input', 'ultra-60', null], ['210W AC adapter input', 'ultra-210', null],
+    ])
+  })
+
+  it('offers the other adapter as a product, not the one it has, on one with an adapter in the box', () => {
+    const o = withSiblings(powerOptions(w60().derived)!, w60().derived!, [{ slug: 'ultra', derived: bare().derived! }, { slug: 'ultra-210', derived: w210().derived! }])
+    expect(o.map((x) => [x.poeInputs ? 'PoE' : x.scenario.name, x.swapSlug ?? null])).toEqual([['PoE', null], ['60W AC adapter input', null], ['210W AC adapter input', 'ultra-210']])
+  })
+
+  it('leaves a product with no sibling that comes with the adapter to the adapter it can buy', () => {
+    const f = flex()
+    expect(withSiblings(powerOptions(f.derived)!, f.derived!, []).find((x) => x.scenario.name === '210W AC adapter input')?.adapter?.slug).toBe('uacc-adapter-ac-210w')
   })
 })

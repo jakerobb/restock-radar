@@ -1,12 +1,12 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useDerived, useProducts } from '../api/queries'
-import type { Product } from '../api/types'
+import type { Derived, Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
 import { productRef } from '../lib/compare'
 import { formatPrice, totalCents } from '../lib/format'
 import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
-import { budgetOf, includedScenario, powerOptions, type PowerOption, type Powering } from '../lib/powering'
+import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
@@ -75,10 +75,12 @@ interface PowerChoice {
   /** The name of the scenario that comes with the product. */
   included: string | null
   adapterProduct: (slug: string) => Product | null
+  /** A product of the range, by slug, for an option that is a matter of which product it is. */
+  sibling: (slug: string) => Product | null
 }
 
 function LineRow({ view, editable, linked, power }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null }) {
-  const { lines, remove, changeQty, switchVariant, addOn, power: choosePower } = usePlan()
+  const { lines, remove, changeQty, switchVariant, addOn, swapProduct, power: choosePower } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
@@ -119,7 +121,9 @@ function LineRow({ view, editable, linked, power }: { view: LineView; editable: 
             value={power.chosen?.code ?? ''}
             onChange={(e) => {
               const o = power.options.find((x) => x.code === Number(e.target.value))
-              if (o) choosePower(key, o.code, o.adapter ? power.adapterProduct(o.adapter.slug) : null, line.qty)
+              const to = o?.swapSlug ? power.sibling(o.swapSlug) : null
+              if (o && to) swapProduct(key, to, line.qty)
+              else if (o) choosePower(key, o.code, o.adapter ? power.adapterProduct(o.adapter.slug) : null, line.qty)
             }}
           >
             {!power.chosen && (
@@ -129,9 +133,12 @@ function LineRow({ view, editable, linked, power }: { view: LineView; editable: 
             )}
             {power.options.map((o) => (
               <option key={o.code} value={o.code}>
-                {o.scenario.name.replace(/ input$/i, '')}: {o.scenario.watts} W
+                {o.poeInputs && o.poeInputs.length > 1
+                  ? `PoE: ${o.poeInputs[0]!.watts}–${o.scenario.watts} W, by the port it is on`
+                  : `${o.scenario.name.replace(/ input$/i, '')}: ${o.scenario.watts} W`}
                 {o.scenario.name === power.included && ' (included)'}
                 {o.adapter && ' (adapter added)'}
+                {o.swapSlug && ` (as ${power.sibling(o.swapSlug)?.title ?? o.swapSlug})`}
               </option>
             ))}
           </Select>
@@ -214,14 +221,19 @@ function HostedRow({ role, editable }: { role: HostedRole; editable: boolean }) 
   )
 }
 
-function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string, Product>): PowerChoice | null {
-  const options = powerOptions(l.derived)
-  if (!options || !l.derived) return null
+function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string, Product>, allDerived: Derived[]): PowerChoice | null {
+  const base = powerOptions(l.derived)
+  const product = l.view.product
+  if (!base || !l.derived || !product) return null
+  // The other products of its range (a Switch Ultra with its own adapter) are other ways to power it.
+  const siblings = product.collection === '' ? [] : allDerived.filter((d) => d.slug !== product.slug && d.region === product.region && products.get(`${d.region}/${d.slug}`)?.collection === product.collection)
+  const options = withSiblings(base, l.derived, siblings.map((d) => ({ slug: d.slug, derived: d })))
   return {
     options,
-    chosen: budgetOf(l, powering).option,
+    chosen: options.find((o) => o.code === budgetOf(l, powering).option?.code) ?? null,
     included: includedScenario(l.derived)?.name ?? null,
-    adapterProduct: (slug) => products.get(`${l.view.product?.region ?? 'us'}/${slug}`) ?? null,
+    adapterProduct: (slug) => products.get(`${product.region}/${slug}`) ?? null,
+    sibling: (slug) => products.get(`${product.region}/${slug}`) ?? null,
   }
 }
 
@@ -391,7 +403,7 @@ export default function PlanPage() {
               </thead>
               <tbody>
                 {derivedLines.map(({ view: v, derived: d }) => (
-                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} power={powerChoiceOf({ view: v, derived: d }, powering, products)} linked={(v.product?.linked ?? []).flatMap((l) => {
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} power={powerChoiceOf({ view: v, derived: d }, powering, products, derived ?? [])} linked={(v.product?.linked ?? []).flatMap((l) => {
                     const p = products.get(`${v.product!.region}/${l.slug}`)
                     return p ? [{ product: p, label: l.label }] : []
                   })} />

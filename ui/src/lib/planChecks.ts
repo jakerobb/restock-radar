@@ -3,7 +3,7 @@ import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
-import { budgetOf, powerOptions, type Powering } from './powering'
+import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
 import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
@@ -134,6 +134,8 @@ interface Device {
   draw: number
   /** Switches (by unit) whose ports it can't take: a switch can't be powered by itself. */
   exclude?: ReadonlySet<number>
+  /** Takes the highest class of port left, not the lowest that will do: a switch's budget is that of the port it is on. */
+  best?: boolean
 }
 
 interface Placement {
@@ -177,14 +179,14 @@ function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Pla
     if (speedFirst) {
       rest = []
       for (const i of [...idx].sort((a, b) => devices[b]!.speed - devices[a]!.speed || demand(a, b))) {
-        const k = pick(i, (f) => f.speed >= devices[i]!.speed, (f, g) => f.rank - g.rank || f.speed - g.speed || left[f.unit]! - left[g.unit]!)
+        const k = pick(i, (f) => f.speed >= devices[i]!.speed, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || left[f.unit]! - left[g.unit]! : (f, g) => f.rank - g.rank || f.speed - g.speed || left[f.unit]! - left[g.unit]!)
         if (k < 0) rest.push(i)
         else put(i, k)
       }
       rest.sort(demand)
     }
     for (const i of rest) {
-      const k = pick(i, () => true, (f, g) => g.speed - f.speed || f.rank - g.rank || left[f.unit]! - left[g.unit]!)
+      const k = pick(i, () => true, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || left[f.unit]! - left[g.unit]! : (f, g) => g.speed - f.speed || f.rank - g.rank || left[f.unit]! - left[g.unit]!)
       if (k >= 0) put(i, k)
     }
     return result
@@ -292,36 +294,51 @@ function poeCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
   if (lost > 0) return out
 
   // Which device goes on which switch: each switch has a budget of its own, so the total isn't enough.
-  const placing: { line: DerivedLine; rank: number; speed: number; draw: number; exclude?: ReadonlySet<number> }[] = []
+  const placing: { line: DerivedLine; rank: number; speed: number; draw: number; exclude?: ReadonlySet<number>; best?: boolean }[] = []
   for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: drawOf(l) ?? 0 })
   const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
   const budgets = units.map((u) => budget(u.line).watts ?? Infinity)
-  const groups: { unit: number; label: string; count: number }[] = []
+  const groups: { unit: number; label: string; count: number; rank: number }[] = []
   const socketList: Socket[] = units.flatMap((u, unit) =>
     poePortsOut(u.line.derived!).flatMap((p) => {
-      const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count }) - 1
+      const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count, rank: rank(p.poe_class) }) - 1
       return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group }))
     }),
   )
   placing.forEach((d) => {
-    if (poweredSwitches.has(d.line)) d.exclude = new Set(units.flatMap((u, k) => (u.line === d.line ? [k] : [])))
+    if (poweredSwitches.has(d.line)) {
+      d.exclude = new Set(units.flatMap((u, k) => (u.line === d.line ? [k] : [])))
+      d.best = true
+    }
   })
   let placed = allocate(placing, socketList, budgets)
   // A switch on a PoE input draws the load of the devices placed on it, which depends on where it goes: settle it in a few rounds.
   if (poweredSwitches.size > 0) {
     const own = placing.map((d) => d.draw)
-    for (let round = 0; round < 4; round++) {
+    for (let round = 0; round < 6; round++) {
       const load = new Map<DerivedLine, number>()
       placing.forEach((d, i) => {
         const at = placed[i]
         if (at) load.set(units[at.unit]!.line, (load.get(units[at.unit]!.line) ?? 0) + d.draw)
       })
       let changed = false
+      const seen = new Map<DerivedLine, number>()
       placing.forEach((d, i) => {
         if (!poweredSwitches.has(d.line)) return
         const next = own[i]! + (load.get(d.line) ?? 0) / qty(d.line)
         if (Math.abs(next - d.draw) > 1e-9) changed = true
         d.draw = next
+        // Its own budget downstream is that of the port it is on.
+        const n = seen.get(d.line) ?? 0
+        seen.set(d.line, n + 1)
+        const option = budgetOf(d.line, powering).option
+        const at = placed[i]
+        const k = units.findIndex((u) => u.line === d.line && u.n === n)
+        if (option?.poeInputs && at && k >= 0) {
+          const b = poeBudgetAt(option, groups[at.group]!.rank) ?? 0
+          if (b !== budgets[k]) changed = true
+          budgets[k] = b
+        }
       })
       if (!changed) break
       placed = allocate(placing, socketList, budgets)

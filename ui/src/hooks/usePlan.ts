@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { addLine, changeVariant, ensureQty, removeLine, setAddOn, setQty, type PlanLine } from '../lib/plan'
+import { addLine, changeVariant, ensureQty, lineFor, removeLine, replaceLine, setAddOn, setQty, type PlanLine } from '../lib/plan'
 import { getHosting, getPlan, getPowering, setHosting, setPlan, setPowering, subscribePlan } from '../lib/planStore'
 import type { Powering } from '../lib/powering'
 import type { Hosting, HostedRole, HostedWhere } from '../lib/roles'
@@ -21,6 +21,11 @@ export function usePlan() {
     setPowering({ ...getPowering(), [key]: code })
     if (adapter) setPlan(ensureQty(getPlan(), adapter, qty))
   }, [])
+  /** Makes a line another product of the same range, with the same quantity and in the same place. */
+  const swapProduct = useCallback((key: string, p: Product, qty: number) => {
+    const line = lineFor(p, qty)
+    if (line) setPlan(replaceLine(getPlan(), key, line))
+  }, [])
   /** Replaces the plan, and where its controllers run (nowhere else, unless said). */
   const replace = useCallback((next: PlanLine[], hosted: Hosting = {}, powered: Powering = {}) => {
     setPlan(next)
@@ -34,5 +39,5 @@ export function usePlan() {
     else delete next[role]
     setHosting(next)
   }, [])
-  return { lines, hosting, powering, power, add, remove, changeQty, switchVariant, addOn, replace, host }
+  return { lines, hosting, powering, power, swapProduct, add, remove, changeQty, switchVariant, addOn, replace, host }
 }
