@@ -347,7 +347,7 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 			prod.Category = page.PageProps.Category.Current.ID
 			prod.Detailed = true
 			if page.PageProps.LinkedProducts != nil {
-				prod.Linked = convertLinked(page.PageProps.LinkedProducts)
+				prod.Linked = offered(prod.Slug, convertLinked(page.PageProps.LinkedProducts))
 				sections := make([]choiceSection, 0, len(page.PageProps.Collection.Sections))
 				for _, sc := range page.PageProps.Collection.Sections {
 					sections = append(sections, choiceSection{Title: sc.Title, Tags: sc.ProductTags})
@@ -463,7 +463,7 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		}
 	}
 	if raw.LinkedProducts != nil {
-		p.Linked = convertLinked(raw.LinkedProducts)
+		p.Linked = offered(raw.Slug, convertLinked(raw.LinkedProducts))
 	}
 	for _, v := range raw.Variants {
 		if v.ID == "" || v.Status == "" {
@@ -653,4 +653,29 @@ func linkLabels(sections []choiceSection, baseTags []string, linked []Product) (
 		base = sections[best].Title
 	}
 	return base, labels
+}
+
+// offeredLinks is which linked products the store's page actually offers with a product, by the product's
+// slug without its region suffix. The data lists more than that (the UPS 2U Pro and the Cloud Gateway Max
+// list the same PDU and SSDs, and the store doesn't offer them there), so the choice is made in the
+// storefront's own code, and is repeated here.
+var offeredLinks = map[string][]string{
+	"ucg-max-ns": {"uacc-ssd-1tb", "uacc-ssd-2tb"},
+	"ucg-fiber":  {"uacc-ssd-1tb", "uacc-ssd-2tb"},
+	"ups-2u":     {"usp-pdu-pro"},
+}
+
+// offered keeps the linked products the store offers with the product of this slug. Nil stays nil: not told.
+func offered(slug string, linked []Product) []Product {
+	if linked == nil {
+		return nil
+	}
+	base := strings.TrimSuffix(strings.TrimSuffix(slug, "-us"), "-eu")
+	out := []Product{}
+	for _, l := range linked {
+		if slices.Contains(offeredLinks[base], l.Slug) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
