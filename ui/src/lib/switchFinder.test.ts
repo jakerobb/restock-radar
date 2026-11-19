@@ -75,7 +75,7 @@ describe('findSwitches', () => {
     expect(findSwitches(plan(c, ['e7', 99]), c.rows, c.map)).toMatchObject({ options: [], all: [], hidden: 0 })
   })
 
-  it('suggests a switch for a device that needs only a port, such as an NVR, counting SFP ports', () => {
+  it('suggests a switch for a device that needs only a port, such as an NVR, counting SFP ports and its own uplink', () => {
     const ac = [{ kind: 'ac' as const, poe_class: '', detail: 'AC' }]
     const nvr = { slug: 'nvr', type: 'Storage', cents: 40000, d: { ports: [port({ media: 'sfp+', max_speed_mbps: 10000 }), port({ max_speed_mbps: 1000 })] } }
     const plain = { slug: 'plain', type: 'Switches', cents: 5000, d: { ports: [port({ count: 8 })], power: ac } }
@@ -83,10 +83,26 @@ describe('findSwitches', () => {
     const c = catalog([nvr, plain, sfp])
     const { options } = findSwitches(plan(c, ['nvr', 1]), c.rows, c.map)
     expect(options.map((o) => o.row.product.slug)).toEqual(['plain'])
-    expect(options[0]?.stats.netSpare).toBe(7)
-    // With ten of them, the 8-port switch isn't enough; two are.
+    expect(options[0]?.stats.netSpare).toBe(6) // 8 ports, one for the switch's uplink, one for the NVR
+    // With ten of them, the 8-port switch isn't enough; two are (the second needs an uplink as well).
     const many = findSwitches(plan(c, ['nvr', 10]), c.rows, c.map).options
     expect(many[0]).toMatchObject({ qty: 2 })
+  })
+
+  it('suggests something with more SFP cages when switches that have them are uplinked over copper', () => {
+    const ac = [{ kind: 'ac' as const, poe_class: '', detail: 'AC' }]
+    const copper = port({ count: 8 })
+    const cage = (n: number) => port({ count: n, media: 'sfp+', max_speed_mbps: 10000 })
+    const c = catalog([
+      { slug: 'gw', type: 'Gateways', cents: 0, d: { ports: [port({ count: 4 }), cage(1)] } },
+      { slug: 'root', type: 'Switches', cents: 0, d: { ports: [copper, cage(2)], power: ac } },
+      { slug: 'a', type: 'Switches', cents: 0, d: { ports: [copper, cage(1)], power: ac } },
+      { slug: 'b', type: 'Switches', cents: 0, d: { ports: [copper, cage(1)], power: ac } },
+      { slug: 'agg', type: 'Switches', cents: 80000, d: { ports: [cage(8)], power: ac } },
+      { slug: 'plain', type: 'Switches', cents: 5000, d: { ports: [copper], power: ac } },
+    ])
+    const { options } = findSwitches(plan(c, ['gw', 1], ['root', 1], ['a', 1], ['b', 1]), c.rows, c.map)
+    expect(options.map((o) => o.row.product.slug)).toEqual(['agg'])
   })
 
   it('has nothing to suggest for a plan with no PoE devices', () => {
@@ -128,13 +144,13 @@ describe('findSwitches', () => {
     const mixed = [
       { slug: 'e7', type: 'WiFi', cents: 54900, d: e7() },
       { slug: 'cam', type: 'Cameras', cents: 10000, d: cam() },
-      { slug: 'tenG', type: 'Switches', cents: 30000, d: sw(2, 'PoE++', 100, 10000) },
-      { slug: 'gig', type: 'Switches', cents: 40000, d: sw(8, 'PoE++', 150) },
+      { slug: 'tenG', type: 'Switches', cents: 30000, d: sw(4, 'PoE++', 100, 10000) },
+      { slug: 'gig', type: 'Switches', cents: 40000, d: sw(10, 'PoE++', 150) },
     ]
 
     it('pairs a 10G switch with a gigabit one when that beats any one model', () => {
       const c = catalog(mixed)
-      // 2 E7 and 8 cameras: 10 ports and 206 W. Two gig switches have the ports but slow the E7s; the pair is cheaper and full speed.
+      // 2 E7 and 8 cameras: 10 ports and 206 W, and each switch needs an uplink. Two gig switches have the ports but slow the E7s; the pair is cheaper and full speed.
       const { options } = findSwitches(plan(c, ['e7', 2], ['cam', 8]), c.rows, c.map)
       expect(options.map((o) => `${o.label}: ${o.qty} × ${o.row.product.slug}${o.also ? ` + ${o.also.qty} × ${o.also.row.product.slug}` : ''}`)).toEqual([
         'Cheapest that fits: 2 × gig',
