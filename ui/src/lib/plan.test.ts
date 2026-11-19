@@ -64,10 +64,25 @@ describe('plan slugs', () => {
   })
 
   it('carries the controllers run elsewhere in the slug, and nothing when there are none', () => {
-    const slug = encodePlan(lines, catalogue, { network: 'self', talk: 'cloud' })
-    expect(decodePlan(slug, catalogue)).toMatchObject({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: { network: 'self', talk: 'cloud' } })
+    const slug = encodePlan(lines, catalogue, { network: 'self', talk: 'self' })
+    expect(decodePlan(slug, catalogue)).toMatchObject({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: { network: 'self', talk: 'self' } })
     expect(encodePlan(lines, catalogue, {})).toBe(encodePlan(lines, catalogue))
     expect(decodePlan(encodePlan(lines, catalogue), catalogue)?.hosting).toEqual({})
+  })
+
+  it('ignores the numbers an earlier version used for cloud hosting, which is a product now', () => {
+    const slug = encodePlan(lines, catalogue, { network: 'self' })
+    // Add the old number for cloud-hosted Access (the odd one after 2^30 + 2).
+    const bytes = [...atob(slug.replace(/-/g, '+').replace(/_/g, '/'))].map((c) => c.charCodeAt(0))
+    let n = 2 ** 30 + 3
+    const extra: number[] = []
+    while (n >= 0x80) {
+      extra.push((n & 0x7f) | 0x80)
+      n = Math.floor(n / 128)
+    }
+    extra.push(n, 1)
+    const old = btoa(String.fromCharCode(...bytes, ...extra)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    expect(decodePlan(old, catalogue)?.hosting).toEqual({ network: 'self' })
   })
 })
 

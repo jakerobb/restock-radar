@@ -194,11 +194,10 @@ describe('running a controller somewhere else', () => {
   const lines = (...items: [string, number][]) => w.plan(...items)
   const hostedBy = (lines2: DerivedLine[], hosting: Parameters<typeof planChecks>[1]) => Object.fromEntries(planChecks(lines2, hosting).map((c) => [c.id, c]))
 
-  it('counts a self-hosted or cloud-hosted controller as filling the role, and says capacity is not checked', () => {
+  it('counts a self-hosted controller as filling the role, and says capacity is not checked', () => {
     const plan = lines(['ap', 2], ['uxg-lite', 1])
     expect(hostedBy(plan, {})['role-network']).toMatchObject({ verdict: 'warn', roleShortfall: 'network' })
     expect(hostedBy(plan, { network: 'self' })['role-network']).toMatchObject({ verdict: 'ok', hosted: 'network', text: expect.stringContaining('Self-hosted') })
-    expect(hostedBy(plan, { network: 'cloud' })['role-network']).toMatchObject({ verdict: 'ok', hosted: 'network', text: expect.stringContaining('UniFi cloud hosting runs UniFi Network') })
     expect(hostedBy(plan, { network: 'self' })['role-network-capacity']).toBeUndefined()
   })
 
@@ -211,7 +210,7 @@ describe('running a controller somewhere else', () => {
     const found = findRoles(plan, w.rows, w.map)
     expect(found.missing).toEqual(['gateway', 'network', 'access'])
     expect(found.hostable).toEqual(['network', 'access'])
-    const hosted = findRoles(plan, w.rows, w.map, { network: 'self', access: 'cloud' })
+    const hosted = findRoles(plan, w.rows, w.map, { network: 'self', access: 'self' })
     expect(hosted.missing).toEqual(['gateway'])
     expect(hosted.hostable).toEqual([])
     // Any gateway does then; the cheapest is the one that does nothing else.
@@ -230,7 +229,44 @@ describe('running a controller somewhere else', () => {
     expect(many(lines(['ap', 1], ['ucg-ultra', 1]))).toBeUndefined()
     expect(many(lines(['ap', 1], ['ucg-ultra', 1], ['cloud-key', 1]))).toMatchObject({ verdict: 'warn', text: expect.stringContaining('2 things in the plan run UniFi Network (ucg-ultra, cloud-key)') })
     expect(many(lines(['ap', 1], ['ucg-ultra', 2]))).toMatchObject({ verdict: 'warn', text: expect.stringContaining('2 × ucg-ultra') })
-    expect(many(lines(['ap', 1], ['ucg-ultra', 1]), { network: 'cloud' })).toMatchObject({ text: expect.stringContaining('UniFi cloud hosting') })
+    expect(many(lines(['ap', 1], ['ucg-ultra', 1]), { network: 'self' })).toMatchObject({ text: expect.stringContaining('a self-hosted controller') })
     expect(many(lines(['ap', 1], ['uxg-lite', 1], ['cloud-key', 1]))).toBeUndefined() // a gateway that runs nothing doesn't count
+  })
+})
+
+describe('gateways filed as accessories, and Official UniFi Hosting', () => {
+  const ids = [{ name: 'ids_ips_throughput_mbps', value: 1000, unit: 'Mbps', at_least: false, raw: '' }]
+  const x = world([
+    { slug: 'ap', type: 'WiFi' },
+    { slug: 'uxg-lite', type: 'Accessories', category: 'accessories-advanced-hosting', cents: 6900, d: { metrics: ids } },
+    { slug: 'cloud-key', type: 'Accessories', category: 'accessories-advanced-hosting', cents: 499900, d: { metrics: [...app('network'), { name: 'managed_devices', value: 1000, unit: 'devices', at_least: false, raw: '' }] } },
+    { slug: 'unifi-hosting', type: 'Accessories', category: 'accessories-advanced-hosting', cents: 2900, d: { ports: [], known: { ...known, ports: false } } },
+    { slug: 'ucg-ultra', type: 'Gateways', cents: 12900, d: { metrics: [...app('network'), { name: 'managed_devices', value: 30, unit: 'devices', at_least: true, raw: '' }, ...ids] } },
+  ])
+
+  it('treats a UXG as a gateway although the store files it as an accessory', () => {
+    const c = roleChecks(x.plan(['ap', 1], ['uxg-lite', 1]))
+    expect(c['role-gateway']).toMatchObject({ verdict: 'ok', text: expect.stringContaining('uxg-lite (1 Gbps IDS/IPS) is the gateway') })
+    expect(c['role-network']).toMatchObject({ verdict: 'warn', roleShortfall: 'network' })
+  })
+
+  it('treats Official UniFi Hosting as a Network controller for up to 1,000 devices, with no specifications of its own', () => {
+    const c = Object.fromEntries(planChecks(x.plan(['ap', 3], ['uxg-lite', 1], ['unifi-hosting', 1])).map((p) => [p.id, p]))
+    expect(c['role-network']).toMatchObject({ verdict: 'ok', text: 'unifi-hosting runs UniFi Network.' })
+    expect(c['role-network-capacity']).toMatchObject({ verdict: 'ok', text: '4 UniFi devices in the plan; unifi-hosting manages 1,000.' })
+    expect(c['role-access']).toBeUndefined()
+  })
+
+  it('offers a UXG and hosting or a Cloud Key as separate products alongside the consoles that do both', () => {
+    const found = findRoles(x.plan(['ap', 2]), x.rows, x.map)
+    const labels = found.options.map((o) => `${o.label}: ${o.rows.map((r) => r.product.slug).join(' + ')}`)
+    expect(labels[0]).toBe('Cheapest that fits: ucg-ultra')
+    expect(labels).toContain('Cheapest as separate products: uxg-lite + unifi-hosting')
+    expect(found.all.filter((o) => o.split).map((o) => o.rows.map((r) => r.product.slug).join(' + '))).toEqual(['uxg-lite + unifi-hosting', 'uxg-lite + cloud-key'])
+  })
+
+  it('offers only the Network controller to be hosted (cloud hosting is a product), and hosting is the cheapest when that is all that is missing', () => {
+    const found = findRoles(x.plan(['ap', 2], ['uxg-lite', 1]), x.rows, x.map)
+    expect(found.options[0]).toMatchObject({ label: 'Cheapest that fits', rows: [expect.objectContaining({ product: expect.objectContaining({ slug: 'unifi-hosting' }) })] })
   })
 })

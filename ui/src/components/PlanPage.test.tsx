@@ -137,7 +137,7 @@ describe('Running a controller elsewhere', () => {
     setPlan([line({ ref: 'us/ap', sku: 'AP-1', qty: 1, addedCents: 15000 })])
   }
 
-  it('self-hosts the Network controller from the finder, keeps it, and can undo it', async () => {
+  it('self-hosts the Network controller from the finder, as an entry in the plan, and can remove it', async () => {
     setup()
     const user = userEvent.setup()
     renderRoute('/plan')
@@ -151,8 +151,25 @@ describe('Running a controller elsewhere', () => {
     expect(JSON.parse(localStorage.getItem('restock-radar.plan-hosting')!)).toEqual({ network: 'self' })
     // Only the gateway is still missing, and it can't be run elsewhere.
     expect(within(screen.getByLabelText('Find a gateway or controller')).queryByRole('button', { name: /Self-host/ })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    // It is an entry in the plan, not just a note in the checks.
+    expect(screen.getByLabelText('Plan')).toHaveTextContent('Self-hosted UniFi Network')
+    await user.click(screen.getByRole('button', { name: 'Remove self-hosted UniFi Network from the plan' }))
     await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('No Network controller in the plan'))
+  })
+})
+
+describe('Sharing a plan with a self-hosted controller', () => {
+  it('shows the entry, counts it in the checks, and has no way to remove it from someone else’s plan', async () => {
+    const ap = product({ id: 'a', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'a', num: 1, sku: 'AP-1', price_cents: 15000 })] })
+    stubFetch({
+      'GET /v1/products': { body: productsResponse({ products: [ap] }) },
+      'GET /v1/derived': { body: [derived({ slug: 'ap', known, ports: [port({ count: 1 })] })] },
+    })
+    const slug = encodePlan([line({ ref: 'us/ap', sku: 'AP-1', qty: 1, addedCents: null })], [ap], { network: 'self' })
+    renderRoute(`/plan/${slug}`)
+    expect(await screen.findByLabelText('Plan')).toHaveTextContent('Self-hosted UniFi Network')
+    expect(screen.getByLabelText('Checks')).toHaveTextContent('Self-hosted: you run UniFi Network yourself')
+    expect(screen.queryByRole('button', { name: /Remove self-hosted/ })).not.toBeInTheDocument()
   })
 })
 

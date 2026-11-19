@@ -99,11 +99,65 @@ describe('planChecks', () => {
       const l: PlanLine = { ref: `us/${slug}`, sku: 'S', qty, addedCents: null }
       return { view: viewLine(l, new Map([[l.ref, product({ slug, title: slug, type })]])), derived: d === null ? null : derived({ slug, known, ...d }) }
     }
+    // A product by its real slug and title, as the store has it (the rack mounts are matched by slug).
+    const real = (slug: string, title: string, type: string, category: string, d: Parameters<typeof derived>[0] | null, qty = 1): DerivedLine => {
+      const l: PlanLine = { ref: `us/${slug}`, sku: 'S', qty, addedCents: null }
+      return { view: viewLine(l, new Map([[l.ref, product({ slug, title, type, category })]])), derived: d === null ? null : derived({ slug, known, ...d }) }
+    }
+    const deskDevice = { rack: { mountable: false, units: 0, full_depth: false } }
     const racked = (slug: string, units: number) => typed(slug, 'Switches', { rack: { mountable: true, units, full_depth: false } })
     const desk = (slug: string, type = 'Switches') => typed(slug, type, { rack: { mountable: false, units: 0, full_depth: false } })
 
     it('says which equipment is not rack-mount, and needs a shelf', () => {
       expect(byId([racked('sw', 1), desk('xg8')]).rack).toMatchObject({ verdict: 'info', text: '1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: xg8.' })
+    })
+
+    it('names the Instant and the CloudKey+, recorders and consoles filed with the cameras, as needing a shelf', () => {
+      const instant = real('unvr-instant', 'UNVR Instant', 'Cameras & Security', 'physical-security-nvr', deskDevice)
+      const key = real('uck-g2-ssd', 'CloudKey+', 'Cameras & Security', 'physical-security-nvr', deskDevice)
+      expect(byId([racked('sw', 1), instant, key]).rack?.text).toBe('1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: UNVR Instant, CloudKey+.')
+    })
+
+    describe('rack-mount accessories', () => {
+      const mountOf = (slug: string, title: string, qty = 1) => real(slug, title, 'Accessories', 'accessories-rack-mount', { rack: { mountable: false, units: 0, full_depth: false } }, qty)
+      const aiKey = (qty: number) => real('ai-key', 'AI Key', 'Cameras & Security', 'physical-security-nvr', deskDevice, qty)
+
+      it('counts the accessory in the rack space and takes what it holds off the shelf list', () => {
+        const c = byId([aiKey(3), mountOf('uacc-ai-key-rm', 'AI Key Rack Mount')]).rack
+        expect(c).toMatchObject({ verdict: 'info', text: '1U of rack space (AI Key Rack Mount 1U).' })
+      })
+
+      it('leaves on the shelf list the ones the accessories do not have room for', () => {
+        expect(byId([aiKey(4), mountOf('uacc-ai-key-rm', 'AI Key Rack Mount')]).rack?.text).toBe('1U of rack space (AI Key Rack Mount 1U). Not rack-mount, so it needs a shelf or desk space: AI Key (1 of 4).')
+        expect(byId([aiKey(4), mountOf('uacc-ai-key-rm', 'AI Key Rack Mount', 2)]).rack?.text).toBe('2U of rack space (2 × AI Key Rack Mount 1U).')
+      })
+
+      it('holds six AI Ports, three AI Keys and one of the rest', () => {
+        const port6 = real('up-ai-port', 'AI Port', 'Cameras & Security', 'physical-security-nvr', deskDevice, 6)
+        expect(byId([port6, mountOf('uacc-ai-port-rm', 'AI Port Rack Mount')]).rack?.text).toBe('1U of rack space (AI Port Rack Mount 1U).')
+        expect(byId([real('up-ai-port', 'AI Port', 'Cameras & Security', 'physical-security-nvr', deskDevice, 7), mountOf('uacc-ai-port-rm', 'AI Port Rack Mount')]).rack?.text).toContain('AI Port (1 of 7)')
+        const key = real('uck-g2-ssd', 'CloudKey+', 'Cameras & Security', 'physical-security-nvr', deskDevice, 2)
+        expect(byId([key, mountOf('ckg2-rack-mount', 'CloudKey Rack Mount')]).rack?.text).toContain('CloudKey+ (1 of 2)')
+      })
+
+      it('puts a device that is rack-mount only with its accessory (a Pro Max 16 or the Industrial gateway) on the shelf list without one', () => {
+        const pm = real('usw-pro-max-16', 'Pro Max 16', 'Switches', 'switching-professional-max-xg', { rack: { mountable: true, units: 1, full_depth: false } })
+        expect(byId([pm]).rack?.text).toBe('Nothing in the plan goes in a rack. Not rack-mount, so it needs a shelf or desk space: Pro Max 16.')
+        expect(byId([pm, mountOf('uacc-pro-max-16-rm', 'Pro Max 16 Rack Mount')]).rack?.text).toBe('1U of rack space (Pro Max 16 Rack Mount 1U).')
+        const ind = real('ucg-industrial', 'Industrial', 'Gateways', 'cloud-gateways-wifi-integrated', { rack: { mountable: true, units: 0, full_depth: false } })
+        expect(byId([ind, mountOf('uacc-ucg-industrial-rm', 'Industrial Rack Mount')]).rack?.text).toBe('1U of rack space (Industrial Rack Mount 1U).')
+      })
+
+      it('shares one accessory between the models it fits', () => {
+        const a = real('usw-pro-max-16', 'Pro Max 16', 'Switches', 'x', { rack: { mountable: true, units: 1, full_depth: false } })
+        const b = real('usw-pro-max-16-poe', 'Pro Max 16 PoE', 'Switches', 'x', { rack: { mountable: true, units: 1, full_depth: false } })
+        expect(byId([a, b, mountOf('uacc-pro-max-16-rm', 'Pro Max 16 Rack Mount')]).rack?.text).toContain('Pro Max 16 PoE')
+        expect(byId([a, b, mountOf('uacc-pro-max-16-rm', 'Pro Max 16 Rack Mount', 2)]).rack?.text).toBe('2U of rack space (2 × Pro Max 16 Rack Mount 1U).')
+      })
+
+      it('still counts an accessory that has nothing to hold', () => {
+        expect(byId([mountOf('uacc-ai-key-rm', 'AI Key Rack Mount')]).rack?.text).toBe('1U of rack space (AI Key Rack Mount 1U).')
+      })
     })
 
     it('mentions desktop equipment even when nothing else is racked', () => {

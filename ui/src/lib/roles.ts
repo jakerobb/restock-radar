@@ -1,4 +1,4 @@
-import type { Derived } from '../api/types'
+import type { Derived, Product } from '../api/types'
 import type { DerivedLine, PlanCheck } from './planChecks'
 
 /**
@@ -14,18 +14,29 @@ export const ROLE_LABEL: Record<Role, string> = { gateway: 'Gateway', network: '
 /** The controllers that can run somewhere other than on a product in the plan (Protect, which records, can't). */
 export type HostedRole = Exclude<Role, 'gateway'>
 export const HOSTED_ROLES: readonly HostedRole[] = ['network', 'access', 'talk']
-/** Where a controller runs when it isn't on a product in the plan: UniFi's cloud hosting, or on a machine you run yourself. */
-export type HostedWhere = 'cloud' | 'self'
-/** The controllers the plan's owner has decided to run elsewhere. */
+/** Where a controller runs when it isn't on a product in the plan: on a machine you run yourself (UniFi's own cloud hosting is a product, below). */
+export type HostedWhere = 'self'
+/** The controllers the plan's owner has decided to run themselves; each is an entry in the plan, but not a product. */
 export type Hosting = Partial<Record<HostedRole, HostedWhere>>
 export const APP_NAME: Record<HostedRole, string> = { network: 'UniFi Network', access: 'UniFi Access', talk: 'UniFi Talk' }
+
+/** What the store says of a product, as far as roles go. */
+export type ProductInfo = Pick<Product, 'type' | 'slug'>
+
+/**
+ * Products that are a hosted controller. The store gives them no specifications, so what they run and manage
+ * is stated here: Official UniFi Hosting (a monthly subscription) runs UniFi Network for up to 1,000 devices.
+ */
+const HOSTED_PRODUCTS: Record<string, { roles: readonly HostedRole[]; managedDevices: number; note: string }> = {
+  'unifi-hosting': { roles: ['network'], managedDevices: 1000, note: 'A monthly subscription: the price is per month.' },
+}
+/** A note about a product that is a hosted controller, or undefined. */
+export const hostedNote = (p: ProductInfo | undefined): string | undefined => (p ? HOSTED_PRODUCTS[p.slug]?.note : undefined)
 
 const metric = (d: Derived | null, n: string): number => {
   const v = d?.metrics.find((m) => m.name === n)?.value
   return typeof v === 'number' ? v : 0
 }
-
-const metricOf = (d: Derived | null, n: string) => d?.metrics.find((m) => m.name === n)
 
 /** "5 Gbps", "800 Mbps": a throughput as the store gives it, in Mbps. */
 export function formatRate(mbps: number): string {
@@ -38,14 +49,26 @@ export function gatewayLabel(d: Derived | null): string {
   return v > 0 ? `${formatRate(v)} gateway` : 'gateway'
 }
 
-/** Whether a product fills a role: a gateway is a product of that type; a controller says it runs the application. */
-export function fills(type: string | undefined, d: Derived | null, role: Role): boolean {
-  return role === 'gateway' ? type === 'Gateways' : metric(d, `app_${role}`) > 0
+/** A gateway: a product of that type, or any that states what it can inspect (the UXG gateways are filed as accessories). */
+export const isGatewayProduct = (p: ProductInfo | undefined, d: Derived | null): boolean => p?.type === 'Gateways' || metric(d, 'ids_ips_throughput_mbps') > 0
+
+/** Whether a product fills a role: a gateway, or a controller that says it runs the application (or is a hosted controller). */
+export function fills(p: ProductInfo | undefined, d: Derived | null, role: Role): boolean {
+  if (role === 'gateway') return isGatewayProduct(p, d)
+  return metric(d, `app_${role}`) > 0 || !!(p && HOSTED_PRODUCTS[p.slug]?.roles.includes(role))
 }
 
 /** The applications a product runs (Protect too, though that role is the NVR check's), in the store's order. */
-export function appsRun(d: Derived | null): string[] {
-  return (['network', 'protect', 'access', 'talk'] as const).filter((a) => metric(d, `app_${a}`) > 0)
+export function appsRun(p: ProductInfo | undefined, d: Derived | null): string[] {
+  return (['network', 'protect', 'access', 'talk'] as const).filter((a) => metric(d, `app_${a}`) > 0 || !!(p && a !== 'protect' && HOSTED_PRODUCTS[p.slug]?.roles.includes(a)))
+}
+
+/** How many devices (managed_devices) or access hubs (managed_access_hubs) a product manages, and whether that is a minimum; null when it doesn't say. */
+export function managedOf(p: ProductInfo | undefined, d: Derived | null, name: string): { value: number; plus: boolean } | null {
+  const m = d?.metrics.find((x) => x.name === name)
+  if (m && m.value > 0) return { value: m.value, plus: m.at_least }
+  const hosted = p && name === 'managed_devices' ? HOSTED_PRODUCTS[p.slug] : undefined
+  return hosted ? { value: hosted.managedDevices, plus: false } : null
 }
 
 /** Store categories of door access products (hubs, intercoms, kits that contain a hub, readers), which are managed by UniFi Access. */
@@ -91,7 +114,7 @@ const qtyOf = (ls: DerivedLine[]) => ls.reduce((n, l) => n + l.view.line.qty, 0)
 /** What a controller manages, and which lines in the plan count against it. */
 const CAPACITY: Partial<Record<Role, { metric: string; noun: string; counted: (lines: DerivedLine[]) => DerivedLine[] }>> = {
   // The devices UniFi Network manages: gateways, switches, access points and the like (cameras and door hubs have their own applications).
-  network: { metric: 'managed_devices', noun: 'UniFi devices', counted: (ls) => ls.filter((l) => NETWORK_TYPES.has(l.view.product?.type ?? '') || l.view.product?.category === 'internet-solutions') },
+  network: { metric: 'managed_devices', noun: 'UniFi devices', counted: (ls) => ls.filter((l) => NETWORK_TYPES.has(l.view.product?.type ?? '') || isGatewayProduct(l.view.product, l.derived) || l.view.product?.category === 'internet-solutions') },
   // A starter kit includes a hub, and an intercom is one.
   access: { metric: 'managed_access_hubs', noun: 'access hubs', counted: (ls) => ls.filter((l) => HUB_CATEGORIES.has(l.view.product?.category ?? '')) },
 }
@@ -99,8 +122,8 @@ const CAPACITY: Partial<Record<Role, { metric: string; noun: string; counted: (l
 /** What the plan's controllers for a role manage, the largest (a console that says "100+" is at least 100), or null when none says. */
 function capacityOf(live: DerivedLine[], metricName: string) {
   const known = live.flatMap((l) => {
-    const m = metricOf(l.derived, metricName)
-    return m && m.value > 0 ? [{ line: l, value: m.value, plus: m.at_least }] : []
+    const m = managedOf(l.view.product, l.derived, metricName)
+    return m ? [{ line: l, value: m.value, plus: m.plus }] : []
   })
   return known.reduce<(typeof known)[number] | null>((a, b) => (a === null || b.value > a.value ? b : a), null)
 }
@@ -111,7 +134,7 @@ export function undersized(lines: DerivedLine[], hosting: Hosting = {}): Derived
     const role = c.roleShortfall
     const cap = role && CAPACITY[role]
     if (!role || !cap || !c.id.endsWith('-capacity')) return []
-    return lines.filter((l) => l.view.state === 'in' && fills(l.view.product?.type, l.derived, role) && (metricOf(l.derived, cap.metric)?.value ?? 0) > 0)
+    return lines.filter((l) => l.view.state === 'in' && fills(l.view.product, l.derived, role) && managedOf(l.view.product, l.derived, cap.metric) !== null)
   })
 }
 
@@ -133,22 +156,22 @@ export function roleCheck(lines: DerivedLine[], hosting: Hosting = {}): PlanChec
   for (const role of ROLES) {
     if (role === 'network') {
       // A site has one Network controller. Two probably means one belongs to another site (or a mistake).
-      const runners = lines.filter((l) => fills(l.view.product?.type, l.derived, 'network'))
+      const runners = lines.filter((l) => fills(l.view.product, l.derived, 'network'))
       const count = qtyOf(runners) + (hosting.network ? 1 : 0)
       if (count > 1) {
-        const names = [...runners.map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)}`), ...(hosting.network ? [hosting.network === 'self' ? 'a self-hosted controller' : 'UniFi cloud hosting'] : [])]
+        const names = [...runners.map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)}`), ...(hosting.network ? ['a self-hosted controller'] : [])]
         out.push({ id: 'role-network-many', label: 'Network controllers', verdict: 'warn', text: `${count} things in the plan run UniFi Network (${names.join(', ')}). A site has one Network controller, so the extra ones probably belong to another site; only the largest is counted here.` })
       }
     }
     if (needers(lines, role).length === 0) continue
     // A controller the owner has decided to run elsewhere is filled, whatever the plan holds.
     const where = role === 'gateway' ? undefined : hosting[role]
-    if (role !== 'gateway' && where) {
-      const text = where === 'self' ? `Self-hosted: you run ${APP_NAME[role]} yourself (UniFi OS Server, or the application on a machine of your own). How many devices it manages isn't checked.` : `UniFi cloud hosting runs ${APP_NAME[role]} for you. How many devices it manages isn't checked.`
+    if (role !== 'gateway' && where === 'self') {
+      const text = `Self-hosted: you run ${APP_NAME[role]} yourself (UniFi OS Server, or the application on a machine of your own). How many devices it manages isn't checked.`
       out.push({ id: `role-${role}`, label: ROLE_LABEL[role], verdict: 'ok', hosted: role, text })
       continue
     }
-    const by = lines.filter((l) => fills(l.view.product?.type, l.derived, role))
+    const by = lines.filter((l) => fills(l.view.product, l.derived, role))
     const live = by.filter((l) => l.view.state === 'in')
     const base = { id: `role-${role}`, label: ROLE_LABEL[role] }
     if (by.length === 0) out.push({ ...base, verdict: 'warn', roleShortfall: role, text: MISSING[role](needers(lines, role)) })

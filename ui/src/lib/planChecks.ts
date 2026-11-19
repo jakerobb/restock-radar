@@ -2,6 +2,7 @@ import type { Derived } from '../api/types'
 import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
+import { RACK_MOUNTS, NEEDS_RACK_MOUNT } from './rackMounts'
 import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
@@ -339,24 +340,45 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
 
 /** The product types that could go in a rack, so a desktop one is worth a mention. An access point or camera never would. */
 const RACKABLE_TYPES = new Set(['Switches', 'Gateways', 'Storage'])
+/** Store categories that could too: the recorders and consoles filed with the cameras (the Instant and the CloudKey+ are desktop). */
+const RACKABLE_CATEGORIES = new Set(['physical-security-nvr'])
 
 function rackCheck(lines: DerivedLine[]): PlanCheck[] {
-  const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '')
-  const mounted = lines.filter((l) => l.derived?.known.rack && l.derived.rack.mountable)
+  const slugOf = (l: DerivedLine) => l.view.product?.slug ?? ''
+  const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '') || RACKABLE_CATEGORIES.has(l.view.product?.category ?? '') || NEEDS_RACK_MOUNT.has(slugOf(l))
+
+  // Rack-mount accessories take rack space themselves, and hold the devices that fit them: those are no longer loose.
+  const mounts = lines.filter((l) => RACK_MOUNTS[slugOf(l)])
+  const room = mounts.map((l) => ({ mount: RACK_MOUNTS[slugOf(l)]!, left: RACK_MOUNTS[slugOf(l)]!.capacity * l.view.line.qty }))
+  const loose = new Map<DerivedLine, number>() // how many of a device that needs a mount have none
+  for (const l of lines.filter((x) => NEEDS_RACK_MOUNT.has(slugOf(x)))) {
+    let need = l.view.line.qty
+    for (const r of room) {
+      const take = r.mount.fits.includes(slugOf(l)) ? Math.min(need, r.left) : 0
+      r.left -= take
+      need -= take
+    }
+    loose.set(l, need)
+  }
+
+  const mounted = lines.filter((l) => l.derived?.known.rack && l.derived.rack.mountable && !NEEDS_RACK_MOUNT.has(slugOf(l)))
   // Equipment that sits on a shelf or desk, and equipment whose mounting isn't known (not the same thing).
-  const desktop = lines.filter((l) => rackable(l) && l.derived?.known.rack && !l.derived.rack.mountable)
-  const unsureMounting = lines.filter((l) => rackable(l) && !l.derived?.known.rack)
-  if (mounted.length === 0 && desktop.length === 0 && unsureMounting.length === 0) return []
+  const desktop = lines.filter((l) => (rackable(l) && l.derived?.known.rack && !l.derived.rack.mountable && !NEEDS_RACK_MOUNT.has(slugOf(l))) || (loose.get(l) ?? 0) > 0)
+  const unsureMounting = lines.filter((l) => rackable(l) && !l.derived?.known.rack && !NEEDS_RACK_MOUNT.has(slugOf(l)))
+  if (mounted.length === 0 && mounts.length === 0 && desktop.length === 0 && unsureMounting.length === 0) return []
 
   const unitsOf = (l: DerivedLine) => l.derived!.rack.units
   const unsureHeight = mounted.filter((l) => unitsOf(l) <= 0)
-  const total = mounted.reduce((n, l) => n + l.view.line.qty * Math.max(0, unitsOf(l)), 0)
-  const parts = mounted.filter((l) => unitsOf(l) > 0).map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)} ${unitsOf(l)}U`)
-  const base = mounted.length > 0 ? `${total}U of rack space${parts.length > 0 ? ` (${parts.join(', ')})` : ''}` : 'Nothing in the plan goes in a rack'
+  const sized = [...mounted.filter((l) => unitsOf(l) > 0).map((l) => ({ l, u: unitsOf(l) })), ...mounts.map((l) => ({ l, u: RACK_MOUNTS[slugOf(l)]!.units }))]
+  const total = sized.reduce((n, x) => n + x.l.view.line.qty * x.u, 0)
+  const parts = sized.map((x) => `${x.l.view.line.qty > 1 ? `${x.l.view.line.qty} × ` : ''}${name(x.l)} ${x.u}U`)
+  const base = sized.length > 0 || unsureHeight.length > 0 ? `${total}U of rack space${parts.length > 0 ? ` (${parts.join(', ')})` : ''}` : 'Nothing in the plan goes in a rack'
   const unsure = unsureHeight.length > 0 || unsureMounting.length > 0
+  // A device that needs a mount may be only partly covered by the ones in the plan.
+  const shelf = desktop.map((l) => ((loose.get(l) ?? 0) > 0 && (loose.get(l) ?? 0) < l.view.line.qty ? `${name(l)} (${loose.get(l)} of ${l.view.line.qty})` : name(l)))
   const sentences = [
     unsureHeight.length > 0 ? `Can't tell: the height of ${list(unsureHeight)} isn't known. ${base} so far.` : `${base}.`,
-    desktop.length > 0 && `Not rack-mount, so it needs a shelf or desk space: ${list(desktop)}.`,
+    desktop.length > 0 && `Not rack-mount, so it needs a shelf or desk space: ${shelf.join(', ')}.`,
     unsureMounting.length > 0 && `Can't tell whether ${list(unsureMounting)} ${unsureMounting.length === 1 ? 'is' : 'are'} rack-mount.`,
   ].filter(Boolean)
   return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: sentences.join(' ') }]

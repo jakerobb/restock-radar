@@ -1,6 +1,7 @@
 import type { Port } from '../api/types'
 import type { DerivedLine, PlanCheck } from './planChecks'
 import { formatSpeed } from './requirements'
+import { isGatewayProduct } from './roles'
 
 export interface NetStats {
   /** Devices and switch uplinks that got no port. */
@@ -61,7 +62,7 @@ const unique = (xs: string[]) => [...new Set(xs)].join(', ')
 
 /** The product types that are the network itself: switches (which each need an uplink) and gateways (the top, which need none). */
 const isSwitch = (l: DerivedLine) => l.view.product?.type === 'Switches'
-const isGateway = (l: DerivedLine) => l.view.product?.type === 'Gateways'
+const isGateway = (l: DerivedLine) => isGatewayProduct(l.view.product, l.derived)
 
 /** The ports of a switch (or gateway) that something can plug into, grouped, with combo pairs counted once; a switch's PoE-in port is kept apart as its own way of uplinking. */
 function groupsOf(unit: Unit): Group[] {

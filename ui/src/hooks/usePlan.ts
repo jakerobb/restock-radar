@@ -17,7 +17,7 @@ export function usePlan() {
     setPlan(next)
     setHosting(hosted)
   }, [])
-  /** Runs a controller in the cloud or on your own machine instead of on a product; null to undo. */
+  /** Runs a controller on your own machine instead of on a product; null to undo. */
   const host = useCallback((role: HostedRole, where: HostedWhere | null) => {
     const next = { ...getHosting() }
     if (where) next[role] = where

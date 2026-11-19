@@ -6,7 +6,7 @@ import { usePlan } from '../hooks/usePlan'
 import { formatPrice } from '../lib/format'
 import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
-import type { HostedRole, Hosting } from '../lib/roles'
+import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
 import { RoleFinder } from './RoleFinder'
@@ -112,6 +112,30 @@ function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
       {editable && (
         <td className="px-2 py-2 text-right">
           <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" aria-label={`Remove ${product?.title ?? line.ref} from the plan`} onClick={() => remove(key)}>
+            Remove
+          </button>
+        </td>
+      )}
+    </tr>
+  )
+}
+
+/** A controller the owner runs themselves: an entry in the plan, though not something to buy. */
+function HostedRow({ role, editable }: { role: HostedRole; editable: boolean }) {
+  const { host } = usePlan()
+  return (
+    <tr className="border-b border-line align-top last:border-0">
+      <td className="px-2 py-2">
+        <span className="font-medium">Self-hosted {APP_NAME[role]}</span>
+        <div className="text-xs text-muted">You run it yourself; not a product</div>
+      </td>
+      <td className="px-2 py-2 text-right text-muted">—</td>
+      <td className="px-2 py-2 text-right text-muted">—</td>
+      <td className="px-2 py-2 text-right text-muted">—</td>
+      <td className="px-2 py-2 text-muted">—</td>
+      {editable && (
+        <td className="px-2 py-2 text-right">
+          <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" aria-label={`Remove self-hosted ${APP_NAME[role]} from the plan`} onClick={() => host(role, null)}>
             Remove
           </button>
         </td>
@@ -285,6 +309,9 @@ export default function PlanPage() {
                 {views.map((v) => (
                   <LineRow key={lineKey(v.line)} view={v} editable={!shared} />
                 ))}
+                {HOSTED_ROLES.filter((r) => hosting[r]).map((role) => (
+                  <HostedRow key={role} role={role} editable={!shared} />
+                ))}
               </tbody>
             </table>
             <div className="mt-3 space-y-1 border-t border-line pt-3 text-right" aria-label="Totals">
@@ -335,14 +362,6 @@ export default function PlanPage() {
                       ) : (
                         c.text
                       )}
-                      {c.hosted && c.hosted !== 'gateway' && !shared && (
-                        <>
-                          {' '}
-                          <button type="button" className="cursor-pointer text-muted underline underline-offset-2 hover:text-ink" onClick={() => mine.host(c.hosted as HostedRole, null)}>
-                            Undo
-                          </button>
-                        </>
-                      )}
                     </span>
                   </li>
                 ))}
@@ -373,7 +392,7 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
-          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} hosting={hosting} onHost={mine.host} onAdd={(added, replacing) => {
+          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} hosting={hosting} onHost={(role) => mine.host(role, 'self')} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingRoles(false)} />}
