@@ -75,6 +75,20 @@ describe('findSwitches', () => {
     expect(findSwitches(plan(c, ['e7', 99]), c.rows, c.map)).toMatchObject({ options: [], all: [], hidden: 0 })
   })
 
+  it('suggests a switch for a device that needs only a port, such as an NVR, counting SFP ports', () => {
+    const ac = [{ kind: 'ac' as const, poe_class: '', detail: 'AC' }]
+    const nvr = { slug: 'nvr', type: 'Storage', cents: 40000, d: { ports: [port({ media: 'sfp+', max_speed_mbps: 10000 }), port({ max_speed_mbps: 1000 })] } }
+    const plain = { slug: 'plain', type: 'Switches', cents: 5000, d: { ports: [port({ count: 8 })], power: ac } }
+    const sfp = { slug: 'agg', type: 'Switches', cents: 30000, d: { ports: [port({ count: 8, media: 'sfp+', max_speed_mbps: 10000 })], power: ac } }
+    const c = catalog([nvr, plain, sfp])
+    const { options } = findSwitches(plan(c, ['nvr', 1]), c.rows, c.map)
+    expect(options.map((o) => o.row.product.slug)).toEqual(['plain'])
+    expect(options[0]?.stats.netSpare).toBe(7)
+    // With ten of them, the 8-port switch isn't enough; two are.
+    const many = findSwitches(plan(c, ['nvr', 10]), c.rows, c.map).options
+    expect(many[0]).toMatchObject({ qty: 2 })
+  })
+
   it('has nothing to suggest for a plan with no PoE devices', () => {
     const c = catalog(base)
     expect(findSwitches([], c.rows, c.map).options).toEqual([])

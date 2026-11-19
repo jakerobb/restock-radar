@@ -63,7 +63,7 @@ export function PlanSearch({ products, inPlan, onAdd, onClose }: { products: Pro
   return (
     <Dialog title="Add a product" onClose={onClose}>
       <TextInput
-        autoFocus
+        data-autofocus
         className="w-full"
         role="combobox"
         aria-expanded={shown.length > 0}

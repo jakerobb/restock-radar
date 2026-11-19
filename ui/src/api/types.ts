@@ -164,6 +164,8 @@ export interface Port {
   poe_direction: string
   poe_inferred?: boolean
   poe_watts?: number | null
+  /** Shares its position with another port (a combo RJ45/SFP+ pair), so only one of the two is usable at a time. */
+  combo?: boolean
 }
 
 export interface PoEScenario {
