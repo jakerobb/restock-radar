@@ -403,3 +403,21 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}): PlanChe
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l) ? l.view.line.qty : 0), 0)
   return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
 }
+
+export interface Answer {
+  word: string
+  emoji: string
+  tone: 'ok' | 'warn' | 'bad'
+}
+
+/**
+ * The one-line answer to "does it add up?": no if anything is wrong, mostly if anything is a warning or can't be told,
+ * yes if every check passed. Notes (info) don't count; with nothing but notes there is no answer.
+ */
+export function overall(checks: PlanCheck[]): Answer | null {
+  const vs = checks.map((c) => c.verdict).filter((v) => v !== 'info')
+  if (vs.length === 0) return null
+  if (vs.includes('bad')) return { word: 'No.', emoji: '❌', tone: 'bad' }
+  if (vs.some((v) => v !== 'ok')) return { word: 'Mostly', emoji: '👍', tone: 'warn' }
+  return { word: 'Yes!', emoji: '🎉', tone: 'ok' }
+}

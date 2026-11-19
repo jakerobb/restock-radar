@@ -1,4 +1,4 @@
-import { planChecks, type DerivedLine } from './planChecks'
+import { overall, planChecks, type DerivedLine, type PlanCheck } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product } from '../test/fixtures'
 
@@ -274,5 +274,17 @@ describe('planChecks', () => {
       const cam = item('cam', 3, { ports: [port({ count: 1, max_speed_mbps: 10000, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 10)] })
       expect(byId([cam, sw(1, 100)])['poe-speed']).toMatchObject({ verdict: 'warn', text: expect.stringContaining('all 3 cam (10 GbE port) would run at 1 GbE') })
     })
+  })
+})
+
+describe('the overall answer', () => {
+  const c = (verdict: PlanCheck['verdict']): PlanCheck => ({ id: verdict, label: verdict, verdict, text: '' })
+  it('is yes when all pass, mostly with warnings or unknowns, no with a problem, and nothing for notes alone', () => {
+    expect(overall([c('ok'), c('info')])).toMatchObject({ word: 'Yes!', emoji: '🎉' })
+    expect(overall([c('ok'), c('warn')])).toMatchObject({ word: 'Mostly', emoji: '👍' })
+    expect(overall([c('ok'), c('unknown')])).toMatchObject({ word: 'Mostly' })
+    expect(overall([c('warn'), c('bad')])).toMatchObject({ word: 'No.', emoji: '❌' })
+    expect(overall([c('info')])).toBeNull()
+    expect(overall([])).toBeNull()
   })
 })
