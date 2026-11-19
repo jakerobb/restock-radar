@@ -27,6 +27,8 @@ interface Group {
   /** A port that takes PoE in: a switch's own way of being uplinked, no use to anything below it. */
   uplinkOnly: boolean
   label: string
+  /** The kind of cage (SFP, SFP+, SFP28) when there is one, as the store names it. */
+  cage: string
 }
 
 /** One switch or gateway (one unit of a line). */
@@ -75,6 +77,7 @@ function groupsOf(unit: Unit): Group[] {
     poe: p.poe_class !== '' && p.poe_direction === 'out',
     uplinkOnly: false,
     label: `${speedLabel(speedOf(p))}${mediaLabel(p.media)}`,
+    cage: isSfp(p.media) ? mediaLabel(p.media) : '',
     ...over,
   })
   const poeIn = ports.filter((p) => p.poe_direction === 'in')
@@ -87,7 +90,7 @@ function groupsOf(unit: Unit): Group[] {
     const fiber = combo.filter((p) => p.media !== 'rj45')
     const n = (ps: Port[]) => ps.reduce((a, p) => a + p.count, 0)
     const speed = Math.max(...combo.map(speedOf))
-    groups.push({ ...mk(combo[0]!), media: copper.length > 0 && fiber.length > 0 ? 'either' : copper.length > 0 ? 'rj45' : 'sfp', speed, free: Math.max(n(copper), n(fiber)), poe: false, label: `${speedLabel(speed)}${[...new Set(combo.map((p) => mediaLabel(p.media)))].join('/')} combo` })
+    groups.push({ ...mk(combo[0]!), cage: fiber[0] ? mediaLabel(fiber[0].media) : '', media: copper.length > 0 && fiber.length > 0 ? 'either' : copper.length > 0 ? 'rj45' : 'sfp', speed, free: Math.max(n(copper), n(fiber)), poe: false, label: `${speedLabel(speed)}${[...new Set(combo.map((p) => mediaLabel(p.media)))].join('/')} combo` })
   }
   if (unit.kind === 'switch') groups.push(...poeIn.map((p) => mk(p, { uplinkOnly: true, poe: false, label: `${speedLabel(speedOf(p))}${mediaLabel(p.media)} (PoE in)` })))
   return groups.filter((g) => g.free > 0)
@@ -283,7 +286,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   const misses = links.filter((l) => l.unit.cages > 0 && l.kind !== 'sfp' && l.kind !== 'external' && l.parent !== null && (l.parent.kind === 'switch' || l.parent.cages > 0))
   const stats: NetStats = { unplaced: lost, spare, sfpMisses: misses.length }
 
-  const how = (l: Uplink) => `${speedLabel(l.speed)}${l.kind === 'sfp' ? 'SFP' : l.kind === 'copper' ? 'copper' : 'copper through an SFP module'}`
+  const how = (l: Uplink) => `${speedLabel(l.speed)}${l.kind === 'sfp' ? l.group.cage || l.parentGroup?.cage || 'SFP' : l.kind === 'copper' ? 'copper' : 'copper through an SFP module'}`
   const wiring = links.map((l) => `${unitName(l.unit)} → ${l.parent ? unitName(l.parent) : 'the network outside the plan'}${l.unit === root ? ' (root)' : ''}: ${l.kind === 'external' ? `${l.group.label} port` : how(l)}`)
   const detail: NonNullable<PlanCheck['detail']> = []
   if (wiring.length > 0) detail.push({ title: 'Uplinks', rows: wiring })

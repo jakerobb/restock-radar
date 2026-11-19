@@ -82,11 +82,21 @@ describe('the NVR check', () => {
     expect(find(s, ['unvr', 1], ['c4k', 19])).toMatchObject({ verdict: 'bad', nvrShortfall: true, text: "1 of 19 cameras have no room on the plan's NVR.", nvr: { unplaced: 1 } })
   })
 
-  it('shares cameras between NVRs', () => {
+  it('fills one NVR before using a second, and warns when it has to spill over', () => {
     const s = setup([UNVR, cam('c4k', 8.3)])
+    const few = find(s, ['unvr', 2], ['c4k', 10])
+    expect(few).toMatchObject({ verdict: 'ok', text: '10 cameras use 28% of the NVRs’ combined capacity.' })
+    expect(few?.detail?.map((b) => b.rows[0])).toEqual([expect.stringContaining('10 × 4K'), 'No cameras on it'])
     const c = find(s, ['unvr', 2], ['c4k', 30])
-    expect(c).toMatchObject({ verdict: 'ok', text: '30 cameras use 83% of the NVRs’ combined capacity.' })
+    expect(c).toMatchObject({ verdict: 'warn', text: expect.stringContaining('83% of the NVRs’ combined capacity. Cameras are spread over several NVRs') })
     expect(c?.detail?.map((b) => b.title)).toEqual(['unvr (1 of 2)', 'unvr (2 of 2)'])
+    expect(c?.detail?.[0]?.rows[0]).toContain('18 × 4K')
+  })
+
+  it('starts with the NVR of the most capacity', () => {
+    const big = nvr('big', 100000, [100, 70, 50])
+    const s = setup([UNVR, big, cam('c4k', 8.3)])
+    expect(find(s, ['unvr', 1], ['big', 1], ['c4k', 5])?.detail?.map((b) => b.rows[0])).toEqual([expect.stringContaining('5 × 4K'), 'No cameras on it'])
   })
 
   it('says when a camera’s resolution is not known', () => {

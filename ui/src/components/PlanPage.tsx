@@ -354,18 +354,29 @@ export default function PlanPage() {
                     <span aria-hidden className={`w-4 shrink-0 text-center font-bold ${VERDICT[c.verdict].tone}`}>
                       {VERDICT[c.verdict].mark}
                     </span>
-                    <span>
-                      <span className="font-medium">{c.label}: </span>
+                    <div className="min-w-0 flex-1">
                       {c.detail ? (
-                        <details className="inline-block align-top">
-                          <summary className="cursor-pointer">{c.text}</summary>
-                          <div className="mt-1 space-y-2 text-muted">
-                            {c.detail.map((b) => (
-                              <div key={b.title}>
-                                <div className="font-medium text-ink">{b.title}</div>
+                        <details>
+                          <summary className="cursor-pointer">
+                            <span className="font-medium">{c.label}: </span>
+                            {c.text}
+                          </summary>
+                          <div className="mt-1 space-y-2 pl-5 text-muted">
+                            {c.detail.map((blk) => (
+                              <div key={blk.title}>
+                                <div className="font-medium text-ink">{blk.title}</div>
                                 <ul className="list-disc pl-5">
-                                  {b.rows.map((r) => (
-                                    <li key={r}>{r}</li>
+                                  {blk.rows.map((r) => (
+                                    <li key={typeof r === 'string' ? r : r.text}>
+                                      {typeof r === 'string' ? r : r.text}
+                                      {typeof r !== 'string' && (
+                                        <ul className="list-disc pl-5">
+                                          {r.items.map((i) => (
+                                            <li key={i}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </li>
                                   ))}
                                 </ul>
                               </div>
@@ -373,24 +384,30 @@ export default function PlanPage() {
                           </div>
                         </details>
                       ) : c.groups ? (
-                        <ul className="mt-1 list-disc space-y-1 pl-5">
-                          {c.groups.map((g) => (
-                            <li key={g.text}>
-                              {g.text}
-                              {g.items && g.items.length > 0 && (
-                                <ListTag ordered={g.ordered}>
-                                  {g.items.map((i) => (
-                                    <li key={i}>{i}</li>
-                                  ))}
-                                </ListTag>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
+                        <>
+                          <span className="font-medium">{c.label}:</span>
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            {c.groups.map((g) => (
+                              <li key={g.text}>
+                                {g.text}
+                                {g.items && g.items.length > 0 && (
+                                  <ListTag ordered={g.ordered}>
+                                    {g.items.map((i) => (
+                                      <li key={i}>{i}</li>
+                                    ))}
+                                  </ListTag>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
                       ) : (
-                        c.text
+                        <>
+                          <span className="font-medium">{c.label}: </span>
+                          {c.text}
+                        </>
                       )}
-                    </span>
+                    </div>
                   </li>
                 ))}
               </ul>

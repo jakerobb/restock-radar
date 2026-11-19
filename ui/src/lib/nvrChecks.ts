@@ -60,7 +60,7 @@ interface Unit {
 /**
  * Whether the plan's NVRs can manage its cameras. Each camera takes 1/capacity of an NVR for its class
  * ("(60) HD, (30) 2K, (18) 4K": a 4K camera is 1/18 of a UNVR, a 2K one 1/30), which is a rough, linear
- * estimate. Cameras are placed biggest first on the NVR with the most room.
+ * estimate. Cameras are placed biggest class first, filling the largest NVR before the next.
  */
 export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
   const counts: Record<CameraClass, number> = { hd: 0, '2k': 0, '4k': 0 }
@@ -91,10 +91,15 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
     text: `${unavailable.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')} ${unavailable.length === 1 && unavailable[0]!.view.line.qty === 1 ? "isn't" : "aren't"} in stock, so the camera capacity ${unavailable.length === 1 ? 'it gives' : 'they give'} can't be had now.`,
   }]
 
+  // Cameras go on the biggest NVR until it is full, and only then on the next: separate Protect controllers
+  // share nothing (facial recognition data, alarm settings), so using more of them than needed costs usability.
+  const WEIGHT: Record<CameraClass, number> = { hd: 1, '2k': 2, '4k': 3.3 }
+  const size = (u: Unit) => Math.max(0, ...CAMERA_CLASSES.map((c) => (u.caps[c] ?? 0) * WEIGHT[c]))
+  units.sort((a, b) => size(b) - size(a))
   let unplaced = 0
   for (const c of CAMERA_CLASSES) {
     for (let i = 0; i < counts[c]; i++) {
-      const fit = units.filter((u) => u.caps[c] !== undefined && u.used + 1 / u.caps[c]! <= 1 + EPS).sort((a, b) => a.used - b.used)[0]
+      const fit = units.filter((u) => u.caps[c] !== undefined && u.used + 1 / u.caps[c]! <= 1 + EPS)[0]
       if (!fit) {
         unplaced++
         continue
@@ -106,6 +111,8 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
   const spare = units.reduce((n, u) => n + Math.max(0, 1 - u.used), 0)
   const stats: NvrStats = { unplaced, spare }
   const many = units.length > 1
+  const spilled = units.filter((u) => u.used > 0).length > 1
+  const spillNote = " Cameras are spread over several NVRs, which works, but they share no facial recognition data, alarm settings or the like."
   const detail = units.map((u, i) => {
     const mix = CAMERA_CLASSES.filter((c) => u.counts[c] > 0).map((c) => `${u.counts[c]} × ${CLASS_LABEL[c]}`)
     return {
@@ -120,7 +127,7 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
   const used = units.length - spare
   const text = `${cameras} camera${s(cameras)} use${cameras === 1 ? 's' : ''} ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.`
   if (unknown > 0) {
-    return [...stock, { id: 'nvr', label: 'Protect controller (NVR)', verdict: 'unknown', nvr: stats, detail, text: `Can't tell for ${unknown} camera${s(unknown)} whose resolution isn't known. The other ${known} use ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.` }]
+    return [...stock, { id: 'nvr', label: 'Protect controller (NVR)', verdict: 'unknown', nvr: stats, detail, text: `Can't tell for ${unknown} camera${s(unknown)} whose resolution isn't known. The other ${known} use ${pct(used / units.length)} of the NVR${many ? 's’ combined' : '’s'} capacity.${spilled ? spillNote : ''}` }]
   }
-  return [...stock, { id: 'nvr', label: 'Protect controller (NVR)', verdict: 'ok', nvr: stats, detail, text }]
+  return [...stock, { id: 'nvr', label: 'Protect controller (NVR)', verdict: spilled ? 'warn' : 'ok', nvr: stats, detail, text: spilled ? text + spillNote : text }]
 }
