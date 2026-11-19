@@ -1,11 +1,14 @@
 import { parsePlan, serializeLine, type PlanLine } from './plan'
+import type { Powering } from './powering'
 import { HOSTED_ROLES, type Hosting } from './roles'
 
 const KEY = 'restock-radar.plan'
 const HOSTING_KEY = 'restock-radar.plan-hosting'
+const POWER_KEY = 'restock-radar.plan-power'
 
 let current: PlanLine[] | undefined
 let currentHosting: Hosting | undefined
+let currentPowering: Powering | undefined
 const listeners = new Set<() => void>()
 
 function load(): PlanLine[] {
@@ -26,6 +29,17 @@ function loadHosting(): Hosting {
       const v = (raw as Record<string, unknown>)[role]
       if (v === 'self') out[role] = v
     }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function loadPowering(): Powering {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(POWER_KEY) ?? '{}')
+    const out: Powering = {}
+    if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 0xffff) out[k] = v
     return out
   } catch {
     return {}
@@ -59,13 +73,27 @@ export function setHosting(next: Hosting): void {
   listeners.forEach((l) => l())
 }
 
+/** How the plan's switches are powered, by line key. The same object is returned until it changes. */
+export const getPowering = (): Powering => (currentPowering ??= loadPowering())
+
+export function setPowering(next: Powering): void {
+  currentPowering = next
+  try {
+    localStorage.setItem(POWER_KEY, JSON.stringify(next))
+  } catch {
+    // It lasts until the tab closes.
+  }
+  listeners.forEach((l) => l())
+}
+
 /** Listens for changes here and, through the storage event, from other tabs. */
 export function subscribePlan(listener: () => void): () => void {
   listeners.add(listener)
   const onStorage = (e: StorageEvent) => {
-    if (e.key !== KEY && e.key !== HOSTING_KEY && e.key !== null) return
+    if (e.key !== KEY && e.key !== HOSTING_KEY && e.key !== POWER_KEY && e.key !== null) return
     current = undefined
     currentHosting = undefined
+    currentPowering = undefined
     listener()
   }
   window.addEventListener('storage', onStorage)
@@ -79,5 +107,6 @@ export function subscribePlan(listener: () => void): () => void {
 export function resetPlanStore(): void {
   current = undefined
   currentHosting = undefined
+  currentPowering = undefined
   listeners.clear()
 }

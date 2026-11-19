@@ -286,6 +286,23 @@ describe('PlanPage', () => {
     expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900'])
   })
 
+  it('lets the way a switch is powered be chosen, and puts the adapter it runs on in the plan', async () => {
+    products = [
+      product({ id: '1', slug: 'flex', title: 'Flex PoE', type: 'Switches', variants: [variant({ id: 'a', num: 1, sku: 'FLEX', price_cents: 19900 })] }),
+      product({ id: '2', slug: 'uacc-adapter-ac-210w', title: 'AC Adapter 210W', type: 'Accessories', variants: [variant({ id: 'b', num: 2, sku: 'ADAPTER', price_cents: 7900 })] }),
+    ]
+    const ds = [derived({ slug: 'flex', known, ports: [port({ count: 8, poe_class: 'PoE++', poe_direction: 'out' })], poe_budget: [{ name: 'PoE+ input', watts: 16, selected: false }, { name: '210W AC adapter input', watts: 196, selected: true }], power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }] })]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: ds } })
+    setPlan([line({ ref: 'us/flex', sku: 'FLEX', qty: 2, addedCents: 19900 })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    const choice = await screen.findByLabelText('Power for Flex PoE')
+    expect(choice).toHaveValue('') // not chosen yet
+    await user.selectOptions(choice, screen.getByRole('option', { name: /210W AC adapter: 196 W/ }))
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/flex:FLEX:2:19900', 'us/uacc-adapter-ac-210w:ADAPTER:2:7900'])
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan-power')!)).toEqual({ 'us/flex:FLEX': expect.any(Number) })
+  })
+
   it('shows a price that has changed since the line was added', async () => {
     catalog()
     setPlan([line({ addedCents: 25000 })])

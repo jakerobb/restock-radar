@@ -36,7 +36,7 @@ describe('plan slugs', () => {
   it('round-trips, in order, without the price, and is URL-safe', () => {
     const slug = encodePlan(lines, catalogue)
     expect(slug).toMatch(/^[A-Za-z0-9_-]+$/)
-    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: {} })
+    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: {}, powering: {} })
   })
 
   it('takes two bytes a line while numbers are small', () => {
@@ -48,7 +48,7 @@ describe('plan slugs', () => {
   it('leaves out lines that are not in the catalogue, and counts the ones it cannot place', () => {
     const slug = encodePlan([...lines, { ref: 'us/gone', sku: 'G', qty: 1, addedCents: null }], catalogue)
     expect(decodePlan(slug, catalogue)!.lines).toHaveLength(3)
-    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1, hosting: {} })
+    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1, hosting: {}, powering: {} })
   })
 
   it('merges a repeated variant and holds an empty plan', () => {
@@ -112,6 +112,26 @@ describe('editing a plan', () => {
     const first = line({ ref: 'us/a' })
     const last = line({ ref: 'us/c' })
     expect(changeVariant([first, line(), last], lineKey(line()), other).map((l) => l.ref)).toEqual(['us/a', 'us/widget', 'us/c'])
+  })
+})
+
+describe('how switches are powered in a share link', () => {
+  it('round-trips with the plan, whichever order it comes in, and is ignored for a line that is not in it', () => {
+    const a = product({ slug: 'a', variants: [variant({ sku: 'A', num: 5 })] })
+    const b = product({ slug: 'b', variants: [variant({ sku: 'B', num: 6 })] })
+    const lines = [line({ ref: 'us/a', sku: 'A' }), line({ ref: 'us/b', sku: 'B', qty: 2 })]
+    const powering = { [lineKey(lines[1]!)]: 4242, [lineKey({ ref: 'us/gone', sku: 'G' })]: 7 }
+    const decoded = decodePlan(encodePlan(lines, [a, b], {}, powering), [a, b])!
+    expect(decoded.powering).toEqual({ [lineKey(lines[1]!)]: 4242 })
+    expect(decoded.lines.map((l) => l.qty)).toEqual([1, 2])
+    expect(decodePlan(encodePlan(lines, [a, b]), [a, b])!.powering).toEqual({})
+  })
+
+  it('refuses a code out of range', () => {
+    const a = product({ slug: 'a', variants: [variant({ sku: 'A', num: 5 })] })
+    const bytes = [5, 1, 0x85 | 0, 0x80, 0x80, 0x80, 0x02, 0xff, 0xff, 0x7f] // a line, then a power entry whose code is too big
+    const slug = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    expect(decodePlan(slug, [a])).toBeNull()
   })
 })
 

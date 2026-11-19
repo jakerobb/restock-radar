@@ -1,3 +1,5 @@
+import { scenarioCode } from './powering'
+import { lineKey } from './plan'
 import { overall, planChecks, type DerivedLine, type PlanCheck } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product, variant } from '../test/fixtures'
@@ -288,6 +290,68 @@ describe('planChecks', () => {
       const cam = item('cam', 3, { ports: [port({ count: 1, max_speed_mbps: 10000, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 10)] })
       expect(byId([cam, sw(1, 100)])['poe-speed']).toMatchObject({ verdict: 'warn', text: expect.stringContaining('all 3 cam (10 GbE port) would run at 1 GbE') })
     })
+  })
+})
+
+describe('a switch that can be powered several ways', () => {
+  const scenarios = [{ name: 'PoE+ input', watts: 16, selected: false }, { name: '210W AC adapter input', watts: 196, selected: true }]
+  const flex = (qty = 1) => item('flex', qty, { ports: [poeOut(8, 'PoE++')], poe_budget: scenarios, power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }], metrics: [metric('poe_budget_w', 196)] })
+  const adapter = (qty: number): DerivedLine => {
+    const l: PlanLine = { ref: 'us/uacc-adapter-ac-210w', sku: 'A', qty, addedCents: null }
+    return { view: viewLine(l, new Map([[l.ref, product({ slug: 'uacc-adapter-ac-210w', title: 'AC Adapter 210W' })]])), derived: null }
+  }
+  const run = (lines: DerivedLine[], code?: number) => Object.fromEntries(planChecks(lines, {}, code === undefined ? {} : { [lineKey(lines[1]!.view.line)]: code }).map((c) => [c.id, c]))
+
+  it('can’t tell the PoE power until the way it is powered is chosen', () => {
+    expect(run([ap(2), flex()])['poe-power']).toMatchObject({ verdict: 'unknown', text: expect.stringContaining("how flex is powered hasn't been chosen") })
+  })
+
+  it('counts the budget of the input chosen', () => {
+    expect(run([ap(2), flex()], scenarioCode('PoE+ input'))['poe-power']).toMatchObject({ verdict: 'bad', text: 'Devices can draw up to 26 W, over the 16 W the plan supplies.' })
+    expect(run([ap(2), flex(), adapter(1)], scenarioCode('210W AC adapter input'))['poe-power']).toMatchObject({ verdict: 'ok', text: 'Devices draw up to 26 W of the 196 W supplied.' })
+  })
+
+  it('wants an adapter in the plan for each switch that runs on one sold separately', () => {
+    const code = scenarioCode('210W AC adapter input')
+    expect(run([ap(2), flex(2), adapter(1)], code)['power-adapter']).toMatchObject({ verdict: 'warn', text: expect.stringContaining('the plan has 1 of the 2 it needs') })
+    expect(run([ap(2), flex(2), adapter(2)], code)['power-adapter']).toBeUndefined()
+    expect(run([ap(2), flex()], scenarioCode('PoE+ input'))['power-adapter']).toBeUndefined()
+  })
+})
+
+describe('a switch powered over PoE', () => {
+  const scenarios = [{ name: 'PoE++ input', watts: 46, selected: false }, { name: '210W AC adapter input', watts: 196, selected: true }]
+  const flex = () => item('flex', 1, { ports: [poeOut(8, 'PoE++'), port({ count: 1, poe_class: 'PoE+++', poe_direction: 'in' })], poe_budget: scenarios, power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }], metrics: [metric('poe_budget_w', 196), metric('power_draw_excl_poe_w', 17), metric('power_draw_max_w', 210)] })
+  const upstream = (budget: number) => item('up', 1, { ports: [poeOut(8, 'PoE++')], metrics: [metric('poe_budget_w', budget)] })
+  const run = (lines: DerivedLine[], pick: string) => {
+    const f = lines.find((l) => l.view.line.ref === 'us/flex')!
+    return Object.fromEntries(planChecks(lines, {}, { [lineKey(f.view.line)]: scenarioCode(pick) }).map((c) => [c.id, c]))
+  }
+
+  it('takes a port and budget upstream for what it uses and what it passes on', () => {
+    // Four 13 W devices and the switch's own 17 W: 69 W, all of it through the upstream switch's 80 W.
+    const c = run([upstream(80), flex(), ap(4)], 'PoE++ input')
+    expect(c['poe-power']).toMatchObject({ verdict: 'ok' })
+    expect(c['poe-layout']?.stats?.devices).toBe(5)
+    expect(c['poe-layout']?.stats?.stranded).toBe(0)
+    // 40 W can't carry that, though the budgets add up (40 + 46 W) to more than the 69 W drawn.
+    expect(run([upstream(40), flex(), ap(4)], 'PoE++ input')['poe-power']).toMatchObject({ verdict: 'bad', text: expect.stringContaining('each switch has its own budget') })
+  })
+
+  it('needs nothing upstream when it runs on its adapter', () => {
+    const c = run([flex(), ap(4)], '210W AC adapter input')
+    expect(c['poe-power']).toMatchObject({ verdict: 'ok', text: 'Devices draw up to 52 W of the 196 W supplied.' })
+    expect(c['poe-layout']?.stats?.devices).toBe(4)
+  })
+
+  it('leaves it with no power when nothing upstream supplies PoE', () => {
+    expect(run([flex(), ap(2)], 'PoE++ input')['poe-power']).toMatchObject({ verdict: 'bad' })
+  })
+
+  it('does not let a switch power itself, or two switches each other', () => {
+    const two = [flex(), item('flex2', 1, { ports: [poeOut(8, 'PoE++'), port({ count: 1, poe_class: 'PoE+++', poe_direction: 'in' })], poe_budget: scenarios, power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }], metrics: [metric('poe_budget_w', 196), metric('power_draw_excl_poe_w', 17)] })]
+    const c = planChecks(two, {}, { [lineKey(two[0]!.view.line)]: scenarioCode('PoE++ input'), [lineKey(two[1]!.view.line)]: scenarioCode('PoE++ input') })
+    expect(c.find((x) => x.id === 'poe-power')).toMatchObject({ verdict: 'bad' })
   })
 })
 

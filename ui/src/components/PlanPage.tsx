@@ -6,7 +6,8 @@ import { usePlan } from '../hooks/usePlan'
 import { productRef } from '../lib/compare'
 import { formatPrice, totalCents } from '../lib/format'
 import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
-import { overall, planChecks, type CheckVerdict } from '../lib/planChecks'
+import { budgetOf, includedScenario, powerOptions, type PowerOption, type Powering } from '../lib/powering'
+import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
@@ -66,8 +67,18 @@ function QtyInput({ qty, label, onChange }: { qty: number; label: string; onChan
   )
 }
 
-function LineRow({ view, editable, linked }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[] }) {
-  const { lines, remove, changeQty, switchVariant, addOn } = usePlan()
+/** How a line's switch can be powered, when that is a choice, and what has been chosen. */
+interface PowerChoice {
+  options: PowerOption[]
+  /** The option in effect: chosen, or the one in the box; null when nothing has been chosen. */
+  chosen: PowerOption | null
+  /** The name of the scenario that comes with the product. */
+  included: string | null
+  adapterProduct: (slug: string) => Product | null
+}
+
+function LineRow({ view, editable, linked, power }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null }) {
+  const { lines, remove, changeQty, switchVariant, addOn, power: choosePower } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
@@ -100,6 +111,30 @@ function LineRow({ view, editable, linked }: { view: LineView; editable: boolean
           </Select>
         ) : (
           <div className="text-xs text-muted">{variant?.title || line.sku}</div>
+        )}
+        {product && editable && power && (
+          <Select
+            className="mt-1 block max-w-64 py-1 text-sm"
+            aria-label={`Power for ${product.title}`}
+            value={power.chosen?.code ?? ''}
+            onChange={(e) => {
+              const o = power.options.find((x) => x.code === Number(e.target.value))
+              if (o) choosePower(key, o.code, o.adapter ? power.adapterProduct(o.adapter.slug) : null, line.qty)
+            }}
+          >
+            {!power.chosen && (
+              <option value="" disabled>
+                Choose how it is powered
+              </option>
+            )}
+            {power.options.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.scenario.name.replace(/ input$/i, '')}: {o.scenario.watts} W
+                {o.scenario.name === power.included && ' (included)'}
+                {o.adapter && ' (adapter added)'}
+              </option>
+            ))}
+          </Select>
         )}
         {product && editable && linked.length > 0 && (
           <Select
@@ -179,9 +214,20 @@ function HostedRow({ role, editable }: { role: HostedRole; editable: boolean }) 
   )
 }
 
-function ShareLink({ lines, products, hosting }: { lines: PlanLine[]; products: Product[]; hosting: Hosting }) {
+function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string, Product>): PowerChoice | null {
+  const options = powerOptions(l.derived)
+  if (!options || !l.derived) return null
+  return {
+    options,
+    chosen: budgetOf(l, powering).option,
+    included: includedScenario(l.derived)?.name ?? null,
+    adapterProduct: (slug) => products.get(`${l.view.product?.region ?? 'us'}/${slug}`) ?? null,
+  }
+}
+
+function ShareLink({ lines, products, hosting, powering }: { lines: PlanLine[]; products: Product[]; hosting: Hosting; powering: Powering }) {
   const [copied, setCopied] = useState(false)
-  const slug = encodePlan(lines, products, hosting)
+  const slug = encodePlan(lines, products, hosting, powering)
   if (slug === '') return null
   const url = `${window.location.origin}/plan/${slug}`
   const copy = async () => {
@@ -231,7 +277,8 @@ export default function PlanPage() {
     return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null }))
   }, [views, derived])
   const hosting: Hosting = useMemo(() => (shared ? (decoded?.hosting ?? {}) : mine.hosting), [shared, decoded, mine.hosting])
-  const checks = useMemo(() => planChecks(derivedLines, hosting), [derivedLines, hosting])
+  const powering = useMemo(() => (shared ? (decoded?.powering ?? {}) : mine.powering), [shared, decoded, mine.powering])
+  const checks = useMemo(() => planChecks(derivedLines, hosting, powering), [derivedLines, hosting, powering])
   const answer = useMemo(() => overall(checks), [checks])
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
@@ -278,7 +325,7 @@ export default function PlanPage() {
               Add product
             </Button>
           )}
-          <ShareLink lines={lines} products={productData.products} hosting={hosting} />
+          <ShareLink lines={lines} products={productData.products} hosting={hosting} powering={powering} />
         </div>
       )}
       {searching && productData && (
@@ -303,7 +350,7 @@ export default function PlanPage() {
             variant="secondary"
             className="py-1 text-sm"
             onClick={() => {
-              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting)
+              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting, decoded.powering)
               leaveShared()
             }}
           >
@@ -343,8 +390,8 @@ export default function PlanPage() {
                 </tr>
               </thead>
               <tbody>
-                {views.map((v) => (
-                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} linked={(v.product?.linked ?? []).flatMap((l) => {
+                {derivedLines.map(({ view: v, derived: d }) => (
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} power={powerChoiceOf({ view: v, derived: d }, powering, products)} linked={(v.product?.linked ?? []).flatMap((l) => {
                     const p = products.get(`${v.product!.region}/${l.slug}`)
                     return p ? [{ product: p, label: l.label }] : []
                   })} />
@@ -443,7 +490,7 @@ export default function PlanPage() {
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown status are labeled as such, not guessed.</p>
+              <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown stats are labeled as such, not guessed.</p>
               {!shared && ((shortfall && !finding) || (nvrShortfall && !findingNvr) || (roleShortfall && !findingRoles)) && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {shortfall && !finding && (
@@ -466,7 +513,7 @@ export default function PlanPage() {
             </Card>
           )}
           <div className="xl:col-start-1 xl:row-start-2">
-          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
+          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} powering={powering} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
