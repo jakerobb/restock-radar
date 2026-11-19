@@ -142,6 +142,16 @@ describe('findRoles with the finder filters', () => {
     expect(found({ ...NO_FILTERS, minIdsMbps: 5000 })).toEqual(['fiber: 30000', 'ucg-industrial: 70000'])
   })
 
+  it('leaves out what has a rack mount that is not in stock, when in stock only is asked for', () => {
+    const sold = world(set.map((x) => (x.slug === 'uacc-ucg-industrial-rm' ? { ...x, status: 'SoldOut' as const } : x)))
+    const all = (f: FinderFilters) => findRoles(sold.plan(['ap', 1]), sold.rows, sold.map, {}, f).all.map((o) => o.rows.map((r) => r.product.slug).join('+'))
+    expect(all(NO_FILTERS)).toEqual(['plain', 'fiber', 'ucg-industrial'])
+    // The Industrial is in stock; its rack mount is not, so with rackmount asked for it can't be had.
+    expect(all({ ...NO_FILTERS, rack: 'rack' })).toEqual(['ucg-industrial'])
+    expect(all({ ...NO_FILTERS, inStock: true, rack: 'rack' })).toEqual([])
+    expect(all({ ...NO_FILTERS, inStock: true })).toEqual(['plain', 'fiber', 'ucg-industrial'])
+  })
+
   it('suggests the gateway with its rack mount, at the price of both, when rackmount is asked for', () => {
     expect(found({ ...NO_FILTERS, rack: 'rack' })).toEqual(['ucg-industrial+uacc-ucg-industrial-rm: 75000'])
     expect(found({ ...NO_FILTERS, rack: 'desk' })).toEqual(['plain: 20000', 'fiber: 30000', 'ucg-industrial: 70000'])

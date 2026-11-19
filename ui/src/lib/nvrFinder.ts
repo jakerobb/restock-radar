@@ -63,7 +63,9 @@ export function findNvrs(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
       const check = planChecks([...plan, { view, derived: row.derived }]).find((c) => c.id === 'nvr')
       if (!check || check.nvrShortfall || !check.nvr) continue
       const mounts = mountsFor(row, qty, filters, products)
-      fits.push({ row, qty, mounts, ...withMounts(view.totalCents, view.state === 'in', mounts), currency: view.currency, alsoGateway, spare: check.nvr.spare })
+      const priced = withMounts(view.totalCents, view.state === 'in', mounts)
+      if (filters.inStock && !priced.inStock) break // what can't be bought now isn't offered, and more of it is no better
+      fits.push({ row, qty, mounts, ...priced, currency: view.currency, alsoGateway, spare: check.nvr.spare })
       break
     }
   }

@@ -87,6 +87,7 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
     if (!shortBefore && short([...plan, ...added])) return null
     const cents = added.reduce<number | null>((n, a) => (n === null || a.view.totalCents === null ? null : n + a.view.totalCents), 0)
     const mounts = items.flatMap((i) => mountsFor(i.row, 1, filters, products))
+    if (filters.inStock && !withMounts(cents, added.every((a) => a.view.state === 'in'), mounts).inStock) return null
     return { rows: items.map((i) => i.row), unverified: items.some((i) => i.unverified), split, mounts, ...withMounts(cents, added.every((a) => a.view.state === 'in'), mounts), currency: added[0]?.view.currency ?? '', covers: missing }
   }
 

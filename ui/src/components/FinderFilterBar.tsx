@@ -8,16 +8,22 @@ interface Props {
   onChange: (next: FinderFilters) => void
   /** The catalogue, for the throughputs on offer; given where gateways are among what is being found. */
   gatewayRows?: CatalogRow[]
+  /** Leave out the hot-swappable power supplies box, for a finder that puts it elsewhere. */
+  hideHotSwap?: boolean
 }
 
 const check = 'inline-flex cursor-pointer items-center gap-1.5'
 
 /** What a plan's finder can be narrowed to. The gateway ones only show where gateways are among the suggestions. */
-export function FinderFilterBar({ filters, onChange, gatewayRows }: Props) {
+export function FinderFilterBar({ filters, onChange, gatewayRows, hideHotSwap = false }: Props) {
   const set = (over: Partial<FinderFilters>) => onChange({ ...filters, ...over })
   return (
     <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
       <legend className="sr-only">Narrow the suggestions</legend>
+      <label className={check}>
+        <input type="checkbox" checked={filters.inStock} onChange={(e) => set({ inStock: e.target.checked })} />
+        In stock only
+      </label>
       <label className="inline-flex items-center gap-1.5">
         <span className="text-muted">Mounting:</span>
         <Select className="py-1 text-sm" aria-label="Mounting" value={filters.rack} onChange={(e) => set({ rack: e.target.value as FinderFilters['rack'] })}>
@@ -26,10 +32,7 @@ export function FinderFilterBar({ filters, onChange, gatewayRows }: Props) {
           <option value="desk">Not rackmount</option>
         </Select>
       </label>
-      <label className={check}>
-        <input type="checkbox" checked={filters.hotSwap} onChange={(e) => set({ hotSwap: e.target.checked })} />
-        Hot-swappable power supplies (CRPS)
-      </label>
+      {!hideHotSwap && <HotSwapBox filters={filters} onChange={onChange} />}
       {gatewayRows && (
         <>
           <label className={check}>
@@ -59,5 +62,15 @@ export function FinderFilterBar({ filters, onChange, gatewayRows }: Props) {
         </button>
       )}
     </fieldset>
+  )
+}
+
+/** The hot-swappable power supplies (CRPS) box. */
+export function HotSwapBox({ filters, onChange }: { filters: FinderFilters; onChange: (next: FinderFilters) => void }) {
+  return (
+    <label className={check}>
+      <input type="checkbox" checked={filters.hotSwap} onChange={(e) => onChange({ ...filters, hotSwap: e.target.checked })} />
+      Hot-swappable power supplies (CRPS)
+    </label>
   )
 }

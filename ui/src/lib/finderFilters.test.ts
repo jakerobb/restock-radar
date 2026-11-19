@@ -65,6 +65,19 @@ describe('finder filters', () => {
     expect(withMounts(30000, true, m)).toEqual({ cents: 50000, inStock: true })
   })
 
+  it('keeps to what is in stock, and a device whose rack mount is not is offered no better', () => {
+    const t = setup([
+      { slug: 'here', type: 'Gateways', d: {} },
+      { slug: 'gone', type: 'Gateways', status: 'SoldOut', d: {} },
+      { slug: 'ucg-industrial', type: 'Gateways', d: { rack: rackOf(true, 0) } },
+      { slug: 'uacc-ucg-industrial-rm', type: 'Accessories', status: 'SoldOut', d: {} },
+    ])
+    const f = on({ inStock: true })
+    expect(t.rows.filter((r) => acceptsRow(r, f, t.map)).map((r) => r.product.slug)).toEqual(['here', 'ucg-industrial'])
+    const m = mountsFor(t.row('ucg-industrial'), 1, on({ inStock: true, rack: 'rack' }), t.map)
+    expect(withMounts(10000, true, m).inStock).toBe(false)
+  })
+
   it('offers the throughputs in the catalogue, smallest first', () => {
     expect(idsSteps(s.rows)).toEqual([1000, 5000, 25000])
   })
