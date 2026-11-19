@@ -379,9 +379,15 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   const unsureHeight = mounted.filter((l) => unitsOf(l) <= 0)
   const sized = [...mounted.filter((l) => unitsOf(l) > 0).map((l) => ({ l, u: unitsOf(l) })), ...stated.map((l) => ({ l, u: statedUnits(l)! })), ...mounts.map((l) => ({ l, u: RACK_MOUNTS[slugOf(l)]!.units }))]
   const total = sized.reduce((n, x) => n + x.l.view.line.qty * x.u, 0)
+  // A panel is named with its variant, since the product alone doesn't say which one ("Brush Panel", the 1U being said after).
+  const rackName = (l: DerivedLine) => {
+    if (!RACK_PANELS.has(slugOf(l))) return name(l)
+    const kind = (l.view.variant?.title || l.view.line.sku).replace(/^\d+U\s+/i, '')
+    return `${name(l)} (${kind})`
+  }
   // One line for each rack unit, so the numbers run with the rack: a 2U device is listed twice.
-  const units = sized.flatMap((x) => Array.from({ length: x.l.view.line.qty * x.u }, () => `${name(x.l)} ${x.u}U`))
-  const parts = sized.map((x) => `${x.l.view.line.qty > 1 ? `${x.l.view.line.qty} × ` : ''}${name(x.l)} ${x.u}U`)
+  const units = sized.flatMap((x) => Array.from({ length: x.l.view.line.qty * x.u }, () => `${rackName(x.l)} ${x.u}U`))
+  const parts = sized.map((x) => `${x.l.view.line.qty > 1 ? `${x.l.view.line.qty} × ` : ''}${rackName(x.l)} ${x.u}U`)
   const heading = sized.length > 0 || unsureHeight.length > 0 ? `${total}U of rack space` : 'Nothing in the plan goes in a rack'
   const unsure = unsureHeight.length > 0 || unsureMounting.length > 0
   // A device that needs a mount may be only partly covered by the ones in the plan.

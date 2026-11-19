@@ -1,6 +1,6 @@
 import { overall, planChecks, type DerivedLine, type PlanCheck } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
-import { derived, port, product } from '../test/fixtures'
+import { derived, port, product, variant } from '../test/fixtures'
 
 const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
 const metric = (name: string, value: number) => ({ name, value, unit: 'W', at_least: false, raw: '' })
@@ -130,13 +130,13 @@ describe('planChecks', () => {
 
     it('counts a panel by the height in its SKU, and lists a device once for each rack unit', () => {
       const none = { rack: { mountable: false, units: 0, full_depth: false } }
-      const panel = (sku: string, qty = 1): DerivedLine => {
+      const panel = (sku: string, title: string, qty = 1): DerivedLine => {
         const l: PlanLine = { ref: 'us/uacc-rack-panel-ocd', sku, qty, addedCents: null }
-        return { view: viewLine(l, new Map([[l.ref, product({ slug: 'uacc-rack-panel-ocd', title: 'Rack Mount OCD Panels', type: 'Accessories', category: 'accessories-rack-mount' })]])), derived: derived({ slug: 'uacc-rack-panel-ocd', known, ...none }) }
+        return { view: viewLine(l, new Map([[l.ref, product({ slug: 'uacc-rack-panel-ocd', title: 'Rack Mount OCD Panels', type: 'Accessories', category: 'accessories-rack-mount', variants: [variant({ sku, title })] })]])), derived: derived({ slug: 'uacc-rack-panel-ocd', known, ...none }) }
       }
-      const c = byId([racked('sw', 1), panel('UACC-Rack-Panel-Vented-2U'), panel('UACC-Rack-Panel-Brush-1U', 2)]).rack
+      const c = byId([racked('sw', 1), panel('UACC-Rack-Panel-Vented-2U', '2U Vented Panel'), panel('UACC-Rack-Panel-Brush-1U', '1U Brush Panel', 2)]).rack
       expect(c?.text).toContain('5U of rack space')
-      expect(c?.groups?.[0]).toEqual({ text: '5U of rack space', ordered: true, items: ['sw 1U', 'Rack Mount OCD Panels 2U', 'Rack Mount OCD Panels 2U', 'Rack Mount OCD Panels 1U', 'Rack Mount OCD Panels 1U'] })
+      expect(c?.groups?.[0]).toEqual({ text: '5U of rack space', ordered: true, items: ['sw 1U', 'Rack Mount OCD Panels (Vented Panel) 2U', 'Rack Mount OCD Panels (Vented Panel) 2U', 'Rack Mount OCD Panels (Brush Panel) 1U', 'Rack Mount OCD Panels (Brush Panel) 1U'] })
     })
 
     describe('rack-mount accessories', () => {
