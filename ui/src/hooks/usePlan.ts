@@ -1,8 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { addLine, changeVariant, removeLine, setQty, type PlanLine } from '../lib/plan'
+import { addLine, changeVariant, removeLine, setAddOn, setQty, type PlanLine } from '../lib/plan'
 import { getHosting, getPlan, setHosting, setPlan, subscribePlan } from '../lib/planStore'
 import type { Hosting, HostedRole, HostedWhere } from '../lib/roles'
-import type { Variant } from '../api/types'
+import type { Product, Variant } from '../api/types'
 
 /** The build plan, kept in this browser, and the ways to change it. */
 export function usePlan() {
@@ -12,6 +12,8 @@ export function usePlan() {
   const remove = useCallback((key: string) => setPlan(removeLine(getPlan(), key)), [])
   const changeQty = useCallback((key: string, qty: number) => setPlan(setQty(getPlan(), key, qty)), [])
   const switchVariant = useCallback((key: string, v: Variant) => setPlan(changeVariant(getPlan(), key, v)), [])
+  /** Picks which of a product's linked products sits in the plan with it (none, with null). */
+  const addOn = useCallback((options: Product[], chosen: Product | null, qty: number) => setPlan(setAddOn(getPlan(), options, chosen, qty)), [])
   /** Replaces the plan, and where its controllers run (nowhere else, unless said). */
   const replace = useCallback((next: PlanLine[], hosted: Hosting = {}) => {
     setPlan(next)
@@ -24,5 +26,5 @@ export function usePlan() {
     else delete next[role]
     setHosting(next)
   }, [])
-  return { lines, hosting, add, remove, changeQty, switchVariant, replace, host }
+  return { lines, hosting, add, remove, changeQty, switchVariant, addOn, replace, host }
 }

@@ -3,8 +3,9 @@ import { useMemo, useState } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import type { Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
-import { formatPrice } from '../lib/format'
-import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
+import { productRef } from '../lib/compare'
+import { formatPrice, totalCents } from '../lib/format'
+import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { overall, planChecks, type CheckVerdict } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
@@ -65,8 +66,8 @@ function QtyInput({ qty, label, onChange }: { qty: number; label: string; onChan
   )
 }
 
-function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
-  const { remove, changeQty, switchVariant } = usePlan()
+function LineRow({ view, editable, linked }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[] }) {
+  const { lines, remove, changeQty, switchVariant, addOn } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
@@ -99,6 +100,33 @@ function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
           </Select>
         ) : (
           <div className="text-xs text-muted">{variant?.title || line.sku}</div>
+        )}
+        {product && editable && linked.length > 0 && (
+          <Select
+            className="mt-1 block max-w-full py-1 text-sm"
+            aria-label={`Sold with ${product.title}`}
+            value={linked.find((l) => lines.some((x) => x.ref === productRef(l.product)))?.product.slug ?? ''}
+            onChange={(e) =>
+              addOn(
+                linked.map((l) => l.product),
+                linked.find((l) => l.product.slug === e.target.value)?.product ?? null,
+                line.qty,
+              )
+            }
+          >
+            <option value="">{product.linked_none ?? 'Nothing sold with it'}</option>
+            {linked.map(({ product: p, label }) => {
+              const v = defaultVariant(p)
+              const cents = v ? totalCents(v) : null
+              return (
+                <option key={p.slug} value={p.slug}>
+                  {label ?? p.title}
+                  {cents !== null && ` (+${formatPrice(cents, v!.currency)})`}
+                  {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
+                </option>
+              )
+            })}
+          </Select>
         )}
       </td>
       <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
@@ -315,7 +343,10 @@ export default function PlanPage() {
               </thead>
               <tbody>
                 {views.map((v) => (
-                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} />
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} linked={(v.product?.linked ?? []).flatMap((l) => {
+                    const p = products.get(`${v.product!.region}/${l.slug}`)
+                    return p ? [{ product: p, label: l.label }] : []
+                  })} />
                 ))}
                 {HOSTED_ROLES.filter((r) => hosting[r]).map((role) => (
                   <HostedRow key={role} role={role} editable={!shared} />

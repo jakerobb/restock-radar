@@ -111,6 +111,14 @@ type Product struct {
 	// else, and also when the response had no specification at all: nil means
 	// "not told", where an empty slice means the store says there is none.
 	Specs []Spec
+	// Linked are the products the store offers with this one on its page (a Cloud Gateway's SSDs, a UPS's PDU),
+	// each a separate product with a variant of its own. Category pages give them, with little more than a
+	// name, a price and stock; nil means the response didn't say, which is different from having none.
+	Linked []Product
+	// LinkLabels names each linked product's choice by its id ("1 TB"), and LinkBaseLabel the choice of having
+	// none of them ("No Storage"), as the store's page words them. Only the product endpoint gives them.
+	LinkLabels    map[string]string
+	LinkBaseLabel string
 	// SpecsSkipped counts specification entries dropped for being malformed
 	// (no feature id, an unknown kind, an unreadable flag), so the caller can
 	// say so. Entries that are merely empty aren't counted.
@@ -316,7 +324,12 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 				} `json:"category"`
 				Collection struct {
 					Products []rawProduct `json:"products"`
+					Sections []struct {
+						Title       string   `json:"title"`
+						ProductTags []string `json:"productTags"`
+					} `json:"sections"`
 				} `json:"collection"`
+				LinkedProducts []rawProduct `json:"linkedProducts"`
 			} `json:"pageProps"`
 		}
 		if err := json.Unmarshal(body, &page); err != nil {
@@ -333,6 +346,14 @@ func (c *Client) fetchProduct(ctx context.Context, region config.Region, buildID
 		if prod != nil {
 			prod.Category = page.PageProps.Category.Current.ID
 			prod.Detailed = true
+			if page.PageProps.LinkedProducts != nil {
+				prod.Linked = convertLinked(page.PageProps.LinkedProducts)
+				sections := make([]choiceSection, 0, len(page.PageProps.Collection.Sections))
+				for _, sc := range page.PageProps.Collection.Sections {
+					sections = append(sections, choiceSection{Title: sc.Title, Tags: sc.ProductTags})
+				}
+				prod.LinkBaseLabel, prod.LinkLabels = linkLabels(sections, prod.Tags, prod.Linked)
+			}
 			for _, b := range page.PageProps.Category.Breadcrumbs {
 				if slices.Contains(b.ProductIDs, prod.ID) {
 					prod.Group = b.Title
@@ -364,6 +385,8 @@ type rawProduct struct {
 		Name string `json:"name"`
 	} `json:"tags"`
 	SurchargeTypes []string `json:"productSurchargeTypes"`
+	// LinkedProducts are other products sold with this one; only category pages carry them.
+	LinkedProducts []rawProduct `json:"linkedProducts"`
 	// TechnicalSpecification is on both endpoints, but category pages carry only
 	// the grid summary, so only parseProduct reads it.
 	TechnicalSpecification *rawSpecs `json:"technicalSpecification"`
@@ -438,6 +461,9 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 				p.SurchargeTypes = append(p.SurchargeTypes, t)
 			}
 		}
+	}
+	if raw.LinkedProducts != nil {
+		p.Linked = convertLinked(raw.LinkedProducts)
 	}
 	for _, v := range raw.Variants {
 		if v.ID == "" || v.Status == "" {
@@ -566,4 +592,65 @@ func decodedBody(resp *http.Response) (io.Reader, error) {
 	default:
 		return nil, fmt.Errorf("unsupported Content-Encoding %q from %s", enc, resp.Request.URL)
 	}
+}
+
+// convertLinked turns the store's linked products into Products, leaving out any too incomplete to track.
+func convertLinked(raws []rawProduct) []Product {
+	out := []Product{}
+	for i := range raws {
+		l := &raws[i]
+		// A linked product has no title of its own here, so its name (the SKU, as the store calls it) stands in.
+		lp, err := convertProduct(&rawProduct{ID: l.ID, Slug: l.Slug, Name: l.Name, Title: l.Name, Variants: l.Variants})
+		if err != nil || lp.ID == "" || lp.Slug == "" {
+			continue
+		}
+		for j := range lp.Variants {
+			if lp.Variants[j].Title == "" {
+				lp.Variants[j].Title = l.Name
+			}
+		}
+		out = append(out, *lp)
+	}
+	return out
+}
+
+// choiceSection is one choice the store's collection page offers: a title ("1 TB") and the product tags that pick it.
+type choiceSection struct {
+	Title string
+	Tags  []string
+}
+
+// linkLabels names the choices on a product's page. The store marks a linked product's choice with a tag
+// that is the end of its slug (the tag "ssd-1tb" for "uacc-ssd-1tb"), and the choice of none of them with
+// the tags of the product itself, the most specific such section ("No Storage" over the plain "Gateway").
+func linkLabels(sections []choiceSection, baseTags []string, linked []Product) (base string, labels map[string]string) {
+	labels = map[string]string{}
+	taken := map[int]bool{}
+	for _, l := range linked {
+		for i, sc := range sections {
+			if sc.Title != "" && slices.ContainsFunc(sc.Tags, func(t string) bool { return t != "" && (l.Slug == t || strings.HasSuffix(l.Slug, "-"+t)) }) {
+				labels[l.ID] = sc.Title
+				taken[i] = true
+				break
+			}
+		}
+	}
+	best, tie := -1, false
+	for i, sc := range sections {
+		if taken[i] || sc.Title == "" || len(sc.Tags) == 0 {
+			continue
+		}
+		if !slices.ContainsFunc(sc.Tags, func(t string) bool { return !slices.Contains(baseTags, t) }) {
+			switch {
+			case best < 0 || len(sc.Tags) > len(sections[best].Tags):
+				best, tie = i, false
+			case len(sc.Tags) == len(sections[best].Tags):
+				tie = true
+			}
+		}
+	}
+	if best >= 0 && !tie {
+		base = sections[best].Title
+	}
+	return base, labels
 }

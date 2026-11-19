@@ -616,7 +616,7 @@ func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := len(migrations) - 2 // everything before the variant numbers
+	prior := len(migrations) - 4 // everything before the variant numbers
 	for i := 0; i < prior; i++ {
 		if _, err := raw.Exec(migrations[i]); err != nil {
 			t.Fatal(err)
@@ -694,5 +694,63 @@ func TestVariantTheStoreTakesOffIsDelisted(t *testing.T) {
 	}
 	if got := state(); got["v1"] || !got["v9"] {
 		t.Fatalf("delisted = %v, want v9 only", got)
+	}
+}
+
+func TestLinkedProductsAreTrackedWithoutBeingWatched(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	ssd := unistore.Product{ID: "s1", Slug: "ssd-1tb", Name: "SSD-1TB", Title: "SSD-1TB", Variants: []unistore.Variant{{ID: "sv1", SKU: "SSD-1TB", Title: "SSD-1TB", Status: "SoldOut", Price: &unistore.Money{Amount: 39000, Currency: "USD"}}}}
+	gw := product("Available", 27900)
+	gw.Linked = []unistore.Product{ssd}
+	if _, err := s.Discover(ctx, "us", gw, true, now); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := s.Variants(ctx, "us")
+	if err != nil || len(vs) != 2 {
+		t.Fatalf("variants = %+v, err = %v; want the gateway's and the SSD's", vs, err)
+	}
+	if links, _, _ := s.Linked(ctx); len(links[[2]string{"us", "p1"}]) != 1 || links[[2]string{"us", "p1"}][0].Slug != "ssd-1tb" {
+		t.Fatalf("links = %v", links)
+	}
+	// It isn't a watched item, and a category that later lists it by itself still finds it new.
+	items, _ := s.Items(ctx)
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want only the gateway", items)
+	}
+	if known, _ := s.KnownProducts(ctx, "us"); !known["p1"] || known["s1"] {
+		t.Fatalf("known = %v, want the gateway only", known)
+	}
+	// Its stock is followed: it coming back is an event.
+	ssd.Variants[0].Status = "Available"
+	gw.Linked = []unistore.Product{ssd}
+	events, err := s.Apply(ctx, "us", gw, now.Add(time.Hour))
+	if err != nil || len(events) != 1 || events[0].VariantID != "sv1" || events[0].NewStatus != "Available" {
+		t.Fatalf("events = %+v, err = %v; want the SSD in stock", events, err)
+	}
+}
+
+func TestLinkedChoicesKeepTheLabelsTheProductPageGave(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	ssd := unistore.Product{ID: "s1", Slug: "ssd-1tb", Name: "SSD-1TB", Title: "SSD-1TB", Variants: []unistore.Variant{{ID: "sv1", SKU: "SSD-1TB", Title: "SSD-1TB", Status: "Available", Price: &unistore.Money{Amount: 39000, Currency: "USD"}}}}
+	gw := product("Available", 27900)
+	gw.Linked = []unistore.Product{ssd}
+	gw.Detailed, gw.LinkLabels, gw.LinkBaseLabel = true, map[string]string{"s1": "1 TB"}, "No Storage"
+	if _, err := s.Discover(ctx, "us", gw, false, now); err != nil {
+		t.Fatal(err)
+	}
+	// A category page, which doesn't word the choices, must not wipe them.
+	cat := product("Available", 27900)
+	cat.Linked = []unistore.Product{ssd}
+	if _, err := s.Apply(ctx, "us", cat, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	links, none, err := s.Linked(ctx)
+	key := [2]string{"us", "p1"}
+	if err != nil || len(links[key]) != 1 || links[key][0].Label != "1 TB" || none[key] != "No Storage" {
+		t.Fatalf("links = %+v, none = %v, err = %v", links, none, err)
 	}
 }

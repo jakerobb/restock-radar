@@ -45,6 +45,12 @@ type retiredJSON struct {
 	SKU string `json:"sku"`
 }
 
+// linkedJSON is a product sold with another, and what the store's page calls that choice ("2 TB"; empty when unknown).
+type linkedJSON struct {
+	Slug  string `json:"slug"`
+	Label string `json:"label,omitempty"`
+}
+
 type productJSON struct {
 	Region string `json:"region"`
 	ID     string `json:"id"`
@@ -68,6 +74,10 @@ type productJSON struct {
 	Variants     []variantJSON `json:"variants"`
 	// Retired are variants taken off the product, by number and SKU, so a plan link made earlier still resolves.
 	Retired []retiredJSON `json:"retired,omitempty"`
+	// Linked are the products the store sells with this one (a gateway's SSDs), in the store's order, in the same region.
+	Linked []linkedJSON `json:"linked,omitempty"`
+	// LinkedNone is what the store's page calls having none of them ("No Storage"); empty when unknown.
+	LinkedNone string `json:"linked_none,omitempty"`
 }
 
 type pendingJSON struct {
@@ -131,6 +141,18 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 			PriceWithSurchargesCents: v.PriceWithSurchargesCents, SurchargeTypes: v.SurchargeTypes, Currency: v.Currency,
 			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, FirstSeen: v.FirstSeen,
 		})
+	}
+	linked, none, err := srv.store.Linked(r.Context())
+	if err != nil {
+		serverError(w, "failed to list linked products", err)
+		return
+	}
+	for i := range resp.Products {
+		key := [2]string{resp.Products[i].Region, resp.Products[i].ID}
+		for _, l := range linked[key] {
+			resp.Products[i].Linked = append(resp.Products[i].Linked, linkedJSON{Slug: l.Slug, Label: l.Label})
+		}
+		resp.Products[i].LinkedNone = none[key]
 	}
 	sort.Slice(resp.Products, func(i, j int) bool {
 		a, b := resp.Products[i], resp.Products[j]

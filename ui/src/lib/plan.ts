@@ -209,6 +209,17 @@ export function changeVariant(plan: PlanLine[], key: string, variant: Variant): 
   return plan.map((l) => (l === line ? moved : l))
 }
 
+/**
+ * Chooses which of a product's linked products (the SSDs sold with a gateway) goes in the plan beside it: the
+ * others come out and the chosen one goes in, as many as the product itself, or none to take them all out.
+ */
+export function setAddOn(plan: PlanLine[], options: Product[], chosen: Product | null, qty: number): PlanLine[] {
+  const refs = new Set(options.map(productRef))
+  const kept = plan.filter((l) => !refs.has(l.ref) || (chosen !== null && l.ref === productRef(chosen)))
+  const line = chosen ? lineFor(chosen, qty) : null
+  return line ? addLine(kept.filter((l) => l.ref !== line.ref), line) : kept
+}
+
 /** What to add when someone says "add this product": the cheapest variant in stock, else the cheapest, else the first. */
 export function defaultVariant(p: Product): Variant | undefined {
   const cheapest = (vs: Variant[]) => vs.filter((v) => totalCents(v) !== null).sort((a, b) => totalCents(a)! - totalCents(b)!)[0]
