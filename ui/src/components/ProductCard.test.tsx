@@ -26,6 +26,17 @@ describe('ProductCard', () => {
     expect(screen.getByRole('link', { name: 'Camera G6' })).toHaveAttribute('href', multi.url)
   })
 
+  it('leaves out the heading badge for a single variant, whose row says the same, and the Details link on its own page', () => {
+    const one = product({ title: 'UPS 2U', variants: [variant({ id: 'u', sku: 'UPS-2U-US', title: 'UPS-2U-US', status: 'SoldOut' })] })
+    const { rerender } = render(<ProductCard product={one} showRegion={false} />)
+    expect(within(screen.getByRole('heading')).queryByText(/stock|Sold out/i)).not.toBeInTheDocument()
+    expect(screen.getAllByText('Sold out')).toHaveLength(1) // the row's
+    expect(screen.queryByText('Variant')).not.toBeInTheDocument() // nor a column of SKUs
+    expect(screen.getByRole('link', { name: 'Details' })).toBeInTheDocument()
+    rerender(<ProductCard product={one} showRegion={false} onPage />)
+    expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument()
+  })
+
   it('links to the tech specs page, when there is one', () => {
     const { rerender } = render(<ProductCard product={multi} showRegion={false} />)
     expect(screen.getByRole('link', { name: 'Tech specs' })).toHaveAttribute('href', multi.techspecs_url)

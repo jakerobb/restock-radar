@@ -14,10 +14,12 @@ interface ProductCardProps {
   showRegion: boolean
   /** The price and stock history; the charts are left out until it's loaded. */
   history?: HistoryIndex
+  /** The card is on the product's own page, so a link to that page is no use. */
+  onPage?: boolean
 }
 
 /** One product: its name and overall stock, with every variant beneath it. */
-export function ProductCard({ product, showRegion, history }: ProductCardProps) {
+export function ProductCard({ product, showRegion, history, onPage = false }: ProductCardProps) {
   const { label, tone } = summarizeVariants(product.variants)
   return (
     <Card aria-label={product.title}>
@@ -26,13 +28,14 @@ export function ProductCard({ product, showRegion, history }: ProductCardProps) 
           <a className="text-accent underline-offset-2 hover:underline" href={product.url} target="_blank" rel="noopener noreferrer">
             {product.title}
           </a>
-          <Badge tone={tone}>{label}</Badge>
+          {/* With one variant its row says the same. */}
+          {product.variants.length > 1 && <Badge tone={tone}>{label}</Badge>}
           {showRegion && <span className="text-sm font-normal text-muted">{product.region}</span>}
         </h2>
         <div className="flex shrink-0 items-baseline gap-3 text-sm">
           <AddToPlan product={product} />
           {/* A merged group has no page of its own: each member has its own specification. */}
-          {!product.id.startsWith('collection:') && (
+          {!onPage && !product.id.startsWith('collection:') && (
             <a className="text-accent underline-offset-2 hover:underline" href={`/p/${encodeURIComponent(product.region)}/${encodeURIComponent(product.slug)}`}>
               Details
             </a>

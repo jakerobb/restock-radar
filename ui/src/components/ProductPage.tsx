@@ -229,7 +229,7 @@ export default function ProductPage() {
               </div>
               <HistoryRangePicker days={days} onChange={setDays} />
             </div>
-            <ProductCard product={product} showRegion={(productData?.regions.length ?? 0) > 1} history={index} />
+            <ProductCard product={product} showRegion={(productData?.regions.length ?? 0) > 1} history={index} onPage />
           </div>
         )}
         {specs.data?.derived && <DerivedSummary d={specs.data.derived} />}

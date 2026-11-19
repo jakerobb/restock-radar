@@ -7,19 +7,23 @@ import { StatusBadge } from './StatusBadge'
 
 interface VariantRowProps {
   variant: Variant
+  /** Whether the table has a column for the variant's name. */
+  named?: boolean
   /** Shown in a full-width row directly beneath this one. */
   chart?: ReactNode
 }
 
-export function VariantRow({ variant, chart }: VariantRowProps) {
+export function VariantRow({ variant, chart, named = true }: VariantRowProps) {
   const { title, sku } = variantName(variant)
   return (
     <>
       <tr className="border-t border-line align-baseline">
-        <td className="py-1.5 pr-2">
-          {title}
-          {sku && <div className="text-xs text-muted">{sku}</div>}
-        </td>
+        {named && (
+          <td className="py-1.5 pr-2">
+            {title}
+            {sku && <div className="text-xs text-muted">{sku}</div>}
+          </td>
+        )}
         <td className="py-1.5 pr-2">
           <StatusBadge status={variant.status} />
           {variant.restock_eta && <span className="ml-1.5 text-xs text-muted">restock {variant.restock_eta}</span>}
@@ -33,7 +37,7 @@ export function VariantRow({ variant, chart }: VariantRowProps) {
       </tr>
       {chart && (
         <tr>
-          <td colSpan={4} className="pt-0.5 pb-2">
+          <td colSpan={named ? 4 : 3} className="pt-0.5 pb-2">
             {chart}
           </td>
         </tr>
