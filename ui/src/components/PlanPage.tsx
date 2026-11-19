@@ -83,7 +83,7 @@ function LineRow({ view, editable, linked }: { view: LineView; editable: boolean
         )}
         {product && editable && product.variants.length > 1 ? (
           <Select
-            className="mt-1 block max-w-full py-1 text-sm"
+            className="mt-1 block max-w-64 py-1 text-sm"
             aria-label={`Variant of ${product.title}`}
             value={variant?.sku ?? ''}
             onChange={(e) => {
@@ -103,7 +103,7 @@ function LineRow({ view, editable, linked }: { view: LineView; editable: boolean
         )}
         {product && editable && linked.length > 0 && (
           <Select
-            className="mt-1 block max-w-full py-1 text-sm"
+            className="mt-1 block max-w-64 py-1 text-sm"
             aria-label={`Sold with ${product.title}`}
             value={linked.find((l) => lines.some((x) => x.ref === productRef(l.product)))?.product.slug ?? ''}
             onChange={(e) =>
@@ -131,7 +131,7 @@ function LineRow({ view, editable, linked }: { view: LineView; editable: boolean
       </td>
       <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
         {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
-        {view.wasCents !== null && <div className="text-xs text-muted">was {formatPrice(view.wasCents, view.currency)} when added</div>}
+        {view.wasCents !== null && <div className="ml-auto max-w-24 text-xs whitespace-normal text-muted">was {formatPrice(view.wasCents, view.currency)} when added</div>}
       </td>
       <td className="px-2 py-2 text-right">
         {editable ? (
@@ -331,7 +331,7 @@ export default function PlanPage() {
         // Stacked when narrow; wide, the plan and what it needs go on the left and the checks on the right.
         <div className="xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] xl:items-start xl:gap-x-6">
           <Card className="mt-4 overflow-x-auto xl:col-start-1 xl:row-start-1" aria-label="Plan">
-            <table className="w-full min-w-max border-collapse text-sm">
+            <table className="w-full border-collapse text-sm">
               <thead className="border-b border-line text-muted">
                 <tr>
                   <th scope="col" className="px-2 py-1.5 text-left font-medium">Product</th>
