@@ -1,7 +1,7 @@
 import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
 import { lineFor, viewLine } from './plan'
-import { planChecks, type DerivedLine, type PoeStats } from './planChecks'
+import { isPoePowered, planChecks, type DerivedLine, type PoeStats } from './planChecks'
 
 /** The most of one switch we'll suggest buying together. */
 export const MAX_SWITCHES = 4
@@ -61,6 +61,9 @@ const hasBudget = (r: CatalogRow): boolean => (r.derived?.metrics.find((m) => m.
 
 type Fit = Omit<SwitchOption, 'label' | 'replaces'>
 
+/** The PoE figures when no device in the plan needs PoE. */
+const NO_POE: PoeStats = { devices: 0, stranded: 0, slowed: 0, crawling: 0, slowestMbps: null, slowedFromMbps: null, spareWatts: null, sparePorts: 0, netSpare: null }
+
 export interface Fits {
   fits: Fit[]
   /** Two different switches that work together where neither (in those numbers) works alone. */
@@ -88,7 +91,13 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   const speedOnly = before.some((c) => c.id === 'poe-power' && c.verdict === 'ok') && before.some((c) => c.id === 'poe-ports' && c.verdict === 'ok')
   const slowedBefore = speedOnly ? (before.find((c) => c.id === 'poe-layout')?.stats?.slowed ?? 0) : 0
   const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
-  const cands = rows.filter((row) => row.product.type === 'Switches' && hasPoeOut(row) && hasBudget(row) && (regions.size === 0 || regions.has(row.product.region)))
+  // What the plan needs from a switch: PoE (power and ports), and a port for each device that isn't PoE-powered.
+  const needsPoe = plan.some(isPoePowered)
+  const needsPorts = before.some((c) => c.id === 'net-ports')
+  if (!needsPoe && !needsPorts) return { fits: [], pairs: [], replaces }
+  const cands = rows.filter(
+    (row) => row.product.type === 'Switches' && !!row.derived?.known.ports && (!needsPoe || (hasPoeOut(row) && hasBudget(row))) && (regions.size === 0 || regions.has(row.product.region)),
+  )
 
   /** The plan with these switches added: a Fit when its PoE power and ports check out, otherwise null. */
   const tryAdd = (adds: { row: CatalogRow; qty: number }[]): Fit | null => {
@@ -108,13 +117,17 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
     const checks = planChecks([...plan, ...added])
     const power = checks.find((c) => c.id === 'poe-power')
     const ports = checks.find((c) => c.id === 'poe-ports')
-    const stats = checks.find((c) => c.id === 'poe-layout')?.stats
-    if (!power || !ports || !stats || power.verdict === 'bad' || ports.verdict === 'bad' || stats.stranded > 0) return null
+    const poeStats = checks.find((c) => c.id === 'poe-layout')?.stats
+    if (needsPoe && (!power || !ports || !poeStats || power.verdict === 'bad' || ports.verdict === 'bad' || poeStats.stranded > 0)) return null
+    // Every device that isn't PoE-powered needs a port too.
+    const net = checks.find((c) => c.id === 'net-ports')
+    if (needsPorts && (!net || net.verdict === 'bad' || net.shortfall)) return null
+    const stats: PoeStats = { ...(needsPoe ? poeStats! : NO_POE), netSpare: net?.net?.spare ?? null }
     // Never recommend a switch that leaves devices crawling (an access point on a 100 Mbps port), however cheap.
     if (stats.crawling > 0 || (slowedBefore > 0 && stats.slowed >= slowedBefore)) return null
     const [first, second] = adds
     if (!first) return null
-    return { row: first.row, qty: first.qty, ...(second && { also: second }), cents, currency, inStock, stats, partial: power.verdict === 'unknown' }
+    return { row: first.row, qty: first.qty, ...(second && { also: second }), cents, currency, inStock, stats, partial: needsPoe && power?.verdict === 'unknown' }
   }
 
   const fits: Fit[] = []
@@ -168,7 +181,7 @@ function listAll(fits: Fit[], pairs: Fit[], replaces: DerivedLine[]): ListedSwit
 export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, accepted: ReadonlySet<PowerMethod>): SwitchSuggestions {
   const fits = every.filter((f) => acceptsPower(f.row, accepted))
   const pairs = everyPair.filter((f) => acceptsPower(f.row, accepted) && !!f.also && acceptsPower(f.also.row, accepted))
-  const room = (f: Fit) => (f.stats.spareWatts ?? 0) + f.stats.sparePorts
+  const room = (f: Fit) => (f.stats.spareWatts ?? 0) + f.stats.sparePorts + (f.stats.netSpare ?? 0)
   const best = (xs: Fit[], by: (f: Fit) => number): Fit | undefined => xs.reduce<Fit | undefined>((a, b) => (a === undefined || by(b) < by(a) ? b : a), undefined)
 
   const stocked = fits.filter((f) => f.inStock)

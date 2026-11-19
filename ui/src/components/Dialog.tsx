@@ -6,7 +6,7 @@ interface DialogProps {
   children: ReactNode
 }
 
-/** A modal dialog (native <dialog>: focus trap, Esc to close). Mount it to open it, unmount to close. */
+/** A modal dialog (native <dialog>: focus trap, Esc to close). Mount it to open it, unmount to close. An element marked data-autofocus gets the focus. */
 export function Dialog({ title, onClose, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -14,6 +14,8 @@ export function Dialog({ title, onClose, children }: DialogProps) {
     if (!el || el.open) return
     if (typeof el.showModal === 'function') el.showModal()
     else el.setAttribute('open', '')
+    // showModal puts focus on the first thing it finds (the close button), after React's own autoFocus has run.
+    el.querySelector<HTMLElement>('[data-autofocus]')?.focus()
   }, [])
   return (
     <dialog

@@ -99,6 +99,16 @@ describe('Find an NVR', () => {
 })
 
 describe('Add product on the plan page', () => {
+  it('puts the cursor in the search box, so you can type at once', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    expect(screen.getByRole('combobox', { name: 'Search products to add' })).toHaveFocus()
+    await user.keyboard('ap-1')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+  })
+
   it('searches by name or SKU, and adds the result you click', async () => {
     catalog()
     const user = userEvent.setup()

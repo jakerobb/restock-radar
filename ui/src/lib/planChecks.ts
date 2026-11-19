@@ -1,5 +1,6 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
+import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
@@ -19,11 +20,15 @@ export interface PlanCheck {
   nvrShortfall?: boolean
   /** On the NVR check: how the cameras came out. */
   nvr?: NvrStats
+  /** On the switch-port check: how the devices that aren't PoE-powered came out. */
+  net?: NetStats
   /** On the layout check: how the placement came out, for comparing switches. */
   stats?: PoeStats
 }
 
 export interface PoeStats {
+  /** PoE-powered devices in the plan; the PoE figures mean nothing when there are none. */
+  devices: number
   /** Devices with no port and budget to go on. */
   stranded: number
   /** Devices on a port slower than their own. */
@@ -37,6 +42,8 @@ export interface PoeStats {
   spareWatts: number | null
   /** PoE ports with nothing on them. */
   sparePorts: number
+  /** Switch ports of any kind left after every device has one; null when no device that isn't PoE-powered needs a port. */
+  netSpare: number | null
 }
 
 /** A line with what is derived from its product's specification. */
@@ -55,6 +62,9 @@ const dataPorts = (d: Derived) => d.ports.filter((p) => p.role === 'data')
 const poePortsIn = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== '' && p.poe_direction === 'in')
 const poePortsOut = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== '' && p.poe_direction === 'out')
 const list = (ls: DerivedLine[]) => ls.map(name).join(', ')
+
+/** True when a product is a PoE-powered device. */
+export const isPoePowered = (l: DerivedLine): boolean => !!l.derived && poeNeed(l.derived) !== null
 
 const rank = (c: string) => POE_CLASSES.indexOf(c as (typeof POE_CLASSES)[number]) + 1
 const lowest = (classes: string[]): string => classes.reduce((a, b) => (rank(b) < rank(a) ? b : a))
@@ -304,6 +314,8 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
     slowedFromMbps: slowest ? slowest.d.speed : null,
     spareWatts: finite ? budgets.reduce((n, b) => n + b, 0) - placing.reduce((n, d, i) => n + (placed[i] ? d.draw : 0), 0) : null,
     sparePorts: socketList.length - placing.filter((_, i) => placed[i] !== null).length,
+    devices: placing.length,
+    netSpare: null,
   }
   const layout: PlanCheck = { id: 'poe-layout', label: 'PoE layout', verdict: 'info', text: `One way to put each device on a port${units.length > 1 ? `, across ${units.length} switches` : ''}.`, detail, stats }
 
@@ -347,9 +359,10 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
 
 /**
  * What the plan adds up to, from the products' derived specifications: whether the PoE switches can
- * power the PoE devices, and how much rack they take. A check appears only when the plan has something
+ * power the PoE devices, whether every other device has a switch port, and how much rack they take. A check appears only when the plan has something
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
 export function planChecks(lines: DerivedLine[]): PlanCheck[] {
-  return [...poeCheck(lines), ...nvrCheck(lines), ...rackCheck(lines)]
+  const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l) ? l.view.line.qty : 0), 0)
+  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...rackCheck(lines)]
 }

@@ -15,10 +15,12 @@ import { Card } from './ui/Card'
 
 function facts(o: ListedSwitch): string {
   const { stats } = o
+  const poe = stats.devices > 0
   const parts = [
-    stats.spareWatts !== null && `${stats.spareWatts} W of PoE budget to spare`,
-    `${stats.sparePorts} PoE ${stats.sparePorts === 1 ? 'port' : 'ports'} spare`,
-    stats.slowed === 0 ? 'every device at full speed' : `${stats.slowed} ${stats.slowed === 1 ? 'device' : 'devices'} slowed to ${formatSpeed(stats.slowestMbps ?? 0)} (from ${formatSpeed(stats.slowedFromMbps ?? 0)})`,
+    poe && stats.spareWatts !== null && `${stats.spareWatts} W of PoE budget to spare`,
+    poe && `${stats.sparePorts} PoE ${stats.sparePorts === 1 ? 'port' : 'ports'} spare`,
+    stats.netSpare !== null && `${stats.netSpare} switch ${stats.netSpare === 1 ? 'port' : 'ports'} spare`,
+    poe && (stats.slowed === 0 ? 'every device at full speed' : `${stats.slowed} ${stats.slowed === 1 ? 'device' : 'devices'} slowed to ${formatSpeed(stats.slowestMbps ?? 0)} (from ${formatSpeed(stats.slowedFromMbps ?? 0)})`),
   ]
   return parts.filter(Boolean).join(' · ')
 }
@@ -87,7 +89,7 @@ export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan
           Close
         </button>
       </div>
-      <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget counted, so a switch you have already chosen still helps.</p>
+      <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget and ports counted, so a switch you have already chosen still helps.</p>
       <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <legend className="sr-only">Power methods you can use</legend>
         <span className="text-muted" aria-hidden>
