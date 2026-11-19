@@ -521,9 +521,9 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingRoles(false)} />}
-          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(l, replacing) => {
+          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
-            mine.add(l)
+            for (const l of added) mine.add(l)
           }} onClose={() => setFindingNvr(false)} />}
           </div>
         </div>

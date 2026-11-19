@@ -63,6 +63,17 @@ export const METRICS: readonly MetricInfo[] = [
   { name: 'range_m', label: 'Link range', unit: 'm' },
 ]
 
+/** Yes-or-no facts that the derived numbers carry as 1, by name, for showing: "Shadow mode: yes". */
+export const FLAG_METRICS: Record<string, string> = {
+  shadow_mode: 'Shadow mode',
+  hot_swap_psu: 'Hot-swappable power supplies (CRPS)',
+  pppoe_acceleration: 'Hardware PPPoE acceleration',
+  app_network: 'Runs UniFi Network',
+  app_protect: 'Runs UniFi Protect',
+  app_access: 'Runs UniFi Access',
+  app_talk: 'Runs UniFi Talk',
+}
+
 export const metricInfo = (name: string): MetricInfo | undefined => METRICS.find((m) => m.name === name)
 
 /** Data ports are the ones that carry traffic; console, management and antenna ports don't count. */

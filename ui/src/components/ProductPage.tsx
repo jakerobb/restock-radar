@@ -5,7 +5,7 @@ import type { Derived, Port, Product, SpecEntry, SpecOverride } from '../api/typ
 import { formatRelative } from '../lib/format'
 import { indexHistory } from '../lib/history'
 import { powerLabel } from '../lib/power'
-import { formatSpeed, metricInfo } from '../lib/requirements'
+import { FLAG_METRICS, formatSpeed, metricInfo } from '../lib/requirements'
 import { useHistoryDays } from '../hooks/useHistoryDays'
 import { ProductCard } from './ProductCard'
 import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
@@ -110,9 +110,7 @@ function DerivedSummary({ d }: { d: Derived }) {
                 const over = d.overridden.metrics.find((o) => o.name === m.name)
                 return (
                   <li key={m.name}>
-                    {metricInfo(m.name)?.label ?? m.name}: {m.at_least ? '≥ ' : ''}
-                    {m.value}
-                    {m.unit ? ` ${m.unit}` : ''}
+                    {FLAG_METRICS[m.name] ?? metricInfo(m.name)?.label ?? m.name}: {FLAG_METRICS[m.name] ? 'yes' : `${m.at_least ? '≥ ' : ''}${m.value}${m.unit ? ` ${m.unit}` : ''}`}
                     {over && (
                       <Badge tone="warn" className="ml-2">
                         overridden{over.published ? `, published ${over.published.value}${over.published.unit ? ` ${over.published.unit}` : ''}` : ', not published'}

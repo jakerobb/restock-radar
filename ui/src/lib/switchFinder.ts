@@ -1,6 +1,7 @@
 import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
 import { lineFor, viewLine } from './plan'
+import { acceptsRow, mountsFor, NO_FILTERS, withMounts, type FinderFilters, type Mount } from './finderFilters'
 import { assumeBest, type Powering } from './powering'
 import { isPoePowered, planChecks, type DerivedLine, type PoeStats } from './planChecks'
 
@@ -24,6 +25,8 @@ export interface SwitchOption {
   replaces: DerivedLine[]
   /** True when some device's power draw isn't known, so the fit counts only those that are. */
   partial: boolean
+  /** Rack-mount accessories to buy with them (the rack filter's), already in `cents` and `inStock`. */
+  mounts: Mount[]
   /** A second, different switch bought alongside (`row`/`qty` is the first); `cents` covers both. */
   also?: { row: CatalogRow; qty: number }
 }
@@ -136,7 +139,7 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
     if (stats.crawling > 0 || (slowedBefore > 0 && stats.slowed >= slowedBefore)) return null
     const [first, second] = adds
     if (!first) return null
-    return { row: first.row, qty: first.qty, ...(second && { also: second }), cents, currency, inStock, stats, partial: needsPoe && power?.verdict === 'unknown' }
+    return { row: first.row, qty: first.qty, mounts: [], ...(second && { also: second }), cents, currency, inStock, stats, partial: needsPoe && power?.verdict === 'unknown' }
   }
 
   const fits: Fit[] = []
@@ -187,7 +190,15 @@ function listAll(fits: Fit[], pairs: Fit[], replaces: DerivedLine[]): ListedSwit
 }
 
 /** From the fits that run on an accepted power method, the few worth a look and the full list; and how many were left out. */
-export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, accepted: ReadonlySet<PowerMethod>): SwitchSuggestions {
+export function pickOptions({ fits: allFits, pairs: allPairs, replaces }: Fits, accepted: ReadonlySet<PowerMethod>, filters: FinderFilters = NO_FILTERS, products: Map<string, Product> = new Map()): SwitchSuggestions {
+  // The other filters narrow what is considered at all, and add the accessory that mounts a switch that needs one to its price.
+  const narrowed = (f: Fit): Fit[] => {
+    if (!acceptsRow(f.row, filters, products) || (f.also && !acceptsRow(f.also.row, filters, products))) return []
+    const mounts = [...mountsFor(f.row, f.qty, filters, products), ...(f.also ? mountsFor(f.also.row, f.also.qty, filters, products) : [])]
+    return [{ ...f, mounts, ...withMounts(f.cents, f.inStock, mounts) }]
+  }
+  const every = allFits.flatMap(narrowed)
+  const everyPair = allPairs.flatMap(narrowed)
   const fits = every.filter((f) => acceptsPower(f.row, accepted))
   const pairs = everyPair.filter((f) => acceptsPower(f.row, accepted) && !!f.also && acceptsPower(f.also.row, accepted))
   const room = (f: Fit) => (f.stats.spareWatts ?? 0) + f.stats.sparePorts + (f.stats.netSpare ?? 0)
@@ -219,4 +230,4 @@ export function pickOptions({ fits: every, pairs: everyPair, replaces }: Fits, a
 }
 
 /** Both steps at once, for when the power methods are settled. */
-export const findSwitches = (plan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, accepted: ReadonlySet<PowerMethod> = new Set<PowerMethod>(['ac', 'dc', 'poe'])): SwitchSuggestions => pickOptions(findFits(plan, rows, products), accepted)
+export const findSwitches = (plan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, accepted: ReadonlySet<PowerMethod> = new Set<PowerMethod>(['ac', 'dc', 'poe']), filters: FinderFilters = NO_FILTERS): SwitchSuggestions => pickOptions(findFits(plan, rows, products), accepted, filters, products)

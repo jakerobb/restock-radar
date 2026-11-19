@@ -1,14 +1,16 @@
 import { Link } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Derived, Product } from '../api/types'
 import { buildCatalog } from '../lib/catalog'
 import { productRef } from '../lib/compare'
 import { formatPrice } from '../lib/format'
+import { isFiltering, mountLines, NO_FILTERS } from '../lib/finderFilters'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
 import { findRoles, type ListedRole } from '../lib/roleFinder'
 import type { Hosting } from '../lib/roles'
 import { APP_NAME, appsRun, gatewayLabel, hostedNote, isGatewayProduct, managedOf, ROLE_LABEL, type HostedRole } from '../lib/roles'
+import { FinderFilterBar } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
@@ -50,6 +52,7 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
         <div className="mt-0.5 text-muted">
           {o.rows.map((r) => roles(r, o.rows.length > 1)).join(' · ')}
         </div>
+        {o.mounts.length > 0 && <div className="mt-0.5 text-muted">With {o.mounts.map((m) => `${m.qty > 1 ? `${m.qty} × ` : ''}${m.product.title}`).join(', ')}, which it needs to go in a rack.</div>}
         {o.rows.map((r) => hostedNote(r.product)).filter(Boolean).map((n) => (
           <div key={n} className="mt-0.5 text-muted">
             {n}
@@ -68,7 +71,7 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
         aria-label={`Add ${title} to the plan`}
         onClick={() => {
           const lines = o.rows.flatMap((r) => lineFor(r.product, 1) ?? [])
-          if (lines.length === o.rows.length) onAdd(lines, o.replaces.map((l) => l.view.line))
+          if (lines.length === o.rows.length) onAdd([...lines, ...mountLines(o.mounts)], o.replaces.map((l) => l.view.line))
         }}
       >
         Add to plan
@@ -79,10 +82,12 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
 
 /** Products that, added to the plan, fill the roles (gateway, Network, Access or Talk controller) it lacks. */
 export function RoleFinder({ plan, products, derived, hosting, onAdd, onHost, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; hosting: Hosting; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onHost: (role: HostedRole) => void; onClose: () => void }) {
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const rows = useMemo(() => buildCatalog(products, derived), [products, derived])
   const found = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
-    return findRoles(plan, buildCatalog(products, derived), byRef, hosting)
-  }, [plan, products, derived, hosting])
+    return findRoles(plan, rows, byRef, hosting, filters)
+  }, [plan, products, rows, hosting, filters])
   const extra = found.all.length - found.options.length
   const what = found.missing.map((r) => ROLE_LABEL[r]).join(', ')
 
@@ -95,6 +100,7 @@ export function RoleFinder({ plan, products, derived, hosting, onAdd, onHost, on
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan.</p>
+      <FinderFilterBar filters={filters} onChange={setFilters} gatewayRows={found.missing.includes('gateway') ? rows : undefined} />
       {found.hostable.length > 0 && (
         <div className="mt-3 text-sm">
           <div className="text-xs font-medium tracking-wide text-muted uppercase">Or self-host it</div>
@@ -112,7 +118,7 @@ export function RoleFinder({ plan, products, derived, hosting, onAdd, onHost, on
         </div>
       )}
       {found.options.length === 0 ? (
-        <p className="mt-3 text-sm">Nothing we track fills {what || 'these roles'}{found.missing.length > 1 ? ', alone or as a pair' : ''}, without leaving the plan short of switch ports.</p>
+        <p className="mt-3 text-sm">Nothing we track{isFiltering(filters) ? ' that fits the filters' : ''} fills {what || 'these roles'}{found.missing.length > 1 ? ', alone or as a pair' : ''}, without leaving the plan short of switch ports.</p>
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {found.options.map((o) => (

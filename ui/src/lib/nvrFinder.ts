@@ -1,5 +1,6 @@
 import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
+import { acceptsRow, mountsFor, NO_FILTERS, withMounts, type FinderFilters, type Mount } from './finderFilters'
 import { isNvr } from './nvrChecks'
 import { lineFor, viewLine } from './plan'
 import { planChecks, type DerivedLine } from './planChecks'
@@ -17,6 +18,8 @@ export interface NvrOption {
   cents: number | null
   currency: string
   inStock: boolean
+  /** Rack-mount accessories to buy with it (the rack filter's), already in `cents`. */
+  mounts: Mount[]
   /** NVRs in the plan that can't be bought now, which this one stands in for (the plan is checked without them). */
   replaces: DerivedLine[]
   /** True for a gateway or console that also records (a Dream Machine, say), rather than a recorder. */
@@ -42,7 +45,7 @@ export interface NvrSuggestions {
  * that isn't in stock. A gateway or console that records too (a Dream Machine) is a candidate, one at a time.
  * An NVR in the plan that can't be bought now is checked without and replaced. Storage isn't considered.
  */
-export function findNvrs(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): NvrSuggestions {
+export function findNvrs(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, filters: FinderFilters = NO_FILTERS): NvrSuggestions {
   // An NVR that can't be bought now gives nothing to count on, so the plan is checked without it and stand-ins offered.
   const replaces = fullPlan.filter((l) => isNvr(l.derived) && l.view.state !== 'in')
   const plan = fullPlan.filter((l) => !replaces.includes(l))
@@ -52,13 +55,15 @@ export function findNvrs(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
     if (!isNvr(row.derived) || replaces.some((l) => l.view.line.ref === `${row.product.region}/${row.product.slug}`)) continue
     const alsoGateway = row.product.category !== 'physical-security-nvr'
     if (regions.size > 0 && !regions.has(row.product.region)) continue
+    if (!acceptsRow(row, filters, products)) continue
     for (let qty = 1; qty <= (alsoGateway ? 1 : MAX_NVRS); qty++) { // one gateway, not four
       const line = lineFor(row.product, qty)
       if (!line) break
       const view = viewLine(line, products)
       const check = planChecks([...plan, { view, derived: row.derived }]).find((c) => c.id === 'nvr')
       if (!check || check.nvrShortfall || !check.nvr) continue
-      fits.push({ row, qty, cents: view.totalCents, currency: view.currency, inStock: view.state === 'in', alsoGateway, spare: check.nvr.spare })
+      const mounts = mountsFor(row, qty, filters, products)
+      fits.push({ row, qty, mounts, ...withMounts(view.totalCents, view.state === 'in', mounts), currency: view.currency, alsoGateway, spare: check.nvr.spare })
       break
     }
   }

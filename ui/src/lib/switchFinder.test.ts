@@ -2,6 +2,7 @@ import type { Derived, Product } from '../api/types'
 import { buildCatalog } from './catalog'
 import { viewLine, type PlanLine } from './plan'
 import type { DerivedLine } from './planChecks'
+import { NO_FILTERS } from './finderFilters'
 import { findSwitches } from './switchFinder'
 import { derived, port, product, variant } from '../test/fixtures'
 
@@ -213,5 +214,26 @@ describe('findSwitches', () => {
       expect(all.length).toBeGreaterThanOrEqual(options.length)
       expect(all.map((o) => o.cents)).toEqual([...all.map((o) => o.cents)].sort((a, b) => a! - b!))
     })
+  })
+})
+
+describe('findSwitches with the finder filters', () => {
+  const rack = (mountable: boolean) => ({ rack: { mountable, units: 1, full_depth: false } })
+  const c = catalog([
+    { slug: 'e7', type: 'WiFi', cents: 54900, d: e7() },
+    { slug: 'desk', type: 'Switches', cents: 30000, d: { ...sw(8, 'PoE++', 150), ...rack(false) } },
+    { slug: 'usw-pro-max-16', type: 'Switches', cents: 40000, d: { ...sw(16, 'PoE++', 180), ...rack(true) } },
+    { slug: 'uacc-pro-max-16-rm', type: 'Accessories', cents: 4900, d: {} },
+    { slug: 'ecs', type: 'Switches', cents: 90000, d: { ...sw(24, 'PoE++', 500), ...rack(true), metrics: [metric('poe_budget_w', 500), { name: 'hot_swap_psu', value: 1, unit: '', at_least: false, raw: '' }] } },
+  ])
+  const all = (f: Parameters<typeof findSwitches>[4]) => findSwitches(plan(c, ['e7', 2]), c.rows, c.map, undefined, f).all.map((o) => `${o.row.product.slug}${o.mounts.map((m) => ` + ${m.product.slug}`).join('')}: ${o.cents}`)
+
+  it('lists the switches that need a rack-mount accessory with it, at the price of both, when rackmount is asked for', () => {
+    expect(all({ ...NO_FILTERS, rack: 'rack' })).toEqual(['usw-pro-max-16 + uacc-pro-max-16-rm: 44900', 'ecs: 90000'])
+    expect(all({ ...NO_FILTERS, rack: 'desk' })).toEqual(['desk: 30000', 'usw-pro-max-16: 40000'])
+  })
+
+  it('wants hot-swappable power supplies stated', () => {
+    expect(all({ ...NO_FILTERS, hotSwap: true })).toEqual(['ecs: 90000'])
   })
 })

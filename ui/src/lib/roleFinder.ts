@@ -1,5 +1,6 @@
 import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
+import { acceptsRow, mountsFor, NO_FILTERS, withMounts, type FinderFilters, type Mount } from './finderFilters'
 import { lineFor, viewLine } from './plan'
 import { planChecks, type DerivedLine } from './planChecks'
 import { appsRun, fills, isGatewayProduct, HOSTED_ROLES, needers, ROLES, roleCheck, undersized, type HostedRole, type Hosting, type Role } from './roles'
@@ -14,6 +15,8 @@ export interface RoleOption {
   cents: number | null
   currency: string
   inStock: boolean
+  /** Rack-mount accessories to buy with them (the rack filter's), already in `cents`. */
+  mounts: Mount[]
   /** Products in the plan that fill a role but can't be bought now, or manage fewer devices than the plan has, which these stand in for (the plan is checked without them). */
   replaces: DerivedLine[]
   /** Of those, the ones that are too small (the rest can't be bought). */
@@ -49,7 +52,7 @@ const refOf = (r: CatalogRow) => `${r.product.region}/${r.product.slug}`
  * plan has, doesn't count, and is replaced. The controllers that are still missing can also be run somewhere
  * else (see `hostable`), which isn't a product. Adding a product mustn't leave the switch ports short.
  */
-export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, hosting: Hosting = {}): RoleSuggestions {
+export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, hosting: Hosting = {}, filters: FinderFilters = NO_FILTERS): RoleSuggestions {
   const filling = (l: DerivedLine) => ROLES.some((r) => needers(fullPlan, r).length > 0 && fills(l.view.product, l.derived, r))
   const small = undersized(fullPlan, hosting)
   const replaces = [...new Set([...fullPlan.filter((l) => l.view.state !== 'in' && filling(l)), ...small])]
@@ -62,7 +65,7 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
   const gone = new Set(replaces.map((l) => l.view.line.ref))
 
   const cands = rows
-    .filter((r) => !gone.has(refOf(r)) && (regions.size === 0 || regions.has(r.product.region)) && missing.some((role) => fills(r.product, r.derived, role)))
+    .filter((r) => !gone.has(refOf(r)) && (regions.size === 0 || regions.has(r.product.region)) && missing.some((role) => fills(r.product, r.derived, role)) && acceptsRow(r, filters, products))
     .flatMap((row) => {
       const line = lineFor(row.product, 1)
       if (!line) return []
@@ -83,7 +86,8 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
     const added = items.map((i) => i.added)
     if (!shortBefore && short([...plan, ...added])) return null
     const cents = added.reduce<number | null>((n, a) => (n === null || a.view.totalCents === null ? null : n + a.view.totalCents), 0)
-    return { rows: items.map((i) => i.row), unverified: items.some((i) => i.unverified), split, cents, currency: added[0]?.view.currency ?? '', inStock: added.every((a) => a.view.state === 'in'), covers: missing }
+    const mounts = items.flatMap((i) => mountsFor(i.row, 1, filters, products))
+    return { rows: items.map((i) => i.row), unverified: items.some((i) => i.unverified), split, mounts, ...withMounts(cents, added.every((a) => a.view.state === 'in'), mounts), currency: added[0]?.view.currency ?? '', covers: missing }
   }
 
   const fits: Fit[] = []

@@ -9,7 +9,9 @@ import type { DerivedLine } from '../lib/planChecks'
 import { powerSummary } from '../lib/power'
 import type { Powering } from '../lib/powering'
 import { formatSpeed } from '../lib/requirements'
+import { isFiltering, mountLines, NO_FILTERS } from '../lib/finderFilters'
 import { DEFAULT_POWER_METHODS, findFits, MAX_SWITCHES, pickOptions, POWER_METHODS, type ListedSwitch, type PowerMethod } from '../lib/switchFinder'
+import { FinderFilterBar } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
@@ -52,6 +54,7 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
         </div>
         <div className="mt-0.5 text-muted">{facts(o)}</div>
         <div className="mt-0.5 text-muted">{power ? `Powered by ${power}` : 'Power method not specified'}</div>
+        {o.mounts.length > 0 && <div className="mt-0.5 text-muted">With {o.mounts.map((m) => `${m.qty > 1 ? `${m.qty} × ` : ''}${m.product.title}`).join(', ')}, which it needs to go in a rack.</div>}
         {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
         {o.partial && <div className="mt-0.5 text-muted">Some devices have no known power draw, so this counts only those that do.</div>}
       </div>
@@ -61,7 +64,7 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
         aria-label={`Add ${parts.map((p) => `${p.qty > 1 ? `${p.qty} × ` : ''}${p.row.product.title}`).join(' and ')} to the plan`}
         onClick={() => {
           const lines = parts.flatMap((p) => lineFor(p.row.product, p.qty) ?? [])
-          if (lines.length === parts.length) onAdd(lines, o.replaces.map((l) => l.view.line))
+          if (lines.length === parts.length) onAdd([...lines, ...mountLines(o.mounts)], o.replaces.map((l) => l.view.line))
         }}
       >
         Add to plan
@@ -74,11 +77,10 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
 export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; powering?: Powering; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onClose: () => void }) {
   const [methods, setMethods] = useState<ReadonlySet<PowerMethod>>(new Set(DEFAULT_POWER_METHODS))
   // Trying every switch is the costly part; the power filter only narrows what it found.
-  const fits = useMemo(() => {
-    const byRef = new Map(products.map((p) => [productRef(p), p]))
-    return findFits(plan, buildCatalog(products, derived), byRef, powering)
-  }, [plan, products, derived, powering])
-  const found = useMemo(() => pickOptions(fits, methods), [fits, methods])
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const byRef = useMemo(() => new Map(products.map((p) => [productRef(p), p])), [products])
+  const fits = useMemo(() => findFits(plan, buildCatalog(products, derived), byRef, powering), [plan, products, derived, byRef, powering])
+  const found = useMemo(() => pickOptions(fits, methods, filters, byRef), [fits, methods, filters, byRef])
   const toggle = (m: PowerMethod) => setMethods((cur) => new Set(cur.has(m) ? [...cur].filter((x) => x !== m) : [...cur, m]))
   const extra = found.all.length - found.options.length
 
@@ -91,6 +93,7 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget and ports counted, so a switch you have already chosen still helps.</p>
+      <FinderFilterBar filters={filters} onChange={setFilters} />
       <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <legend className="sr-only">Power methods you can use</legend>
         <span className="text-muted" aria-hidden>
@@ -105,7 +108,7 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
       </fieldset>
       {found.options.length === 0 ? (
         <p className="mt-3 text-sm">
-          No switch we track, even {MAX_SWITCHES} of one, gives these devices the power and ports they need
+          No switch we track{isFiltering(filters) ? ' that fits the filters' : ''}, even {MAX_SWITCHES} of one, gives these devices the power and ports they need
           {found.hidden > 0 ? ` on the power methods you've chosen (${found.hidden} would work on others)` : ''}. A device may want a higher PoE class than any switch offers.
         </p>
       ) : (
