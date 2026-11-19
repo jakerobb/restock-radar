@@ -37,6 +37,12 @@ export function summarizeVariants(variants: Variant[]): StatusInfo {
  * "Default", which says nothing, so the SKU takes its place (and isn't repeated
  * beneath it).
  */
+/** True when a variant's name says nothing beyond its SKU ("Default", nothing, or the SKU itself). */
+export function nameIsSku(variant: Variant): boolean {
+  const { title, sku } = variantName(variant)
+  return sku === undefined || title === sku
+}
+
 export function variantName(variant: Variant): { title: string; sku?: string } {
   if (variant.title === '' || variant.title.toLowerCase() === 'default') return { title: variant.sku }
   return { title: variant.title, sku: variant.sku }

@@ -28,7 +28,8 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: /Camera G6/ })).toBeInTheDocument()
     expect(screen.getByText(/Last synced/)).toBeInTheDocument()
     expect(screen.getByText(/2 products/)).toBeInTheDocument()
-    expect(screen.getByText('UCG-Fiber')).toBeInTheDocument()
+    expect(screen.queryByText('UCG-Fiber')).not.toBeInTheDocument() // a name that is only the SKU gets no column
+    expect(screen.getAllByText('Variant')).toHaveLength(1) // the other product's
     expect(screen.getByText('us/waiting-slug')).toBeInTheDocument()
   })
 
