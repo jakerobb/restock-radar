@@ -266,6 +266,26 @@ describe('PlanPage', () => {
     expect(screen.getByLabelText('Totals')).toHaveTextContent('Total $350')
   })
 
+  it('offers the products sold with another (a gateway\'s SSDs) as a choice that adds them to the plan', async () => {
+    products = [
+      product({ id: '1', slug: 'gw', title: 'Gateway', variants: [variant({ id: 'a', num: 1, sku: 'GW', price_cents: 27900 })], linked: [{ slug: 'ssd-1', label: '1 TB' }, { slug: 'ssd-2', label: '2 TB' }], linked_none: 'No Storage' }),
+      product({ id: '2', slug: 'ssd-1', title: 'SSD-1TB', variants: [variant({ id: 'b', num: 2, sku: 'SSD-1', price_cents: 39000 })] }),
+      product({ id: '3', slug: 'ssd-2', title: 'SSD-2TB', variants: [variant({ id: 'c', num: 3, sku: 'SSD-2', status: 'SoldOut', price_cents: 73000 })] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: [] } })
+    setPlan([line({ ref: 'us/gw', sku: 'GW', qty: 2, addedCents: 27900 })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    const choice = await screen.findByLabelText('Sold with Gateway')
+    expect(within(choice).getAllByRole('option').map((o) => o.textContent)).toEqual(['No Storage', '1 TB (+$390)', '2 TB (+$730) — sold out'])
+    await user.selectOptions(choice, 'ssd-1')
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900', 'us/ssd-1:SSD-1:2:39000'])
+    await user.selectOptions(choice, 'ssd-2') // replaces the other one
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900', 'us/ssd-2:SSD-2:2:73000'])
+    await user.selectOptions(choice, '')
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900'])
+  })
+
   it('shows a price that has changed since the line was added', async () => {
     catalog()
     setPlan([line({ addedCents: 25000 })])

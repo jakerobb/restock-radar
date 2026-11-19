@@ -49,6 +49,10 @@ export interface Product {
   variants: Variant[]
   /** Variants the store has taken off the product, so a plan link made while they were listed still resolves (to the variant with the same SKU, if any). */
   retired?: { num: number; sku: string }[]
+  /** Products (in this region) the store sells with this one, such as a gateway's SSDs, in the store's order, and what its page calls each choice ("2 TB") when it says. */
+  linked?: { slug: string; label?: string }[]
+  /** What the store's page calls having none of them ("No Storage"), when it says. */
+  linked_none?: string
 }
 
 export interface PendingItem {

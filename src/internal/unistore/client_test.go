@@ -24,6 +24,14 @@ const productJSON = `{"pageProps":{"currentProductId":"p1","category":{"currentC
 		{"id":"v1","sku":"W-1","title":"US","status":"SoldOut","displayPrice":{"amount":10900,"currency":"USD"},
 		 "displayRegularPrice":null,"restockEtaAt":null}]}]}}}`
 
+// A product page that sells SSDs with the product, and words the choices in its collection sections.
+const gatewayJSON = `{"pageProps":{"currentProductId":"g1","category":{"currentCategory":{"id":"c1"},"breadcrumbs":[]},
+	"collection":{"sections":[{"title":"Gateway","productTags":["gw"]},{"title":"No Storage","productTags":["gw","gw-ns"]},{"title":"1 TB","productTags":["gw","ssd-1tb"]}],
+	"products":[{"id":"g1","slug":"gw","name":"GW","title":"Gateway","tags":[{"name":"gw"},{"name":"gw-ns"}],"variants":[
+		{"id":"gv","sku":"GW","status":"Available","displayPrice":{"amount":27900,"currency":"USD"}}]}]},
+	"linkedProducts":[{"id":"s1","slug":"uacc-ssd-1tb","name":"UACC-SSD-1TB","variants":[
+		{"id":"sv","sku":"UACC-SSD-1TB","status":"Available","displayPrice":{"amount":39000,"currency":"USD"}}]}]}}`
+
 func newTestServer(t *testing.T, currentBuild *string) (*httptest.Server, config.Region) {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -39,6 +47,8 @@ func newTestServer(t *testing.T, currentBuild *string) (*httptest.Server, config
 		switch r.PathValue("slug") {
 		case "widget.json":
 			_, _ = w.Write([]byte(productJSON))
+		case "gateway.json":
+			_, _ = w.Write([]byte(gatewayJSON))
 		case "old-widget.json":
 			_, _ = w.Write([]byte(`{"pageProps":{"__N_REDIRECT":"/us/en/products/widget","__N_REDIRECT_STATUS":307}}`))
 		case "category-thing.json":
@@ -349,5 +359,65 @@ func TestVariantTitleFromOptions(t *testing.T) {
 	want := []string{"Black / 2 m", "White", "Own title", "Default"}
 	if !slices.Equal(got, want) {
 		t.Errorf("titles = %q, want %q", got, want)
+	}
+}
+
+func TestConvertProductLinkedProducts(t *testing.T) {
+	var raw rawProduct
+	err := json.Unmarshal([]byte(`{"id":"p1","slug":"gw","name":"GW","title":"Gateway",
+		"variants":[{"id":"v1","sku":"GW","title":"US","status":"Available","displayPrice":{"amount":27900,"currency":"USD"}}],
+		"linkedProducts":[
+			{"id":"s1","slug":"ssd-1tb","name":"SSD-1TB","status":"Available","variants":[{"id":"sv1","sku":"SSD-1TB","status":"Available","displayPrice":{"amount":39000,"currency":"USD"}}]},
+			{"id":"","slug":"broken","name":"X","variants":[]}]}`), &raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := convertProduct(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Linked) != 1 || p.Linked[0].Slug != "ssd-1tb" || p.Linked[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Price.Amount != 39000 {
+		t.Fatalf("linked = %+v, want the one usable SSD, named by its SKU", p.Linked)
+	}
+	// A response with no such field says nothing, which isn't the same as none.
+	var bare rawProduct
+	_ = json.Unmarshal([]byte(`{"id":"p2","slug":"s","name":"S","title":"S","variants":[{"id":"v","sku":"S","status":"Available"}]}`), &bare)
+	if q, _ := convertProduct(&bare); q.Linked != nil {
+		t.Errorf("linked = %v, want nil when not given", q.Linked)
+	}
+}
+
+func TestLinkLabelsFollowTheStoresTags(t *testing.T) {
+	sections := []choiceSection{
+		{Title: "Cloud Gateway Fiber", Tags: []string{"ucg-fiber"}},
+		{Title: "Gateway", Tags: []string{"ucg-fiber", "fiber-gateway"}},
+		{Title: "No Storage", Tags: []string{"fiber-gateway", "ucg-fiber", "fiber-gateway-ns"}},
+		{Title: "1 TB", Tags: []string{"ucg-fiber", "fiber-gateway", "ssd-1tb"}},
+		{Title: "2 TB", Tags: []string{"ucg-fiber", "fiber-gateway", "ssd-2tb"}},
+	}
+	base := []string{"fiber-gateway", "fiber-gateway-ns", "ucg", "ucg-fiber"}
+	linked := []Product{{ID: "a", Slug: "uacc-ssd-2tb"}, {ID: "b", Slug: "uacc-ssd-1tb"}, {ID: "c", Slug: "unrelated"}}
+	none, labels := linkLabels(sections, base, linked)
+	if none != "No Storage" || labels["a"] != "2 TB" || labels["b"] != "1 TB" || labels["c"] != "" {
+		t.Fatalf("none = %q, labels = %v", none, labels)
+	}
+	// Nothing to tell the choice of none from the plain product: no label rather than a guess.
+	if none, _ := linkLabels(sections[:2], base, nil); none != "Gateway" {
+		t.Errorf("none = %q, want the one section that fits", none)
+	}
+	if none, _ := linkLabels([]choiceSection{{Title: "A", Tags: []string{"x"}}, {Title: "B", Tags: []string{"y"}}}, []string{"x", "y"}, nil); none != "" {
+		t.Errorf("none = %q, want no guess between equals", none)
+	}
+}
+
+func TestFetchProductReadsLinkedProductsAndTheirLabels(t *testing.T) {
+	build := "b1"
+	_, region := newTestServer(t, &build)
+	p, err := New("test").FetchProduct(context.Background(), region, "gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Linked) != 1 || p.Linked[0].Slug != "uacc-ssd-1tb" || p.LinkLabels["s1"] != "1 TB" || p.LinkBaseLabel != "No Storage" {
+		t.Fatalf("linked = %+v, labels = %v, none = %q", p.Linked, p.LinkLabels, p.LinkBaseLabel)
 	}
 }

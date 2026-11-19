@@ -310,6 +310,17 @@ var migrations = []string{
 	// A variant the store no longer lists for its product (renamed, replaced) is kept, for its history and so
 	// that links to it still read, but marked so that it isn't offered or counted. Empty while it is listed.
 	`ALTER TABLE variants ADD COLUMN delisted_at TEXT NOT NULL DEFAULT '';`,
+	// Products the store sells with another on its page (a gateway's SSDs): which, in the store's order.
+	`CREATE TABLE linked_products (
+		region     TEXT NOT NULL,
+		product_id TEXT NOT NULL,
+		linked_id  TEXT NOT NULL,
+		position   INTEGER NOT NULL,
+		PRIMARY KEY (region, product_id, linked_id)
+	);`,
+	// What the store's page calls each choice: "1 TB" for a linked product, "No Storage" for having none of them.
+	`ALTER TABLE linked_products ADD COLUMN label TEXT NOT NULL DEFAULT '';
+	ALTER TABLE products ADD COLUMN linked_base_label TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -707,6 +718,58 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE variants SET delisted_at = ? WHERE region = ? AND product_id = ? AND delisted_at = '' AND id NOT IN (`+strings.Join(marks, ",")+`)`, listed...); err != nil {
 		return nil, fmt.Errorf("marking delisted variants: %w", err)
+	}
+
+	// Products sold alongside it are tracked as products of their own (without being watched: they have no
+	// product page to read, so nothing more is learned of them than the category page says), unless
+	// something already tracks them, whose own observation is the better one.
+	if p.Linked != nil {
+		// Category pages don't word the choices, so what a product page said earlier is kept.
+		labels := map[string]string{}
+		old, err := tx.QueryContext(ctx, `SELECT linked_id, label FROM linked_products WHERE region = ? AND product_id = ?`, region, p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reading linked products: %w", err)
+		}
+		for old.Next() {
+			var id, label string
+			if err := old.Scan(&id, &label); err != nil {
+				_ = old.Close()
+				return nil, err
+			}
+			labels[id] = label
+		}
+		if err := old.Close(); err != nil {
+			return nil, err
+		}
+		for id, label := range p.LinkLabels {
+			labels[id] = label
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM linked_products WHERE region = ? AND product_id = ?`, region, p.ID); err != nil {
+			return nil, fmt.Errorf("clearing linked products: %w", err)
+		}
+		if p.LinkBaseLabel != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE products SET linked_base_label = ? WHERE region = ? AND id = ?`, p.LinkBaseLabel, region, p.ID); err != nil {
+				return nil, fmt.Errorf("saving the label of having none: %w", err)
+			}
+		}
+		for i := range p.Linked {
+			l := &p.Linked[i]
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO linked_products (region, product_id, linked_id, position, label) VALUES (?, ?, ?, ?, ?)`, region, p.ID, l.ID, i, labels[l.ID]); err != nil {
+				return nil, fmt.Errorf("linking product: %w", err)
+			}
+			var watched int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM items WHERE region = ? AND product_id = ?`, region, l.ID).Scan(&watched); err != nil {
+				return nil, fmt.Errorf("reading items: %w", err)
+			}
+			if watched > 0 {
+				continue
+			}
+			evs, err := applyTx(ctx, tx, region, l, now)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, evs...)
+		}
 	}
 
 	return events, nil
@@ -1131,9 +1194,55 @@ func (s *Store) HasProduct(ctx context.Context, region, id string) (bool, error)
 	return n > 0, err
 }
 
-// KnownProducts returns the ids of every product observed in a region.
+// LinkedProduct is a product the store sells with another, and what its page calls that choice ("2 TB"; empty when unknown).
+type LinkedProduct struct {
+	Slug  string
+	Label string
+}
+
+// Linked maps each product (region, id) to the products the store sells with it, in the store's order, and
+// to what its page calls the choice of none of them ("No Storage"; empty when unknown).
+func (s *Store) Linked(ctx context.Context) (links map[[2]string][]LinkedProduct, none map[[2]string]string, err error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT l.region, l.product_id, p.slug, l.label FROM linked_products l
+		JOIN products p ON p.region = l.region AND p.id = l.linked_id
+		ORDER BY l.region, l.product_id, l.position`)
+	if err != nil {
+		return nil, nil, err
+	}
+	links = map[[2]string][]LinkedProduct{}
+	for rows.Next() {
+		var region, id string
+		var l LinkedProduct
+		if err := rows.Scan(&region, &id, &l.Slug, &l.Label); err != nil {
+			_ = rows.Close()
+			return nil, nil, err
+		}
+		links[[2]string{region, id}] = append(links[[2]string{region, id}], l)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	nrows, err := s.db.QueryContext(ctx, `SELECT region, id, linked_base_label FROM products WHERE linked_base_label != ''`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = nrows.Close() }()
+	none = map[[2]string]string{}
+	for nrows.Next() {
+		var region, id, label string
+		if err := nrows.Scan(&region, &id, &label); err != nil {
+			return nil, nil, err
+		}
+		none[[2]string{region, id}] = label
+	}
+	return links, none, nrows.Err()
+}
+
+// KnownProducts returns the ids of the products observed in a region, other than those seen only as another's linked product.
 func (s *Store) KnownProducts(ctx context.Context, region string) (map[string]bool, error) {
-	return s.idSet(ctx, `SELECT id FROM products WHERE region = ?`, region)
+	// A product known only as another's linked product (no item of its own) is still to be discovered.
+	return s.idSet(ctx, `SELECT id FROM products p WHERE region = ? AND (EXISTS (SELECT 1 FROM items i WHERE i.region = p.region AND i.product_id = p.id) OR NOT EXISTS (SELECT 1 FROM linked_products l WHERE l.region = p.region AND l.linked_id = p.id))`, region)
 }
 
 // SeenCategories returns the ids of the categories whose product lists have

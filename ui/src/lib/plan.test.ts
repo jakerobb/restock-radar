@@ -1,4 +1,4 @@
-import { variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
+import { setAddOn, variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
 const line = (over: Partial<PlanLine> = {}): PlanLine => ({ ref: 'us/widget', sku: 'SKU-1', qty: 1, addedCents: 10900, ...over })
@@ -122,6 +122,20 @@ describe('variants the store has taken off', () => {
     const l = line({ sku: 'SKU-1' })
     expect(decodePlan(encodePlan([l], [p]), [p])!.lines.map((x) => x.sku)).toEqual(['SKU-1'])
     expect(encodePlan([l], [p])).toBe(encodePlan([l], [product({ variants: [variant({ sku: 'SKU-1', num: 9 })] })]))
+  })
+})
+
+describe('products sold with another', () => {
+  const gw = product({ slug: 'gw', variants: [variant({ sku: 'GW' })] })
+  const a = product({ slug: 'a', variants: [variant({ sku: 'A', price_cents: 100 })] })
+  const b = product({ slug: 'b', variants: [variant({ sku: 'B', price_cents: 200 })] })
+  const base = [line({ ref: 'us/gw', sku: 'GW' }), line({ ref: 'us/other', sku: 'O' })]
+  it('puts the chosen one in, takes the others out, and leaves the rest of the plan alone', () => {
+    const withA = setAddOn(base, [a, b], a, 3)
+    expect(withA.map((l) => [l.ref, l.qty])).toEqual([['us/gw', 1], ['us/other', 1], ['us/a', 3]])
+    expect(setAddOn(withA, [a, b], b, 3).map((l) => l.ref)).toEqual(['us/gw', 'us/other', 'us/b'])
+    expect(setAddOn(withA, [a, b], null, 3).map((l) => l.ref)).toEqual(['us/gw', 'us/other'])
+    expect(gw.slug).toBe('gw')
   })
 })
 
