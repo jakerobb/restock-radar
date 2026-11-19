@@ -111,6 +111,7 @@ func deriveMetrics(ix *index, r *Result) {
 	deriveCoverage(ix, r)
 	deriveCameras(ix, r)
 	deriveApps(ix, r)
+	deriveManaged(ix, r)
 
 	if e, ok := ix.scalar("WiFi Standard", "WiFi Standards"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
@@ -516,5 +517,29 @@ func deriveApps(ix *index, r *Result) {
 				add(app, text)
 			}
 		}
+	}
+}
+
+var managedRe = regexp.MustCompile(`^\s*(\d[\d,]*)\s*(\+?)`)
+
+// deriveManaged reads how many UniFi devices a console manages (managed_devices) and how many access hubs
+// (managed_access_hubs), as published: "100+" is at least 100.
+func deriveManaged(ix *index, r *Result) {
+	for _, m := range []struct{ label, name string }{{"Managed UniFi Devices", "managed_devices"}, {"Managed Access Hubs", "managed_access_hubs"}} {
+		e, ok := ix.scalar(m.label)
+		if !ok {
+			continue
+		}
+		lines := Lines(e.Value)
+		if len(lines) == 0 {
+			continue
+		}
+		g := managedRe.FindStringSubmatch(lines[0])
+		if g == nil {
+			ix.issue("metrics", e, "no device count")
+			continue
+		}
+		n, _ := num(g[1])
+		r.Metrics = append(r.Metrics, Metric{Name: m.name, Value: n, Unit: "devices", AtLeast: g[2] == "+", Raw: strings.Join(lines, " | ")})
 	}
 }

@@ -3,6 +3,7 @@ import { buildCatalog } from './catalog'
 import { viewLine, type PlanLine } from './plan'
 import { planChecks, type DerivedLine } from './planChecks'
 import { findRoles } from './roleFinder'
+import { formatRate, gatewayLabel } from './roles'
 import { derived, port, product, variant } from '../test/fixtures'
 
 const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
@@ -119,5 +120,72 @@ describe('findRoles', () => {
 
   it('has nothing to suggest when nothing is missing', () => {
     expect(findRoles(w.plan(['ap', 1], ['udm-pro', 1]), w.rows, w.map).options).toEqual([])
+  })
+})
+
+describe('what a controller manages', () => {
+  const m = (name: string, value: number, at_least = false) => ({ name, value, unit: '', at_least, raw: '' })
+  const set: Spec[] = [
+    { slug: 'ap', type: 'WiFi' },
+    { slug: 'sw', type: 'Switches' },
+    { slug: 'hub', type: 'Door Access', category: 'door-access-hub' },
+    { slug: 'small', type: 'Gateways', cents: 14000, d: { metrics: [...app('network'), m('managed_devices', 3, true), m('ids_ips_throughput_mbps', 1000)] } },
+    { slug: 'exact', type: 'Gateways', cents: 20000, d: { metrics: [...app('network', 'access'), m('managed_devices', 3), m('managed_access_hubs', 2), m('ids_ips_throughput_mbps', 5000)] } },
+    { slug: 'big', type: 'Gateways', cents: 40000, d: { metrics: [...app('network', 'access'), m('managed_devices', 100, true), m('managed_access_hubs', 50), m('ids_ips_throughput_mbps', 3500)] } },
+    { slug: 'silent', type: 'Gateways', cents: 9000, d: { metrics: app('network') } },
+  ]
+  const x = world(set)
+  const caps = (...items: [string, number][]) => Object.fromEntries(planChecks(x.plan(...items)).filter((c) => c.id.endsWith('-capacity')).map((c) => [c.id, c]))
+
+  it('is satisfied when the controller manages at least as many UniFi devices as the plan has', () => {
+    // 2 access points, a switch and the gateway itself: 4 devices.
+    expect(caps(['ap', 2], ['sw', 1], ['big', 1])['role-network-capacity']).toMatchObject({ verdict: 'ok', text: '4 UniFi devices in the plan; big manages 100+.' })
+    expect(caps(['ap', 2], ['exact', 1])['role-network-capacity']).toMatchObject({ verdict: 'ok' }) // 3 of 3
+  })
+
+  it('is bad when the plan has more than a controller that states an exact number manages, and offers to fix it', () => {
+    expect(caps(['ap', 3], ['exact', 1])['role-network-capacity']).toMatchObject({ verdict: 'bad', roleShortfall: 'network', text: 'The plan has 4 UniFi devices, over the 3 that exact manages.' })
+  })
+
+  it('only warns when the figure is a minimum ("3+"), since it may manage more', () => {
+    expect(caps(['ap', 3], ['small', 1])['role-network-capacity']).toMatchObject({ verdict: 'warn', roleShortfall: 'network', text: expect.stringContaining('only listed for 3+') })
+  })
+
+  it('says it can’t tell when the store gives no figure', () => {
+    expect(caps(['ap', 3], ['silent', 1])['role-network-capacity']).toMatchObject({ verdict: 'unknown', text: expect.stringContaining("Can't tell how many UniFi devices silent manages") })
+    expect(caps(['ap', 3], ['silent', 1])['role-network-capacity']?.roleShortfall).toBeUndefined()
+  })
+
+  it('goes by the largest controller when there are several', () => {
+    expect(caps(['ap', 5], ['exact', 1], ['big', 1])['role-network-capacity']).toMatchObject({ verdict: 'ok', text: expect.stringContaining('big manages 100+') })
+  })
+
+  it('counts door access hubs against what the Access controller manages', () => {
+    expect(caps(['hub', 2], ['exact', 1])['role-access-capacity']).toMatchObject({ verdict: 'ok', text: '2 access hubs in the plan; exact manages 2.' })
+    expect(caps(['hub', 3], ['exact', 1])['role-access-capacity']).toMatchObject({ verdict: 'bad', text: 'The plan has 3 access hubs, over the 2 that exact manages.' })
+  })
+
+  it('does not check capacity when the role is missing or nothing counts against it', () => {
+    expect(caps(['ap', 3])).toEqual({})
+    expect(caps(['hub', 2], ['small', 1])['role-access-capacity']).toBeUndefined() // small doesn't run Access
+  })
+
+  it('names the gateway’s throughput in the check', () => {
+    expect(roleChecks(x.plan(['ap', 1], ['exact', 1]))['role-gateway']?.text).toBe('exact (5 Gbps IDS/IPS) is the gateway.')
+  })
+
+  it('suggests a bigger controller, replacing the one that is too small', () => {
+    const found = findRoles(x.plan(['ap', 5], ['exact', 1]), x.rows, x.map)
+    expect(found.options[0]).toMatchObject({ rows: [expect.objectContaining({ product: expect.objectContaining({ slug: 'big' }) })] })
+    expect(found.options[0]?.replaces.map((l) => l.view.line.ref)).toEqual(['us/exact'])
+    expect(found.options[0]?.undersized).toHaveLength(1)
+    // One that doesn't state its capacity is in the full list, flagged, but isn't suggested.
+    const all = findRoles(x.plan(['ap', 5], ['exact', 1]), x.rows, x.map).all
+    expect(all.map((o) => `${o.rows[0]?.product.slug}${o.unverified ? ' (unverified)' : ''}`)).toEqual(['silent (unverified)', 'big'])
+    expect(found.options.map((o) => o.rows[0]?.product.slug)).toEqual(['big'])
+  })
+
+  it('formats the gateway figure for the finder', () => {
+    expect([gatewayLabel(x.plan(['big', 1])[0]!.derived), gatewayLabel(x.plan(['silent', 1])[0]!.derived), formatRate(800), formatRate(10000)]).toEqual(['3.5 Gbps gateway', 'gateway', '800 Mbps', '10 Gbps'])
   })
 })

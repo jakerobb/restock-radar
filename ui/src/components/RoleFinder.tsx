@@ -7,12 +7,22 @@ import { formatPrice } from '../lib/format'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
 import { findRoles, type ListedRole } from '../lib/roleFinder'
-import { appsRun, ROLE_LABEL } from '../lib/roles'
+import { appsRun, gatewayLabel, ROLE_LABEL } from '../lib/roles'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 
 const APP_LABEL: Record<string, string> = { network: 'Network', protect: 'Protect', access: 'Access', talk: 'Talk' }
+
+/** What a product does, one thing after another: "5 Gbps gateway, Network controller (50+ devices), Protect controller". */
+function roles(r: ListedRole['rows'][number]): string {
+  const count = (name: string, noun: string) => {
+    const m = r.derived?.metrics.find((x) => x.name === name)
+    return m && m.value > 0 ? ` (${m.value.toLocaleString('en-US')}${m.at_least ? '+' : ''} ${noun})` : ''
+  }
+  const parts = [r.product.type === 'Gateways' ? gatewayLabel(r.derived) : null, ...appsRun(r.derived).map((a) => `${APP_LABEL[a]} controller${a === 'network' ? count('managed_devices', 'devices') : a === 'access' ? count('managed_access_hubs', 'hubs') : ''}`)]
+  return `${r.product.title}: ${parts.filter(Boolean).join(', ') || 'no applications listed'}`
+}
 
 function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void }) {
   const title = o.rows.map((r) => r.product.title).join(' and ')
@@ -35,9 +45,14 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
           </Badge>
         </div>
         <div className="mt-0.5 text-muted">
-          {o.rows.map((r) => `${r.product.title}: ${[r.product.type === 'Gateways' ? 'gateway' : null, ...appsRun(r.derived).map((a) => `${APP_LABEL[a]} controller`)].filter(Boolean).join(', ') || 'no applications listed'}`).join(' · ')}
+          {o.rows.map(roles).join(' · ')}
         </div>
-        {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
+        {o.unverified && <div className="mt-0.5 text-muted">The store doesn't say how many devices it manages, so it can't be shown to manage the plan's.</div>}
+        {o.replaces.length > 0 && (
+          <div className="mt-0.5 text-muted">
+            Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which {o.replaces.every((l) => o.undersized.includes(l)) ? 'manages too few devices for the plan' : o.replaces.some((l) => o.undersized.includes(l)) ? "can't be bought now or manages too few devices for the plan" : "can't be bought now"}.
+          </div>
+        )}
       </div>
       <Button
         variant="secondary"

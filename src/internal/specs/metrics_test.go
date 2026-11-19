@@ -585,3 +585,43 @@ func TestRealApplications(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedCounts(t *testing.T) {
+	for _, tc := range []struct {
+		label, value string
+		want         float64
+		atLeast      bool
+	}{
+		{"Managed UniFi Devices", "1,000", 1000, false},
+		{"Managed UniFi Devices", "100+", 100, true},
+		{"Managed UniFi Devices", "2,250+", 2250, true},
+		{"Managed Access Hubs", "150", 150, false},
+	} {
+		b := &builder{}
+		b.text("Overview", tc.label, tc.value)
+		name := map[string]string{"Managed UniFi Devices": "managed_devices", "Managed Access Hubs": "managed_access_hubs"}[tc.label]
+		m := metric(b.derive(), name)
+		if m == nil || m.Value != tc.want || m.AtLeast != tc.atLeast {
+			t.Errorf("%s %q = %+v, want %v atLeast=%v", tc.label, tc.value, m, tc.want, tc.atLeast)
+		}
+	}
+	b := &builder{}
+	b.text("Overview", "Managed UniFi Devices", "lots")
+	r := b.derive()
+	if metric(r, "managed_devices") != nil || len(r.Issues) != 1 {
+		t.Errorf("unreadable count: metric %+v issues %+v", metric(r, "managed_devices"), r.Issues)
+	}
+}
+
+func TestRealManagedCounts(t *testing.T) {
+	if m := metric(derived(t, "cloud-key-enterprise"), "managed_devices"); m == nil || m.Value != 1000 || m.AtLeast {
+		t.Errorf("cloud key managed devices = %+v", m)
+	}
+	r := derived(t, "ucg-fiber")
+	if m := metric(r, "managed_devices"); m == nil || m.Value != 50 || !m.AtLeast {
+		t.Errorf("ucg-fiber managed devices = %+v", m)
+	}
+	if m := metric(r, "managed_access_hubs"); m == nil || m.Value != 50 {
+		t.Errorf("ucg-fiber access hubs = %+v", m)
+	}
+}
