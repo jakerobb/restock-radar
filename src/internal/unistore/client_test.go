@@ -27,7 +27,7 @@ const productJSON = `{"pageProps":{"currentProductId":"p1","category":{"currentC
 // A product page that sells SSDs with the product, and words the choices in its collection sections.
 const gatewayJSON = `{"pageProps":{"currentProductId":"g1","category":{"currentCategory":{"id":"c1"},"breadcrumbs":[]},
 	"collection":{"sections":[{"title":"Gateway","productTags":["gw"]},{"title":"No Storage","productTags":["gw","gw-ns"]},{"title":"1 TB","productTags":["gw","ssd-1tb"]}],
-	"products":[{"id":"g1","slug":"gw","name":"GW","title":"Gateway","tags":[{"name":"gw"},{"name":"gw-ns"}],"variants":[
+	"products":[{"id":"g1","slug":"ucg-fiber","name":"GW","title":"Gateway","tags":[{"name":"gw"},{"name":"gw-ns"}],"variants":[
 		{"id":"gv","sku":"GW","status":"Available","displayPrice":{"amount":27900,"currency":"USD"}}]}]},
 	"linkedProducts":[{"id":"s1","slug":"uacc-ssd-1tb","name":"UACC-SSD-1TB","variants":[
 		{"id":"sv","sku":"UACC-SSD-1TB","status":"Available","displayPrice":{"amount":39000,"currency":"USD"}}]}]}}`
@@ -364,10 +364,10 @@ func TestVariantTitleFromOptions(t *testing.T) {
 
 func TestConvertProductLinkedProducts(t *testing.T) {
 	var raw rawProduct
-	err := json.Unmarshal([]byte(`{"id":"p1","slug":"gw","name":"GW","title":"Gateway",
+	err := json.Unmarshal([]byte(`{"id":"p1","slug":"ucg-fiber","name":"GW","title":"Gateway",
 		"variants":[{"id":"v1","sku":"GW","title":"US","status":"Available","displayPrice":{"amount":27900,"currency":"USD"}}],
 		"linkedProducts":[
-			{"id":"s1","slug":"ssd-1tb","name":"SSD-1TB","status":"Available","variants":[{"id":"sv1","sku":"SSD-1TB","status":"Available","displayPrice":{"amount":39000,"currency":"USD"}}]},
+			{"id":"s1","slug":"uacc-ssd-1tb","name":"SSD-1TB","status":"Available","variants":[{"id":"sv1","sku":"SSD-1TB","status":"Available","displayPrice":{"amount":39000,"currency":"USD"}}]},
 			{"id":"","slug":"broken","name":"X","variants":[]}]}`), &raw)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestConvertProductLinkedProducts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Linked) != 1 || p.Linked[0].Slug != "ssd-1tb" || p.Linked[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Price.Amount != 39000 {
+	if len(p.Linked) != 1 || p.Linked[0].Slug != "uacc-ssd-1tb" || p.Linked[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Title != "SSD-1TB" || p.Linked[0].Variants[0].Price.Amount != 39000 {
 		t.Fatalf("linked = %+v, want the one usable SSD, named by its SKU", p.Linked)
 	}
 	// A response with no such field says nothing, which isn't the same as none.
@@ -419,5 +419,20 @@ func TestFetchProductReadsLinkedProductsAndTheirLabels(t *testing.T) {
 	}
 	if len(p.Linked) != 1 || p.Linked[0].Slug != "uacc-ssd-1tb" || p.LinkLabels["s1"] != "1 TB" || p.LinkBaseLabel != "No Storage" {
 		t.Fatalf("linked = %+v, labels = %v, none = %q", p.Linked, p.LinkLabels, p.LinkBaseLabel)
+	}
+}
+
+func TestOnlyTheLinkedProductsTheStoreOffersAreKept(t *testing.T) {
+	pdu, ssd := Product{ID: "p", Slug: "usp-pdu-pro"}, Product{ID: "s", Slug: "uacc-ssd-1tb"}
+	for slug, want := range map[string]int{"ups-2u-us": 1, "ups-2u-eu": 1, "ups-2u-pro-us": 0, "ucg-fiber": 1, "ucg-max": 0, "ucg-max-ns": 1} {
+		if got := offered(slug, []Product{pdu, ssd}); len(got) != want || (want == 1 && slug == "ups-2u-us" && got[0].Slug != "usp-pdu-pro") {
+			t.Errorf("%s keeps %+v, want %d", slug, got, want)
+		}
+	}
+	if offered("ups-2u-us", nil) != nil {
+		t.Error("not told should stay not told")
+	}
+	if got := offered("ups-2u-pro-us", []Product{pdu}); got == nil {
+		t.Error("none offered should be empty, not nil, so earlier links are cleared")
 	}
 }
