@@ -110,6 +110,8 @@ func deriveMetrics(ix *index, r *Result) {
 
 	deriveCoverage(ix, r)
 	deriveCameras(ix, r)
+	deriveStorage(ix, r)
+	deriveBitrate(ix, r)
 	deriveApps(ix, r)
 	deriveManaged(ix, r)
 
@@ -460,11 +462,21 @@ func deriveCameras(ix *index, r *Result) {
 	}
 
 	best, raw, have := 0.0, "", false
+	sensors := 1.0
 	for _, e := range ix.all("Resolution") {
 		text := strings.Join(Lines(e.Value), " | ")
-		for _, m := range sensorRe.FindAllStringSubmatch(text, -1) {
+		ms := sensorRe.FindAllStringSubmatch(text, -1)
+		count := 0.0 // how many sensors the entry lists: "(4) 8MP" is four, and a main and a package camera two
+		for _, m := range ms {
+			n := 1.0
+			if m[1] != "" {
+				n, _ = num(m[1])
+			}
+			count += n
+		}
+		for _, m := range ms {
 			if mp, ok := num(m[2]); ok && (!have || mp > best) {
-				best, raw, have = mp, text, true
+				best, raw, have, sensors = mp, text, true, count
 			}
 		}
 	}
@@ -484,6 +496,67 @@ func deriveCameras(ix *index, r *Result) {
 	}
 	if have {
 		r.Metrics = append(r.Metrics, Metric{Name: "camera_megapixels", Value: best, Unit: "MP", Raw: raw})
+		if sensors > 1 {
+			r.Metrics = append(r.Metrics, Metric{Name: "camera_sensors", Value: sensors, Unit: "sensors", Raw: raw})
+		}
+	}
+}
+
+var (
+	// "(4) 2.5/3.5" drive bays", "(2) 3.5" NVR HDD bays": how many drives an NVR takes.
+	driveBaysRe = regexp.MustCompile(`(?i)^\s*\((\d+)\)[^\n]*\bbays?\b`)
+	// "1 TB 2.5" SATA SSD", "128 GB microSD": storage an NVR comes with that can't be changed.
+	fixedStorageRe = regexp.MustCompile(`(?i)(?:^|pre-installed\s+)` + numRe + `\s*(TB|GB)\b`)
+)
+
+// deriveStorage reads the drive bays of an NVR (nvr_drive_bays), where the buyer chooses the drives, and for
+// one without any the storage it comes with (nvr_storage_tb: a microSD card, or the CloudKey+'s SSD).
+func deriveStorage(ix *index, r *Result) {
+	if _, ok := ix.scalar("Managed Cameras"); !ok {
+		return
+	}
+	for _, label := range []string{"Storage Capacity", "NVR Storage", "Storage", "Hard Drive Capacity"} {
+		for _, e := range ix.all(label) {
+			for _, line := range Lines(e.Value) {
+				if m := driveBaysRe.FindStringSubmatch(line); m != nil {
+					n, _ := num(m[1])
+					r.Metrics = append(r.Metrics, Metric{Name: "nvr_drive_bays", Value: n, Unit: "bays", Raw: line})
+					return
+				}
+			}
+		}
+	}
+	for _, label := range []string{"Hard Drive Capacity", "NVR Storage"} {
+		for _, e := range ix.all(label) {
+			for _, line := range Lines(e.Value) {
+				m := fixedStorageRe.FindStringSubmatch(line)
+				if m == nil {
+					continue
+				}
+				n, ok := num(m[1])
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(m[2], "GB") {
+					n /= 1000
+				}
+				r.Metrics = append(r.Metrics, Metric{Name: "nvr_storage_tb", Value: n, Unit: "TB", Raw: line})
+				return
+			}
+		}
+	}
+}
+
+// deriveBitrate reads what a camera records at, as camera_bitrate_mbps. The store doesn't publish it, so it exists only
+// where the owner adds the fact (an entry labelled "Recording Bitrate": "24 Mbps"), to override the estimate by resolution.
+func deriveBitrate(ix *index, r *Result) {
+	e, ok := ix.scalar("Recording Bitrate")
+	if !ok {
+		return
+	}
+	text := strings.Join(Lines(e.Value), " | ")
+	if v, ok := firstNumber(regexp.MustCompile(`(?i)`+numRe+`\s*Mbps\b`), text); ok && v > 0 {
+		r.Metrics = append(r.Metrics, Metric{Name: "camera_bitrate_mbps", Value: v, Unit: "Mbps", Raw: text})
 	}
 }
 

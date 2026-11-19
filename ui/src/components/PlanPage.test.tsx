@@ -286,6 +286,28 @@ describe('PlanPage', () => {
     expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900'])
   })
 
+  it('lets the drives of an NVR with bays be chosen by size and number, one drive line for all the NVRs', async () => {
+    products = [
+      product({ id: '1', slug: 'unvr', title: 'UNVR', category: 'physical-security-nvr', variants: [variant({ id: 'a', num: 1, sku: 'UNVR', price_cents: 29900 })] }),
+      product({ id: '2', slug: 'uacc-hdd-s-4tb', title: '4 TB drive', variants: [variant({ id: 'b', num: 2, sku: 'UACC-HDD-S-4TB', price_cents: 16500 })] }),
+      product({ id: '3', slug: 'uacc-hdd-e-16tb', title: '16 TB drive', variants: [variant({ id: 'c', num: 3, sku: 'UACC-HDD-E-16TB', price_cents: 72900 })] }),
+      product({ id: '4', slug: 'uacc-hdd-e-8tb', title: '8 TB drive', variants: [variant({ id: 'd', num: 4, sku: 'UACC-HDD-E-8TB', price_cents: 37900 })] }),
+    ]
+    const ds = [derived({ slug: 'unvr', known, metrics: [metric('nvr_cameras_4k', 18), metric('nvr_drive_bays', 4)] })]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: ds } })
+    setPlan([line({ ref: 'us/unvr', sku: 'UNVR', qty: 2, addedCents: 29900 })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    const size = await screen.findByLabelText('Drives for UNVR')
+    expect(within(size).getAllByRole('option').map((o) => o.textContent)).toEqual(['No drives', '4 TB drives (+$165 each)', '16 TB drives (+$729 each)']) // not the 8 TB
+    await user.selectOptions(size, 'uacc-hdd-e-16tb') // a full set in each of the two NVRs
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:8:72900'])
+    await user.selectOptions(screen.getByLabelText('Number of drives for UNVR'), '3')
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:6:72900'])
+    await user.selectOptions(size, '')
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900'])
+  })
+
   it('lets the way a switch is powered be chosen, and puts the adapter it runs on in the plan', async () => {
     products = [
       product({ id: '1', slug: 'flex', title: 'Flex PoE', type: 'Switches', variants: [variant({ id: 'a', num: 1, sku: 'FLEX', price_cents: 19900 })] }),

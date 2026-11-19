@@ -110,6 +110,60 @@ describe('the NVR check', () => {
   })
 })
 
+const drive = (slug: string): Spec => ({ slug, category: 'accessories-storage', cents: 70000, d: {} })
+const bayNvr = (slug: string, bays: number, extra: Partial<Derived> = {}) => nvr(slug, 30000, [60, 30, 18], { ...extra, metrics: [metric('nvr_drive_bays', bays, 'bays'), ...(extra.metrics ?? [])] })
+const rows = (c: ReturnType<typeof find>) => c?.detail?.flatMap((b) => b.rows.flatMap((r) => (typeof r === 'string' ? [r] : [r.text, ...r.items]))) ?? []
+
+describe('the storage of an NVR', () => {
+  // Ten 4K cameras at 12 Mbps each record 120 Mbps: 1 TB lasts 1e12 * 8 / 120e6 s, or 0.77 days.
+  const four = () => setup([bayNvr('bays4', 4), drive('uacc-hdd-e-16tb'), cam('c4k', 8.3)])
+
+  it('gives each way to protect four drives, with the effective storage and days of footage', () => {
+    const s = four()
+    const r = rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 4], ['c4k', 10]))
+    expect(r).toContain('4 × 16 TB drives, 64 TB in all:')
+    expect(r).toContain('RAID 5: 48 TB effective, 37 days of footage')
+    expect(r).toContain('RAID 10: 32 TB effective, 25 days of footage')
+  })
+
+  it('has one way to protect two or three drives, and none for one', () => {
+    const s = four()
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 2], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 1: 16 TB effective, 12 days of footage'])
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 3], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 5: 32 TB effective, 25 days of footage'])
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 1], ['c4k', 10])).some((x) => x.startsWith('16 TB effective, 12'))).toBe(true)
+  })
+
+  it('shares the plan’s drives among the NVRs, and never puts more in one than it has bays', () => {
+    const s = setup([bayNvr('a', 4), bayNvr('b', 4), drive('uacc-hdd-e-16tb')])
+    const c = find(s, ['a', 2], ['uacc-hdd-e-16tb', 4], ['c4k', 1]) // no cameras defined: just the drives
+    expect(c).toBeUndefined()
+    const s2 = setup([bayNvr('a', 2), drive('uacc-hdd-e-16tb'), cam('c4k', 8.3)])
+    expect(rows(find(s2, ['a', 1], ['uacc-hdd-e-16tb', 6], ['c4k', 1]))).toContain('2 × 16 TB drives, 32 TB in all:')
+  })
+
+  it('says so when there are no drives, and not that the plan fails', () => {
+    const c = find(four(), ['bays4', 1], ['c4k', 10])
+    expect(rows(c).some((x) => x.startsWith('No drives in the plan for its 4 bays'))).toBe(true)
+    expect(c?.verdict).toBe('ok')
+  })
+
+  it('offers RAID 6 from nine drives, on an NVR with the bays for it', () => {
+    const s = setup([bayNvr('big', 16), drive('uacc-hdd-e-16tb'), cam('c4k', 8.3)])
+    const r = rows(find(s, ['big', 1], ['uacc-hdd-e-16tb', 10], ['c4k', 10])).filter((x) => x.startsWith('RAID'))
+    expect(r.map((x) => x.split(':')[0])).toEqual(['RAID 5', 'RAID 6', 'RAID 10'])
+    const nine = rows(find(s, ['big', 1], ['uacc-hdd-e-16tb', 9], ['c4k', 10])).filter((x) => x.startsWith('RAID'))
+    expect(nine.map((x) => x.split(':')[0])).toEqual(['RAID 5', 'RAID 6'])
+  })
+
+  it('counts the storage a gateway has in its M.2 slot or an NVR has built in', () => {
+    const gw = nvr('gw', 20000, [30, 15, 9], { metrics: [] })
+    const s = setup([gw, drive('uacc-ssd-2tb'), cam('c4k', 8.3), nvr('uck', 25000, [20, 10, 5], { metrics: [metric('nvr_storage_tb', 1, 'TB')] })])
+    s.map.get('us/gw')!.linked = [{ slug: 'uacc-ssd-2tb' }]
+    expect(rows(find(s, ['gw', 1], ['uacc-ssd-2tb', 1], ['c4k', 2]))).toContain('2 TB effective, 7.7 days of footage')
+    expect(rows(find(s, ['uck', 1], ['c4k', 2]))).toContain('1 TB of storage built in: 3.9 days of footage')
+  })
+})
+
 describe('findNvrs', () => {
   const small = nvr('small', 20000, [15, 8, 6])
   const big = nvr('big', 100000, [100, 70, 50])
