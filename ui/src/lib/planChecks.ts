@@ -2,7 +2,7 @@ import type { Derived } from '../api/types'
 import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
-import { RACK_MOUNTS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
+import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
 import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
@@ -367,17 +367,20 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   }
 
   // Rack equipment the store doesn't describe as such (a PDU, a patch panel), of a height known here.
-  const stated = lines.filter((l) => RACK_UNITS[slugOf(l)] !== undefined)
+  const statedUnits = (l: DerivedLine) => RACK_UNITS[slugOf(l)] ?? (RACK_PANELS.has(slugOf(l)) ? panelUnits(l.view.line.sku) : null) ?? undefined
+  const stated = lines.filter((l) => statedUnits(l) !== undefined)
   const mounted = lines.filter((l) => l.derived?.known.rack && l.derived.rack.mountable && !NEEDS_RACK_MOUNT.has(slugOf(l)))
   // Equipment that sits on a shelf or desk, and equipment whose mounting isn't known (not the same thing).
   const desktop = lines.filter((l) => (rackable(l) && l.derived?.known.rack && !l.derived.rack.mountable && !NEEDS_RACK_MOUNT.has(slugOf(l))) || (loose.get(l) ?? 0) > 0)
   const unsureMounting = lines.filter((l) => rackable(l) && !l.derived?.known.rack && !NEEDS_RACK_MOUNT.has(slugOf(l)))
   if (mounted.length === 0 && stated.length === 0 && mounts.length === 0 && desktop.length === 0 && unsureMounting.length === 0) return []
 
-  const unitsOf = (l: DerivedLine) => RACK_UNITS[slugOf(l)] ?? l.derived!.rack.units
+  const unitsOf = (l: DerivedLine) => l.derived!.rack.units
   const unsureHeight = mounted.filter((l) => unitsOf(l) <= 0)
-  const sized = [...mounted.filter((l) => unitsOf(l) > 0).map((l) => ({ l, u: unitsOf(l) })), ...stated.map((l) => ({ l, u: RACK_UNITS[slugOf(l)]! })), ...mounts.map((l) => ({ l, u: RACK_MOUNTS[slugOf(l)]!.units }))]
+  const sized = [...mounted.filter((l) => unitsOf(l) > 0).map((l) => ({ l, u: unitsOf(l) })), ...stated.map((l) => ({ l, u: statedUnits(l)! })), ...mounts.map((l) => ({ l, u: RACK_MOUNTS[slugOf(l)]!.units }))]
   const total = sized.reduce((n, x) => n + x.l.view.line.qty * x.u, 0)
+  // One line for each rack unit, so the numbers run with the rack: a 2U device is listed twice.
+  const units = sized.flatMap((x) => Array.from({ length: x.l.view.line.qty * x.u }, () => `${name(x.l)} ${x.u}U`))
   const parts = sized.map((x) => `${x.l.view.line.qty > 1 ? `${x.l.view.line.qty} × ` : ''}${name(x.l)} ${x.u}U`)
   const heading = sized.length > 0 || unsureHeight.length > 0 ? `${total}U of rack space` : 'Nothing in the plan goes in a rack'
   const unsure = unsureHeight.length > 0 || unsureMounting.length > 0
@@ -385,7 +388,7 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   const shelf = desktop.map((l) => ((loose.get(l) ?? 0) > 0 && (loose.get(l) ?? 0) < l.view.line.qty ? `${name(l)} (${loose.get(l)} of ${l.view.line.qty})` : name(l)))
   const groups: NonNullable<PlanCheck['groups']> = [
     ...(unsureHeight.length > 0 ? [{ text: `Can't tell: the height of ${list(unsureHeight)} isn't known. ${heading} so far.` }] : []),
-    { text: unsureHeight.length > 0 ? 'Counted so far' : heading, ordered: true, items: parts },
+    { text: unsureHeight.length > 0 ? 'Counted so far' : heading, ordered: true, items: units },
     ...(desktop.length > 0 ? [{ text: 'Not rack-mount, so it needs a shelf or desk space:', items: shelf }] : []),
     ...(unsureMounting.length > 0 ? [{ text: `Can't tell whether ${list(unsureMounting)} ${unsureMounting.length === 1 ? 'is' : 'are'} rack-mount.` }] : []),
   ]
