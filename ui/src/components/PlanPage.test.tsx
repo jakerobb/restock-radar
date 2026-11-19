@@ -268,7 +268,7 @@ describe('PlanPage', () => {
 
   it('offers the products sold with another (a gateway\'s SSDs) as a choice that adds them to the plan', async () => {
     products = [
-      product({ id: '1', slug: 'gw', title: 'Gateway', variants: [variant({ id: 'a', num: 1, sku: 'GW', price_cents: 27900 })], linked: [{ slug: 'ssd-1', label: '1 TB' }, { slug: 'ssd-2', label: '2 TB' }], linked_none: 'No Storage' }),
+      product({ id: '1', slug: 'gw', title: 'Gateway', variants: [variant({ id: 'a', num: 1, sku: 'GW', price_cents: 27900 })], linked: [{ slug: 'ssd-2', label: '2 TB' }, { slug: 'ssd-1', label: '1 TB' }], linked_none: 'No Storage' }),
       product({ id: '2', slug: 'ssd-1', title: 'SSD-1TB', variants: [variant({ id: 'b', num: 2, sku: 'SSD-1', price_cents: 39000 })] }),
       product({ id: '3', slug: 'ssd-2', title: 'SSD-2TB', variants: [variant({ id: 'c', num: 3, sku: 'SSD-2', status: 'SoldOut', price_cents: 73000 })] }),
     ]
