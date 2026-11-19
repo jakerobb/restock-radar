@@ -423,8 +423,8 @@ export default function PlanPage() {
                                 {g.text}
                                 {g.items && g.items.length > 0 && (
                                   <ListTag ordered={g.ordered}>
-                                    {g.items.map((i) => (
-                                      <li key={i}>{i}</li>
+                                    {g.items.map((i, n) => (
+                                      <li key={`${n}:${i}`}>{i}</li>
                                     ))}
                                   </ListTag>
                                 )}

@@ -24,3 +24,12 @@ export const RACK_UNITS: Record<string, number> = {
   'usp-pdu-pro': 2,
   'uacc-rack-panel-patch-blank-24': 1,
 }
+
+/** Products sold as panels of several heights, one variant for each, which says so in its SKU ("...-Vented-2U"). */
+export const RACK_PANELS: ReadonlySet<string> = new Set(['uacc-rack-panel-ocd'])
+
+/** The height of a panel variant from its SKU; null when it doesn't say. */
+export function panelUnits(sku: string): number | null {
+  const m = /-(\d+)U$/i.exec(sku)
+  return m ? Number(m[1]) : null
+}

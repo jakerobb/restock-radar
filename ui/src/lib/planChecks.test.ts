@@ -123,9 +123,20 @@ describe('planChecks', () => {
       const c = byId([racked('sw', 1), real('usp-pdu-pro', 'PDU Pro', 'Integrations', 'integrations-power-tech', none), real('uacc-rack-panel-patch-blank-24', 'Patch Panel', 'Accessories', 'accessories-rack-mount', none), desk('xg8')]).rack
       expect(c?.text).toBe('4U of rack space (sw 1U, PDU Pro 2U, Patch Panel 1U). Not rack-mount, so it needs a shelf or desk space: xg8.')
       expect(c?.groups).toEqual([
-        { text: '4U of rack space', ordered: true, items: ['sw 1U', 'PDU Pro 2U', 'Patch Panel 1U'] },
+        { text: '4U of rack space', ordered: true, items: ['sw 1U', 'PDU Pro 2U', 'PDU Pro 2U', 'Patch Panel 1U'] },
         { text: 'Not rack-mount, so it needs a shelf or desk space:', items: ['xg8'] },
       ])
+    })
+
+    it('counts a panel by the height in its SKU, and lists a device once for each rack unit', () => {
+      const none = { rack: { mountable: false, units: 0, full_depth: false } }
+      const panel = (sku: string, qty = 1): DerivedLine => {
+        const l: PlanLine = { ref: 'us/uacc-rack-panel-ocd', sku, qty, addedCents: null }
+        return { view: viewLine(l, new Map([[l.ref, product({ slug: 'uacc-rack-panel-ocd', title: 'Rack Mount OCD Panels', type: 'Accessories', category: 'accessories-rack-mount' })]])), derived: derived({ slug: 'uacc-rack-panel-ocd', known, ...none }) }
+      }
+      const c = byId([racked('sw', 1), panel('UACC-Rack-Panel-Vented-2U'), panel('UACC-Rack-Panel-Brush-1U', 2)]).rack
+      expect(c?.text).toContain('5U of rack space')
+      expect(c?.groups?.[0]).toEqual({ text: '5U of rack space', ordered: true, items: ['sw 1U', 'Rack Mount OCD Panels 2U', 'Rack Mount OCD Panels 2U', 'Rack Mount OCD Panels 1U', 'Rack Mount OCD Panels 1U'] })
     })
 
     describe('rack-mount accessories', () => {
