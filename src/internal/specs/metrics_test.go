@@ -2,6 +2,8 @@ package specs
 
 import (
 	"testing"
+
+	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
 func metricOf(label, value string) (Result, *Metric) {
@@ -522,5 +524,64 @@ func TestCameraResolution(t *testing.T) {
 	}
 	if m := metric((&builder{}).derive(), "camera_megapixels"); m != nil {
 		t.Errorf("a product with no resolution has %+v", m)
+	}
+}
+
+func appsOf(r Result) (apps []string) {
+	for _, name := range []string{"network", "protect", "access", "talk"} {
+		if m := metric(r, "app_"+name); m != nil && m.Value == 1 {
+			apps = append(apps, name)
+		}
+	}
+	return apps
+}
+
+func TestApplicationsAGatewayOrConsoleRuns(t *testing.T) {
+	b := &builder{}
+	g := b.add("Overview", "", "UniFi Application Suite", unistore.SpecGroup, "", "")
+	for _, a := range []string{"Network", "Protect", "Talk", "Connect"} {
+		b.add("Overview", g, a, unistore.SpecFlag, "true", "")
+	}
+	b.add("Overview", g, "Access", unistore.SpecFlag, "false", "")
+	if got := appsOf(b.derive()); !jsonEqual(got, []string{"network", "protect", "talk"}) {
+		t.Errorf("apps = %v", got)
+	}
+}
+
+func TestApplicationsAnNVRNamesInText(t *testing.T) {
+	b := &builder{}
+	b.text("Overview", "Managed Cameras", "(60) HD / (30) 2K / (18) 4K")
+	b.text("Overview", "Management Application", "UniFi Protect /  UniFi Access /  UniFi Connect")
+	if got := appsOf(b.derive()); !jsonEqual(got, []string{"protect", "access"}) {
+		t.Errorf("apps = %v", got)
+	}
+}
+
+func TestApplicationsAManagedDeviceRunsNone(t *testing.T) {
+	// A door hub, a camera and a phone name the application that manages them; they don't run it.
+	b := &builder{}
+	b.text("Software", "Management Application", "Access")
+	if got := appsOf(b.derive()); len(got) != 0 {
+		t.Errorf("a hub's apps = %v", got)
+	}
+	c := &builder{}
+	c.text("Overview", "UniFi Application Suite", "Protect / Access")
+	if got := appsOf(c.derive()); len(got) != 0 {
+		t.Errorf("a camera's apps = %v", got)
+	}
+}
+
+func TestRealApplications(t *testing.T) {
+	for slug, want := range map[string][]string{
+		"ucg-fiber":            {"network", "protect", "talk"},
+		"udr7":                 {"network", "protect", "talk"},
+		"cloud-key-enterprise": {"network"},
+		"unvr-g2":              {"protect", "access"},
+		"uvc-g6-entry":         nil,
+		"usw-flex":             nil,
+	} {
+		if got := appsOf(derived(t, slug)); !jsonEqual(got, want) && !(len(got) == 0 && len(want) == 0) {
+			t.Errorf("%s apps = %v, want %v", slug, got, want)
+		}
 	}
 }
