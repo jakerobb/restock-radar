@@ -538,6 +538,7 @@ func appsOf(r Result) (apps []string) {
 
 func TestApplicationsAGatewayOrConsoleRuns(t *testing.T) {
 	b := &builder{}
+	b.text("Overview", "Managed UniFi Devices", "100+")
 	g := b.add("Overview", "", "UniFi Application Suite", unistore.SpecGroup, "", "")
 	for _, a := range []string{"Network", "Protect", "Talk", "Connect"} {
 		b.add("Overview", g, a, unistore.SpecFlag, "true", "")
@@ -554,6 +555,16 @@ func TestApplicationsAnNVRNamesInText(t *testing.T) {
 	b.text("Overview", "Management Application", "UniFi Protect /  UniFi Access /  UniFi Connect")
 	if got := appsOf(b.derive()); !jsonEqual(got, []string{"protect", "access"}) {
 		t.Errorf("apps = %v", got)
+	}
+}
+
+func TestApplicationsAPhoneListsTalkButDoesNotRunIt(t *testing.T) {
+	// A phone's suite lists Talk as a flag, the same way a gateway's does, but it manages nothing.
+	b := &builder{}
+	g := b.add("Overview", "", "UniFi Application Suite", unistore.SpecGroup, "", "")
+	b.add("Overview", g, "Talk", unistore.SpecFlag, "true", "")
+	if got := appsOf(b.derive()); len(got) != 0 {
+		t.Errorf("a phone's apps = %v", got)
 	}
 }
 
@@ -583,5 +594,45 @@ func TestRealApplications(t *testing.T) {
 		if got := appsOf(derived(t, slug)); !jsonEqual(got, want) && !(len(got) == 0 && len(want) == 0) {
 			t.Errorf("%s apps = %v, want %v", slug, got, want)
 		}
+	}
+}
+
+func TestManagedCounts(t *testing.T) {
+	for _, tc := range []struct {
+		label, value string
+		want         float64
+		atLeast      bool
+	}{
+		{"Managed UniFi Devices", "1,000", 1000, false},
+		{"Managed UniFi Devices", "100+", 100, true},
+		{"Managed UniFi Devices", "2,250+", 2250, true},
+		{"Managed Access Hubs", "150", 150, false},
+	} {
+		b := &builder{}
+		b.text("Overview", tc.label, tc.value)
+		name := map[string]string{"Managed UniFi Devices": "managed_devices", "Managed Access Hubs": "managed_access_hubs"}[tc.label]
+		m := metric(b.derive(), name)
+		if m == nil || m.Value != tc.want || m.AtLeast != tc.atLeast {
+			t.Errorf("%s %q = %+v, want %v atLeast=%v", tc.label, tc.value, m, tc.want, tc.atLeast)
+		}
+	}
+	b := &builder{}
+	b.text("Overview", "Managed UniFi Devices", "lots")
+	r := b.derive()
+	if metric(r, "managed_devices") != nil || len(r.Issues) != 1 {
+		t.Errorf("unreadable count: metric %+v issues %+v", metric(r, "managed_devices"), r.Issues)
+	}
+}
+
+func TestRealManagedCounts(t *testing.T) {
+	if m := metric(derived(t, "cloud-key-enterprise"), "managed_devices"); m == nil || m.Value != 1000 || m.AtLeast {
+		t.Errorf("cloud key managed devices = %+v", m)
+	}
+	r := derived(t, "ucg-fiber")
+	if m := metric(r, "managed_devices"); m == nil || m.Value != 50 || !m.AtLeast {
+		t.Errorf("ucg-fiber managed devices = %+v", m)
+	}
+	if m := metric(r, "managed_access_hubs"); m == nil || m.Value != 50 {
+		t.Errorf("ucg-fiber access hubs = %+v", m)
 	}
 }

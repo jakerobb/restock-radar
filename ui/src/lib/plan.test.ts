@@ -36,7 +36,7 @@ describe('plan slugs', () => {
   it('round-trips, in order, without the price, and is URL-safe', () => {
     const slug = encodePlan(lines, catalogue)
     expect(slug).toMatch(/^[A-Za-z0-9_-]+$/)
-    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0 })
+    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: {} })
   })
 
   it('takes two bytes a line while numbers are small', () => {
@@ -48,7 +48,7 @@ describe('plan slugs', () => {
   it('leaves out lines that are not in the catalogue, and counts the ones it cannot place', () => {
     const slug = encodePlan([...lines, { ref: 'us/gone', sku: 'G', qty: 1, addedCents: null }], catalogue)
     expect(decodePlan(slug, catalogue)!.lines).toHaveLength(3)
-    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1 })
+    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1, hosting: {} })
   })
 
   it('merges a repeated variant and holds an empty plan', () => {
@@ -61,6 +61,13 @@ describe('plan slugs', () => {
     // A bare number with no quantity, a quantity of 0 or 100, a number of 0, and a number running off the end.
     const bad = ['', 'not a slug', '!!!!', 'a'.repeat(MAX_SLUG + 1), btoa('\x0c'), btoa('\x0c\x00'), btoa('\x0c\x64'), btoa('\x00\x01'), btoa('\x0c\x01\x80')].map((s) => s.replace(/=+$/, ''))
     for (const slug of bad) expect(decodePlan(slug, catalogue), slug).toBeNull()
+  })
+
+  it('carries the controllers run elsewhere in the slug, and nothing when there are none', () => {
+    const slug = encodePlan(lines, catalogue, { network: 'self', talk: 'cloud' })
+    expect(decodePlan(slug, catalogue)).toMatchObject({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: { network: 'self', talk: 'cloud' } })
+    expect(encodePlan(lines, catalogue, {})).toBe(encodePlan(lines, catalogue))
+    expect(decodePlan(encodePlan(lines, catalogue), catalogue)?.hosting).toEqual({})
   })
 })
 

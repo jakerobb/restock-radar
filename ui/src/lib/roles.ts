@@ -11,9 +11,31 @@ export type Role = 'gateway' | 'network' | 'access' | 'talk'
 export const ROLES: readonly Role[] = ['gateway', 'network', 'access', 'talk']
 export const ROLE_LABEL: Record<Role, string> = { gateway: 'Gateway', network: 'Network controller', access: 'Access controller', talk: 'Talk controller' }
 
+/** The controllers that can run somewhere other than on a product in the plan (Protect, which records, can't). */
+export type HostedRole = Exclude<Role, 'gateway'>
+export const HOSTED_ROLES: readonly HostedRole[] = ['network', 'access', 'talk']
+/** Where a controller runs when it isn't on a product in the plan: UniFi's cloud hosting, or on a machine you run yourself. */
+export type HostedWhere = 'cloud' | 'self'
+/** The controllers the plan's owner has decided to run elsewhere. */
+export type Hosting = Partial<Record<HostedRole, HostedWhere>>
+export const APP_NAME: Record<HostedRole, string> = { network: 'UniFi Network', access: 'UniFi Access', talk: 'UniFi Talk' }
+
 const metric = (d: Derived | null, n: string): number => {
   const v = d?.metrics.find((m) => m.name === n)?.value
   return typeof v === 'number' ? v : 0
+}
+
+const metricOf = (d: Derived | null, n: string) => d?.metrics.find((m) => m.name === n)
+
+/** "5 Gbps", "800 Mbps": a throughput as the store gives it, in Mbps. */
+export function formatRate(mbps: number): string {
+  return mbps >= 1000 ? `${Math.round((mbps / 1000) * 100) / 100} Gbps` : `${mbps} Mbps`
+}
+
+/** "5 Gbps gateway" (the figure is its IDS/IPS throughput, what it can inspect), or just "gateway" when that isn't known. */
+export function gatewayLabel(d: Derived | null): string {
+  const v = metric(d, 'ids_ips_throughput_mbps')
+  return v > 0 ? `${formatRate(v)} gateway` : 'gateway'
 }
 
 /** Whether a product fills a role: a gateway is a product of that type; a controller says it runs the application. */
@@ -56,26 +78,87 @@ const MISSING: Record<Role, (users: DerivedLine[]) => string> = {
   talk: (u) => `${count(u)} ${count(u) === 1 ? 'phone needs' : 'phones need'} a Talk controller (a console that runs UniFi Talk), and nothing in the plan runs it.`,
 }
 const FILLED: Record<Role, (by: DerivedLine[]) => string> = {
-  gateway: (by) => `${by.map(name).join(', ')} ${by.length === 1 ? 'is' : 'are'} the gateway.`,
+  gateway: (by) => `${by.map((l) => `${name(l)}${metric(l.derived, 'ids_ips_throughput_mbps') > 0 ? ` (${formatRate(metric(l.derived, 'ids_ips_throughput_mbps'))} IDS/IPS)` : ''}`).join(', ')} ${by.length === 1 ? 'is' : 'are'} the gateway.`,
   network: (by) => `${by.map(name).join(', ')} ${by.length === 1 ? 'runs' : 'run'} UniFi Network.`,
   access: (by) => `${by.map(name).join(', ')} ${by.length === 1 ? 'runs' : 'run'} UniFi Access.`,
   talk: (by) => `${by.map(name).join(', ')} ${by.length === 1 ? 'runs' : 'run'} UniFi Talk.`,
+}
+
+const NETWORK_TYPES = new Set(['Switches', 'WiFi', 'Gateways'])
+const HUB_CATEGORIES = new Set(['door-access-hub', 'door-access-intercoms', 'door-access-starter-kit'])
+const qtyOf = (ls: DerivedLine[]) => ls.reduce((n, l) => n + l.view.line.qty, 0)
+
+/** What a controller manages, and which lines in the plan count against it. */
+const CAPACITY: Partial<Record<Role, { metric: string; noun: string; counted: (lines: DerivedLine[]) => DerivedLine[] }>> = {
+  // The devices UniFi Network manages: gateways, switches, access points and the like (cameras and door hubs have their own applications).
+  network: { metric: 'managed_devices', noun: 'UniFi devices', counted: (ls) => ls.filter((l) => NETWORK_TYPES.has(l.view.product?.type ?? '') || l.view.product?.category === 'internet-solutions') },
+  // A starter kit includes a hub, and an intercom is one.
+  access: { metric: 'managed_access_hubs', noun: 'access hubs', counted: (ls) => ls.filter((l) => HUB_CATEGORIES.has(l.view.product?.category ?? '')) },
+}
+
+/** What the plan's controllers for a role manage, the largest (a console that says "100+" is at least 100), or null when none says. */
+function capacityOf(live: DerivedLine[], metricName: string) {
+  const known = live.flatMap((l) => {
+    const m = metricOf(l.derived, metricName)
+    return m && m.value > 0 ? [{ line: l, value: m.value, plus: m.at_least }] : []
+  })
+  return known.reduce<(typeof known)[number] | null>((a, b) => (a === null || b.value > a.value ? b : a), null)
+}
+
+/** Controllers in the plan that manage fewer devices than the plan has, which a bigger one would replace. */
+export function undersized(lines: DerivedLine[], hosting: Hosting = {}): DerivedLine[] {
+  return roleCheck(lines, hosting).flatMap((c) => {
+    const role = c.roleShortfall
+    const cap = role && CAPACITY[role]
+    if (!role || !cap || !c.id.endsWith('-capacity')) return []
+    return lines.filter((l) => l.view.state === 'in' && fills(l.view.product?.type, l.derived, role) && (metricOf(l.derived, cap.metric)?.value ?? 0) > 0)
+  })
+}
+
+function capacityCheck(role: Role, noun: string, need: number, live: DerivedLine[], best: ReturnType<typeof capacityOf>): PlanCheck {
+  const base = { id: `role-${role}-capacity`, label: `${ROLE_LABEL[role]} capacity` }
+  if (!best) return { ...base, verdict: 'unknown', text: `Can't tell how many ${noun} ${live.map(name).join(', ')} manages: the store doesn't say. The plan has ${need}.` }
+  const shown = `${best.value.toLocaleString('en-US')}${best.plus ? '+' : ''}`
+  if (need <= best.value) return { ...base, verdict: 'ok', text: `${need} ${noun} in the plan; ${name(best.line)} manages ${shown}.` }
+  if (best.plus) return { ...base, verdict: 'warn', roleShortfall: role, text: `The plan has ${need} ${noun}, but ${name(best.line)} is only listed for ${shown}, so it may not manage them all.` }
+  return { ...base, verdict: 'bad', roleShortfall: role, text: `The plan has ${need} ${noun}, over the ${shown} that ${name(best.line)} manages.` }
 }
 
 /**
  * Whether the plan has something to fill each role it needs, and which role is missing when it hasn't. A role
  * only filled by something that can't be bought now counts as missing too (with a warning that says so).
  */
-export function roleCheck(lines: DerivedLine[]): PlanCheck[] {
+export function roleCheck(lines: DerivedLine[], hosting: Hosting = {}): PlanCheck[] {
   const out: PlanCheck[] = []
   for (const role of ROLES) {
+    if (role === 'network') {
+      // A site has one Network controller. Two probably means one belongs to another site (or a mistake).
+      const runners = lines.filter((l) => fills(l.view.product?.type, l.derived, 'network'))
+      const count = qtyOf(runners) + (hosting.network ? 1 : 0)
+      if (count > 1) {
+        const names = [...runners.map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)}`), ...(hosting.network ? [hosting.network === 'self' ? 'a self-hosted controller' : 'UniFi cloud hosting'] : [])]
+        out.push({ id: 'role-network-many', label: 'Network controllers', verdict: 'warn', text: `${count} things in the plan run UniFi Network (${names.join(', ')}). A site has one Network controller, so the extra ones probably belong to another site; only the largest is counted here.` })
+      }
+    }
     if (needers(lines, role).length === 0) continue
+    // A controller the owner has decided to run elsewhere is filled, whatever the plan holds.
+    const where = role === 'gateway' ? undefined : hosting[role]
+    if (role !== 'gateway' && where) {
+      const text = where === 'self' ? `Self-hosted: you run ${APP_NAME[role]} yourself (UniFi OS Server, or the application on a machine of your own). How many devices it manages isn't checked.` : `UniFi cloud hosting runs ${APP_NAME[role]} for you. How many devices it manages isn't checked.`
+      out.push({ id: `role-${role}`, label: ROLE_LABEL[role], verdict: 'ok', hosted: role, text })
+      continue
+    }
     const by = lines.filter((l) => fills(l.view.product?.type, l.derived, role))
     const live = by.filter((l) => l.view.state === 'in')
     const base = { id: `role-${role}`, label: ROLE_LABEL[role] }
     if (by.length === 0) out.push({ ...base, verdict: 'warn', roleShortfall: role, text: MISSING[role](needers(lines, role)) })
     else if (live.length === 0) out.push({ ...base, verdict: 'warn', roleShortfall: role, text: `${by.map(name).join(', ')} ${by.length === 1 ? "isn't" : "aren't"} in stock, so nothing in the plan that can be had fills this role.` })
-    else out.push({ ...base, verdict: 'ok', text: FILLED[role](live) })
+    else {
+      out.push({ ...base, verdict: 'ok', text: FILLED[role](live) })
+      const cap = CAPACITY[role]
+      const need = cap ? qtyOf(cap.counted(lines)) : 0
+      if (cap && need > 0) out.push(capacityCheck(role, cap.noun, need, live, capacityOf(live, cap.metric)))
+    }
   }
   return out
 }

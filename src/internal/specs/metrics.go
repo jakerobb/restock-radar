@@ -111,6 +111,7 @@ func deriveMetrics(ix *index, r *Result) {
 	deriveCoverage(ix, r)
 	deriveCameras(ix, r)
 	deriveApps(ix, r)
+	deriveManaged(ix, r)
 
 	if e, ok := ix.scalar("WiFi Standard", "WiFi Standards"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
@@ -491,10 +492,16 @@ var appNames = map[string]string{"network": "network", "protect": "protect", "ac
 
 // deriveApps reads which UniFi applications a product runs, as app_network, app_protect, app_access and
 // app_talk (1 each): a gateway or console lists them as flags under "UniFi Application Suite", and an NVR
-// names them in "Management Application". A camera, reader or phone names the applications that manage
-// it in the same places, so those count only for products that manage cameras or access hubs, and the
-// scalar form of the suite is ignored.
+// names them in "Management Application". Products that are only managed by an application say the same
+// things (a phone's suite lists Talk, a camera's lists Protect, a reader's names Access), so either counts
+// only for a product that says how many devices, cameras or access hubs it manages.
 func deriveApps(ix *index, r *Result) {
+	_, devices := ix.scalar("Managed UniFi Devices")
+	_, cameras := ix.scalar("Managed Cameras")
+	_, hubs := ix.scalar("Managed Access Hubs")
+	if !devices && !cameras && !hubs {
+		return
+	}
 	seen := map[string]bool{}
 	add := func(app, raw string) {
 		if !seen[app] {
@@ -507,14 +514,36 @@ func deriveApps(ix *index, r *Result) {
 			add(app, "UniFi Application Suite: "+strings.TrimSpace(e.Label))
 		}
 	}
-	_, cameras := ix.scalar("Managed Cameras")
-	_, hubs := ix.scalar("Managed Access Hubs")
-	if e, ok := ix.scalar("Management Application"); ok && (cameras || hubs) {
+	if e, ok := ix.scalar("Management Application"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
 		for word, app := range appNames {
 			if strings.Contains(strings.ToLower(text), word) {
 				add(app, text)
 			}
 		}
+	}
+}
+
+var managedRe = regexp.MustCompile(`^\s*(\d[\d,]*)\s*(\+?)`)
+
+// deriveManaged reads how many UniFi devices a console manages (managed_devices) and how many access hubs
+// (managed_access_hubs), as published: "100+" is at least 100.
+func deriveManaged(ix *index, r *Result) {
+	for _, m := range []struct{ label, name string }{{"Managed UniFi Devices", "managed_devices"}, {"Managed Access Hubs", "managed_access_hubs"}} {
+		e, ok := ix.scalar(m.label)
+		if !ok {
+			continue
+		}
+		lines := Lines(e.Value)
+		if len(lines) == 0 {
+			continue
+		}
+		g := managedRe.FindStringSubmatch(lines[0])
+		if g == nil {
+			ix.issue("metrics", e, "no device count")
+			continue
+		}
+		n, _ := num(g[1])
+		r.Metrics = append(r.Metrics, Metric{Name: m.name, Value: n, Unit: "devices", AtLeast: g[2] == "+", Raw: strings.Join(lines, " | ")})
 	}
 }

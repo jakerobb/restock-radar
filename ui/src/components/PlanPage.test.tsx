@@ -123,6 +123,39 @@ describe('Find a gateway or controller', () => {
   })
 })
 
+describe('Running a controller elsewhere', () => {
+  const setup = () => {
+    const prods = [
+      product({ id: 'a', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'a', num: 1, sku: 'AP-1', price_cents: 15000 })] }),
+      product({ id: 'g', slug: 'gw', title: 'The Gateway', type: 'Gateways', variants: [variant({ id: 'g', num: 2, sku: 'GW-1', price_cents: 30000 })] }),
+    ]
+    const ds = [
+      derived({ slug: 'ap', known, ports: [port({ count: 1 })], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] }),
+      derived({ slug: 'gw', known, ports: [port({ count: 4 })], metrics: [{ name: 'ids_ips_throughput_mbps', value: 5000, unit: 'Mbps', at_least: false, raw: '' }, { name: 'app_network', value: 1, unit: '', at_least: false, raw: '' }] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products: prods }) }, 'GET /v1/derived': { body: ds } })
+    setPlan([line({ ref: 'us/ap', sku: 'AP-1', qty: 1, addedCents: 15000 })])
+  }
+
+  it('self-hosts the Network controller from the finder, keeps it, and can undo it', async () => {
+    setup()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Find a gateway or controller' }))
+    const finder = await screen.findByLabelText('Find a gateway or controller')
+    // The product's name is in the link, not repeated in the gray line under it.
+    expect(within(finder).getAllByText(/The Gateway/)).toHaveLength(1)
+    expect(finder).toHaveTextContent('5 Gbps gateway')
+    await user.click(within(finder).getByRole('button', { name: 'Self-host UniFi Network' }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('Self-hosted: you run UniFi Network yourself'))
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan-hosting')!)).toEqual({ network: 'self' })
+    // Only the gateway is still missing, and it can't be run elsewhere.
+    expect(within(screen.getByLabelText('Find a gateway or controller')).queryByRole('button', { name: /Self-host/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('No Network controller in the plan'))
+  })
+})
+
 describe('Add product on the plan page', () => {
   it('puts the cursor in the search box, so you can type at once', async () => {
     catalog()
