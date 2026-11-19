@@ -93,14 +93,16 @@ function readVarint(bytes: number[], at: number): { value: number; next: number 
 
 /**
  * Where a controller is run when it isn't a product, in a slug: a number no variant has, above 2^30, for each
- * (role, where) with a quantity of 1 after it, following the lines.
+ * role that is self-hosted with a quantity of 1 after it, following the lines.
  */
 const HOSTING_BASE = 2 ** 30
-const hostingNumber = (role: (typeof HOSTED_ROLES)[number], where: 'cloud' | 'self') => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2 + (where === 'cloud' ? 1 : 0)
-const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'cloud' | 'self'] | null => {
+const hostingNumber = (role: (typeof HOSTED_ROLES)[number]) => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2
+/** The role a number stands for; null for one that isn't self-hosting (an odd number was cloud hosting, once, before it became a product). */
+const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'self'] | 'ignore' | null => {
   const i = num - HOSTING_BASE
   const role = HOSTED_ROLES[Math.floor(i / 2)]
-  return i >= 0 && role ? [role, i % 2 === 1 ? 'cloud' : 'self'] : null
+  if (i < 0 || !role) return null
+  return i % 2 === 0 ? [role, 'self'] : 'ignore'
 }
 
 /** The variants by number: which product (as "region/slug") and which SKU each is. */
@@ -127,7 +129,7 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosti
   for (const role of HOSTED_ROLES) {
     const where = hosting[role]
     if (!where) continue
-    writeVarint(bytes, hostingNumber(role, where))
+    writeVarint(bytes, hostingNumber(role))
     writeVarint(bytes, 1)
   }
   return toBase64Url(bytes)
@@ -162,7 +164,7 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     at = qty.next
     const host = hostingOf(num.value)
     if (host) {
-      hosting[host[0]] = host[1]
+      if (host !== 'ignore') hosting[host[0]] = host[1]
       continue
     }
     const target = byNum.get(num.value)

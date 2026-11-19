@@ -24,7 +24,7 @@ function loadHosting(): Hosting {
     const out: Hosting = {}
     if (raw && typeof raw === 'object') for (const role of HOSTED_ROLES) {
       const v = (raw as Record<string, unknown>)[role]
-      if (v === 'cloud' || v === 'self') out[role] = v
+      if (v === 'self') out[role] = v
     }
     return out
   } catch {
@@ -46,7 +46,7 @@ export function setPlan(next: PlanLine[]): void {
   listeners.forEach((l) => l())
 }
 
-/** The controllers the plan runs elsewhere (cloud hosting, or self-hosted). The same object is returned until it changes. */
+/** The controllers the plan runs elsewhere (self-hosted). The same object is returned until it changes. */
 export const getHosting = (): Hosting => (currentHosting ??= loadHosting())
 
 export function setHosting(next: Hosting): void {

@@ -2,7 +2,7 @@ import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
 import { lineFor, viewLine } from './plan'
 import { planChecks, type DerivedLine } from './planChecks'
-import { appsRun, fills, HOSTED_ROLES, needers, ROLES, roleCheck, undersized, type HostedRole, type Hosting, type Role } from './roles'
+import { appsRun, fills, isGatewayProduct, HOSTED_ROLES, needers, ROLES, roleCheck, undersized, type HostedRole, type Hosting, type Role } from './roles'
 
 /** One or two products that, added to the plan, fill the roles nothing in it does. */
 export interface RoleOption {
@@ -32,7 +32,7 @@ type Fit = Omit<ListedRole, 'replaces' | 'undersized'>
 export interface RoleSuggestions {
   /** What was missing (after leaving out what can't be bought now). */
   missing: Role[]
-  /** The missing roles that can be run in the cloud or on your own machine instead of on a product. */
+  /** The missing roles that can be run on a machine of your own instead of on a product. */
   hostable: HostedRole[]
   options: RoleOption[]
   /** Every product or pair that fills them, in stock or not, cheapest first. */
@@ -50,7 +50,7 @@ const refOf = (r: CatalogRow) => `${r.product.region}/${r.product.slug}`
  * else (see `hostable`), which isn't a product. Adding a product mustn't leave the switch ports short.
  */
 export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, hosting: Hosting = {}): RoleSuggestions {
-  const filling = (l: DerivedLine) => ROLES.some((r) => needers(fullPlan, r).length > 0 && fills(l.view.product?.type, l.derived, r))
+  const filling = (l: DerivedLine) => ROLES.some((r) => needers(fullPlan, r).length > 0 && fills(l.view.product, l.derived, r))
   const small = undersized(fullPlan, hosting)
   const replaces = [...new Set([...fullPlan.filter((l) => l.view.state !== 'in' && filling(l)), ...small])]
   const plan = fullPlan.filter((l) => !replaces.includes(l))
@@ -62,7 +62,7 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
   const gone = new Set(replaces.map((l) => l.view.line.ref))
 
   const cands = rows
-    .filter((r) => !gone.has(refOf(r)) && (regions.size === 0 || regions.has(r.product.region)) && missing.some((role) => fills(r.product.type, r.derived, role)))
+    .filter((r) => !gone.has(refOf(r)) && (regions.size === 0 || regions.has(r.product.region)) && missing.some((role) => fills(r.product, r.derived, role)))
     .flatMap((row) => {
       const line = lineFor(row.product, 1)
       if (!line) return []
@@ -102,7 +102,7 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
   })
 
   const price = (f: Fit) => f.cents ?? Infinity
-  const apps = (f: Fit) => f.rows.reduce((n, r) => n + appsRun(r.derived).length + (r.product.type === 'Gateways' ? 1 : 0), 0)
+  const apps = (f: Fit) => f.rows.reduce((n, r) => n + appsRun(r.product, r.derived).length + (isGatewayProduct(r.product, r.derived) ? 1 : 0), 0)
   const best = (xs: Fit[], by: (f: Fit) => number) => xs.reduce<Fit | undefined>((a, b) => (a === undefined || by(b) < by(a) ? b : a), undefined)
   // Those that can be shown to manage the plan's devices come first; the rest only when there are none (they stay in the full list).
   const verified = fits.filter((f) => !f.unverified)
