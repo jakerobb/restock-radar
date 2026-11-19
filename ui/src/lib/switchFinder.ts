@@ -78,7 +78,8 @@ export interface Fits {
  * the plan page uses, so each switch's own budget counts). Suggests the cheapest that is in stock, the
  * cheapest that runs every device at full speed, and the one with the most room to spare, when those differ.
  * When no one model fits, or a pair undercuts the one that does, two different switches are tried too (up to two of each).
- * A switch with no known PoE budget is never suggested: unknown is not a fit. Nor is one that leaves a device
+ * Each switch added needs an uplink too, and every device that isn't PoE-powered a port, so those must be covered; and when the plan
+ * only falls short of SFP uplinks, a switch must give more of them. A switch with no known PoE budget is never suggested: unknown is not a fit. Nor is one that leaves a device
  * below 1 GbE (or below its own speed, if lower), and when the plan only falls short on speed, one that doesn't
  * speed anything up.
  */
@@ -94,9 +95,12 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   // What the plan needs from a switch: PoE (power and ports), and a port for each device that isn't PoE-powered.
   const needsPoe = plan.some(isPoePowered)
   const needsPorts = before.some((c) => c.id === 'net-ports')
+  // When only some switch with cages is uplinked over copper, a switch is worth suggesting only if it cuts that down (any switch will do, PoE or not).
+  const sfpBefore = before.find((c) => c.id === 'net-sfp')?.net?.sfpMisses ?? 0
+  const sfpOnly = sfpBefore > 0 && before.every((c) => c.id === 'net-sfp' || !c.shortfall)
   if (!needsPoe && !needsPorts) return { fits: [], pairs: [], replaces }
   const cands = rows.filter(
-    (row) => row.product.type === 'Switches' && !!row.derived?.known.ports && (!needsPoe || (hasPoeOut(row) && hasBudget(row))) && (regions.size === 0 || regions.has(row.product.region)),
+    (row) => row.product.type === 'Switches' && !!row.derived?.known.ports && (!needsPoe || sfpOnly || (hasPoeOut(row) && hasBudget(row))) && (regions.size === 0 || regions.has(row.product.region)),
   )
 
   /** The plan with these switches added: a Fit when its PoE power and ports check out, otherwise null. */
@@ -119,9 +123,11 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
     const ports = checks.find((c) => c.id === 'poe-ports')
     const poeStats = checks.find((c) => c.id === 'poe-layout')?.stats
     if (needsPoe && (!power || !ports || !poeStats || power.verdict === 'bad' || ports.verdict === 'bad' || poeStats.stranded > 0)) return null
-    // Every device that isn't PoE-powered needs a port too.
+    // Every device that isn't PoE-powered, and every switch (for its uplink), needs a port too.
     const net = checks.find((c) => c.id === 'net-ports')
-    if (needsPorts && (!net || net.verdict === 'bad' || net.shortfall)) return null
+    if (net && (net.verdict === 'bad' || net.shortfall)) return null
+    if (needsPorts && !net) return null
+    if (sfpOnly && (net?.net?.sfpMisses ?? 0) >= sfpBefore) return null
     const stats: PoeStats = { ...(needsPoe ? poeStats! : NO_POE), netSpare: net?.net?.spare ?? null }
     // Never recommend a switch that leaves devices crawling (an access point on a 100 Mbps port), however cheap.
     if (stats.crawling > 0 || (slowedBefore > 0 && stats.slowed >= slowedBefore)) return null
