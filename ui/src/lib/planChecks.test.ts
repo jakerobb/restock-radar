@@ -355,6 +355,37 @@ describe('a switch powered over PoE', () => {
   })
 })
 
+describe('a switch powered over PoE has the budget of the port it is on', () => {
+  const scenarios = [{ name: 'PoE+ input', watts: 16, selected: false }, { name: 'PoE++ input', watts: 46, selected: false }, { name: '210W AC adapter input', watts: 196, selected: true }]
+  const flex = () => item('flex', 1, { ports: [poeOut(8, 'PoE++'), port({ count: 1, poe_class: 'PoE+++', poe_direction: 'in' })], poe_budget: scenarios, power: [{ kind: 'ac', poe_class: '', detail: '(1) AC/DC adapter (Excluded)' }], metrics: [metric('poe_budget_w', 196), metric('power_draw_excl_poe_w', 17)] })
+  const up = (cls: string) => item('up', 1, { ports: [poeOut(8, cls)], metrics: [metric('poe_budget_w', 400)] })
+  const run = (lines: DerivedLine[]) => {
+    const f = lines.find((l) => l.view.line.ref === 'us/flex')!
+    return Object.fromEntries(planChecks(lines, {}, { [lineKey(f.view.line)]: scenarioCode('PoE input') }).map((c) => [c.id, c]))
+  }
+
+  it('gets the PoE++ budget from a PoE++ port, and only the PoE+ one from a PoE+ port', () => {
+    // Four 13 W devices (52 W) on the Flex: 46 W is too little, 16 W is less, and the Flex's own 17 W is in the upstream's budget.
+    const on46 = run([up('PoE++'), flex(), ap(3)])
+    expect(on46['poe-power']?.verdict).toBe('ok')
+    expect(on46['poe-layout']?.stats?.stranded).toBe(0)
+    // On a PoE+ port it has 16 W to pass on: one 13 W device fits on it, and the rest must go on the upstream.
+    const onPlus = run([up('PoE+'), flex(), ap(3)])
+    expect(onPlus['poe-power']?.verdict).toBe('ok')
+    expect(onPlus['poe-layout']?.detail?.some((b) => b.title.startsWith('flex:') && b.title.includes('of 16 W'))).toBe(true)
+    expect(on46['poe-layout']?.detail?.some((b) => b.title.startsWith('flex:') && b.title.includes('of 46 W'))).toBe(true)
+  })
+
+  it('takes the best port left, not the lowest that will do', () => {
+    const c = run([item('up', 1, { ports: [poeOut(4, 'PoE+'), poeOut(4, 'PoE++')], metrics: [metric('poe_budget_w', 400)] }), flex(), ap(1)])
+    expect(c['poe-layout']?.detail?.some((b) => b.title.startsWith('flex:') && b.title.includes('of 46 W'))).toBe(true)
+  })
+
+  it('cannot be powered by a port below the lowest input it takes', () => {
+    expect(run([up('PoE'), flex(), ap(1)])['poe-power']?.verdict).toBe('bad')
+  })
+})
+
 describe('the overall answer', () => {
   const c = (verdict: PlanCheck['verdict']): PlanCheck => ({ id: verdict, label: verdict, verdict, text: '' })
   it('is yes when all pass, mostly with warnings or unknowns, no with a problem, and nothing for notes alone', () => {

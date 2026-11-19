@@ -248,6 +248,14 @@ export function setAddOn(plan: PlanLine[], options: Product[], chosen: Product |
   return line ? addLine(kept.filter((l) => l.ref !== line.ref), line) : kept
 }
 
+/** Replaces a line with another product's, where it was (or into the line already in the plan for that product). */
+export function replaceLine(plan: PlanLine[], key: string, line: PlanLine): PlanLine[] {
+  const old = plan.find((l) => lineKey(l) === key)
+  if (!old) return plan
+  if (plan.some((l) => lineKey(l) === lineKey(line))) return addLine(removeLine(plan, key), line)
+  return plan.map((l) => (l === old ? line : l))
+}
+
 /** Makes sure the plan has at least `qty` of a product (one more line, or a bigger quantity on its line), which is what an adapter for each switch needs. */
 export function ensureQty(plan: PlanLine[], p: Product, qty: number): PlanLine[] {
   const line = lineFor(p, qty)
