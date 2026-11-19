@@ -538,6 +538,7 @@ func appsOf(r Result) (apps []string) {
 
 func TestApplicationsAGatewayOrConsoleRuns(t *testing.T) {
 	b := &builder{}
+	b.text("Overview", "Managed UniFi Devices", "100+")
 	g := b.add("Overview", "", "UniFi Application Suite", unistore.SpecGroup, "", "")
 	for _, a := range []string{"Network", "Protect", "Talk", "Connect"} {
 		b.add("Overview", g, a, unistore.SpecFlag, "true", "")
@@ -554,6 +555,16 @@ func TestApplicationsAnNVRNamesInText(t *testing.T) {
 	b.text("Overview", "Management Application", "UniFi Protect /  UniFi Access /  UniFi Connect")
 	if got := appsOf(b.derive()); !jsonEqual(got, []string{"protect", "access"}) {
 		t.Errorf("apps = %v", got)
+	}
+}
+
+func TestApplicationsAPhoneListsTalkButDoesNotRunIt(t *testing.T) {
+	// A phone's suite lists Talk as a flag, the same way a gateway's does, but it manages nothing.
+	b := &builder{}
+	g := b.add("Overview", "", "UniFi Application Suite", unistore.SpecGroup, "", "")
+	b.add("Overview", g, "Talk", unistore.SpecFlag, "true", "")
+	if got := appsOf(b.derive()); len(got) != 0 {
+		t.Errorf("a phone's apps = %v", got)
 	}
 }
 

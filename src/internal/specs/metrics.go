@@ -492,10 +492,16 @@ var appNames = map[string]string{"network": "network", "protect": "protect", "ac
 
 // deriveApps reads which UniFi applications a product runs, as app_network, app_protect, app_access and
 // app_talk (1 each): a gateway or console lists them as flags under "UniFi Application Suite", and an NVR
-// names them in "Management Application". A camera, reader or phone names the applications that manage
-// it in the same places, so those count only for products that manage cameras or access hubs, and the
-// scalar form of the suite is ignored.
+// names them in "Management Application". Products that are only managed by an application say the same
+// things (a phone's suite lists Talk, a camera's lists Protect, a reader's names Access), so either counts
+// only for a product that says how many devices, cameras or access hubs it manages.
 func deriveApps(ix *index, r *Result) {
+	_, devices := ix.scalar("Managed UniFi Devices")
+	_, cameras := ix.scalar("Managed Cameras")
+	_, hubs := ix.scalar("Managed Access Hubs")
+	if !devices && !cameras && !hubs {
+		return
+	}
 	seen := map[string]bool{}
 	add := func(app, raw string) {
 		if !seen[app] {
@@ -508,9 +514,7 @@ func deriveApps(ix *index, r *Result) {
 			add(app, "UniFi Application Suite: "+strings.TrimSpace(e.Label))
 		}
 	}
-	_, cameras := ix.scalar("Managed Cameras")
-	_, hubs := ix.scalar("Managed Access Hubs")
-	if e, ok := ix.scalar("Management Application"); ok && (cameras || hubs) {
+	if e, ok := ix.scalar("Management Application"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
 		for word, app := range appNames {
 			if strings.Contains(strings.ToLower(text), word) {
