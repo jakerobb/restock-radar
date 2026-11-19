@@ -116,21 +116,21 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
 
     it('roots the tree at the switch with the most SFP cages, which uplinks to the gateway; the others uplink to it', () => {
       const lines = [leaf('a'), leaf('b'), agg(), gw([{ count: 4 }, sfp(1)])]
-      expect(rows(lines, 'Uplinks')).toEqual(['agg → gw (root): 10 GbE SFP', 'a → agg: 10 GbE SFP', 'b → agg: 10 GbE SFP'])
+      expect(rows(lines, 'Uplinks')).toEqual(['agg → gw (root): 10 GbE SFP+', 'a → agg: 10 GbE SFP+', 'b → agg: 10 GbE SFP+'])
       expect(sfpCheck(lines)).toBeUndefined()
     })
 
     it('prefers a cage on the gateway, and a cage for every switch that has one', () => {
       const lines = [leaf('a'), gw([{ count: 4 }, sfp(1)])]
-      expect(rows(lines, 'Uplinks')).toEqual(['a → gw (root): 10 GbE SFP'])
+      expect(rows(lines, 'Uplinks')).toEqual(['a → gw (root): 10 GbE SFP+'])
     })
 
     it('keeps the tree flat: switches go on the root while it has a port, even a copper one, and warn for want of a cage', () => {
       // The root has one free cage after the gateway; the other two leaves with cages go over copper to the root, not deeper.
       const lines = [leaf('a', 1), leaf('b', 1), leaf('c', 1), sw([{ count: 8 }, sfp(2)], 'root'), gw([{ count: 4 }, sfp(1)])]
       const w = sfpCheck(lines)
-      expect(rows(lines, 'Uplinks')?.[0]).toBe('root → gw (root): 10 GbE SFP')
-      expect(rows(lines, 'Uplinks')?.filter((r) => r.includes('→ root'))).toHaveLength(3)
+      expect(rows(lines, 'Uplinks')?.[0]).toBe('root → gw (root): 10 GbE SFP+')
+      expect(rows(lines, 'Uplinks')?.filter((r) => typeof r === 'string' && r.includes('→ root'))).toHaveLength(3)
       expect(w).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining('aggregation switch') })
       expect(w?.net?.sfpMisses).toBe(2)
     })
@@ -138,7 +138,7 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     it('goes a level deeper only when the root is full, and warns', () => {
       const lines = [leaf('a', 1), leaf('b', 1), sw([sfp(2)], 'root'), gw([{ count: 4 }, sfp(1)])]
       // root: 2 cages, one to the gateway, one to a; b has no port on the root left, so it goes to a.
-      expect(rows(lines, 'Uplinks')).toEqual(['root → gw (root): 10 GbE SFP', 'a → root: 10 GbE SFP', 'b → a: 1 GbE copper'])
+      expect(rows(lines, 'Uplinks')).toEqual(['root → gw (root): 10 GbE SFP+', 'a → root: 10 GbE SFP+', 'b → a: 1 GbE copper'])
       expect(sfpCheck(lines)?.text).toContain('b has SFP ports')
     })
 
@@ -167,7 +167,7 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     it('counts a switch quantity as separate switches, each with an uplink', () => {
       const lines = [sw([{ count: 8 }, sfp(1)], 'pair', 2), gw([{ count: 4 }, sfp(2)])]
       // The first one's only cage goes to the gateway, so the second goes over copper (and the plan is told).
-      expect(rows(lines, 'Uplinks')).toEqual(['pair #1 → gw (root): 10 GbE SFP', 'pair #2 → pair #1: 1 GbE copper'])
+      expect(rows(lines, 'Uplinks')).toEqual(['pair #1 → gw (root): 10 GbE SFP+', 'pair #2 → pair #1: 1 GbE copper'])
       expect(sfpCheck(lines)?.text).toContain('pair #2 has SFP ports')
     })
   })

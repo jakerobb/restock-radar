@@ -209,9 +209,12 @@ describe('planChecks', () => {
     it('spells out which ports each device takes, how many are spare, and which run slower', () => {
       const detail = byId([e7(12), hd])['poe-layout']?.detail
       expect(detail).toHaveLength(1)
-      expect(detail![0]).toMatchObject({ title: 'hd: 516 of 600 W', rows: ['24 × 10 GbE PoE++ ports: 12 × e7, 12 spare'] })
+      expect(detail![0]).toMatchObject({ title: 'hd: 516 of 600 W', rows: [{ text: '24 × 10 GbE PoE++ ports:', items: ['12 × e7', '12 spare'] }] })
       const mixed = item('mixed', 1, { ports: [port({ count: 2, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'out' }), port({ count: 4, max_speed_mbps: 2500, poe_class: 'PoE++', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 600)] })
-      expect(byId([e7(3), mixed])['poe-layout']?.detail?.[0]?.rows).toEqual(['2 × 10 GbE PoE++ ports: 2 × e7', '4 × 2.5 GbE PoE++ ports: 1 × e7 (runs at 2.5 GbE), 3 spare'])
+      expect(byId([e7(3), mixed])['poe-layout']?.detail?.[0]?.rows).toEqual([
+        { text: '2 × 10 GbE PoE++ ports:', items: ['2 × e7'] },
+        { text: '4 × 2.5 GbE PoE++ ports:', items: ['1 × e7 (runs at 2.5 GbE)', '3 spare'] },
+      ])
     })
 
     it('lists devices that fit nowhere', () => {

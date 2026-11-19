@@ -9,6 +9,9 @@ import { formatSpeed, POE_CLASSES } from './requirements'
 /** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
 export type CheckVerdict = 'ok' | 'bad' | 'warn' | 'unknown' | 'info'
 
+/** A line of a breakdown: plain, or with a list under it. */
+export type DetailRow = string | { text: string; items: string[] }
+
 export interface PlanCheck {
   id: string
   label: string
@@ -17,7 +20,7 @@ export interface PlanCheck {
   /** The same, laid out as a list of points, each with a list under it (`text` is those run together). */
   groups?: { text: string; ordered?: boolean; items?: string[] }[]
   /** A breakdown to show on request, as blocks of lines (one block per switch, say). */
-  detail?: { title: string; rows: string[] }[]
+  detail?: { title: string; rows: DetailRow[] }[]
   /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
   shortfall?: boolean
   /** True when there are cameras and no NVR with room for them, which an NVR could fix. */
@@ -287,7 +290,7 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
 
   // Each device on a port group, spelled out: one valid arrangement, not the only one.
   const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
-  const detail = units.map((u, k) => {
+  const detail: NonNullable<PlanCheck['detail']> = units.map((u, k) => {
     const used = placing.reduce((n, d, i) => n + (placed[i]?.unit === k ? d.draw : 0), 0)
     const rows = groups.flatMap((g, gi) => {
       if (g.unit !== k) return []
@@ -302,7 +305,7 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
       })
       const what = [...on].map(([nm, c]) => `${c} × ${nm}`)
       if (taken < g.count) what.push(`${g.count - taken} spare`)
-      return [`${g.count} × ${g.label} ports: ${what.join(', ')}`]
+      return [{ text: `${g.count} × ${g.label} ports:`, items: what }]
     })
     return { title: `${label(u)}: ${used} of ${budgets[k] === Infinity ? '?' : budgets[k]} W`, rows }
   })
