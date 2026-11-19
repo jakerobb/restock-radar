@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
 var (
@@ -108,6 +110,7 @@ func deriveMetrics(ix *index, r *Result) {
 
 	deriveCoverage(ix, r)
 	deriveCameras(ix, r)
+	deriveApps(ix, r)
 
 	if e, ok := ix.scalar("WiFi Standard", "WiFi Standards"); ok {
 		text := strings.Join(Lines(e.Value), " | ")
@@ -480,5 +483,38 @@ func deriveCameras(ix *index, r *Result) {
 	}
 	if have {
 		r.Metrics = append(r.Metrics, Metric{Name: "camera_megapixels", Value: best, Unit: "MP", Raw: raw})
+	}
+}
+
+// appNames maps the words the store uses for UniFi applications to the app_ metrics' suffixes.
+var appNames = map[string]string{"network": "network", "protect": "protect", "access": "access", "talk": "talk"}
+
+// deriveApps reads which UniFi applications a product runs, as app_network, app_protect, app_access and
+// app_talk (1 each): a gateway or console lists them as flags under "UniFi Application Suite", and an NVR
+// names them in "Management Application". A camera, reader or phone names the applications that manage
+// it in the same places, so those count only for products that manage cameras or access hubs, and the
+// scalar form of the suite is ignored.
+func deriveApps(ix *index, r *Result) {
+	seen := map[string]bool{}
+	add := func(app, raw string) {
+		if !seen[app] {
+			seen[app] = true
+			r.Metrics = append(r.Metrics, Metric{Name: "app_" + app, Value: 1, Unit: "", Raw: raw})
+		}
+	}
+	for _, e := range ix.group("UniFi Application Suite") {
+		if app, ok := appNames[key(e.Label)]; ok && e.Kind == unistore.SpecFlag && e.Value == "true" {
+			add(app, "UniFi Application Suite: "+strings.TrimSpace(e.Label))
+		}
+	}
+	_, cameras := ix.scalar("Managed Cameras")
+	_, hubs := ix.scalar("Managed Access Hubs")
+	if e, ok := ix.scalar("Management Application"); ok && (cameras || hubs) {
+		text := strings.Join(Lines(e.Value), " | ")
+		for word, app := range appNames {
+			if strings.Contains(strings.ToLower(text), word) {
+				add(app, text)
+			}
+		}
 	}
 }

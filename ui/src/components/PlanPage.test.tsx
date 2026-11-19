@@ -88,13 +88,38 @@ describe('Find an NVR', () => {
     const user = userEvent.setup()
     setPlan([line({ ref: 'us/cam', sku: 'CAM-1', qty: 4, addedCents: 15000 })])
     renderRoute('/plan')
-    expect(await screen.findByLabelText('Checks')).toHaveTextContent('4 cameras in the plan, and no NVR to record them.')
+    expect(await screen.findByLabelText('Checks')).toHaveTextContent('4 cameras in the plan, and no NVR (Protect controller) to record them.')
     await user.click(screen.getByRole('button', { name: 'Find an NVR' }))
     const finder = await screen.findByLabelText('Find an NVR')
     expect(finder).toHaveTextContent('Cheapest that fits')
     await user.click(within(finder).getByRole('button', { name: 'Add The NVR to the plan' }))
     await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('4 cameras use 22% of the NVR’s capacity.'))
     expect(screen.queryByRole('button', { name: 'Find an NVR' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Find a gateway or controller', () => {
+  it('notes the missing gateway and Network controller, and adds a product that fills both', async () => {
+    const prods = [
+      product({ id: 'a', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'a', num: 1, sku: 'AP-1', price_cents: 15000 })] }),
+      product({ id: 'g', slug: 'gw', title: 'The Gateway', type: 'Gateways', variants: [variant({ id: 'g', num: 2, sku: 'GW-1', price_cents: 30000 })] }),
+    ]
+    const ds = [
+      derived({ slug: 'ap', known, ports: [port({ count: 1 })], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] }),
+      derived({ slug: 'gw', known, ports: [port({ count: 4 })], metrics: [{ name: 'app_network', value: 1, unit: '', at_least: false, raw: '' }] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products: prods }) }, 'GET /v1/derived': { body: ds } })
+    const user = userEvent.setup()
+    setPlan([line({ ref: 'us/ap', sku: 'AP-1', qty: 1, addedCents: 15000 })])
+    renderRoute('/plan')
+    expect(await screen.findByLabelText('Checks')).toHaveTextContent('No gateway in the plan')
+    expect(screen.getByLabelText('Checks')).toHaveTextContent('No Network controller in the plan')
+    await user.click(screen.getByRole('button', { name: 'Find a gateway or controller' }))
+    const finder = await screen.findByLabelText('Find a gateway or controller')
+    await user.click(within(finder).getByRole('button', { name: 'Add The Gateway to the plan' }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('The Gateway is the gateway.'))
+    expect(screen.getByLabelText('Checks')).toHaveTextContent('The Gateway runs UniFi Network.')
+    expect(screen.queryByRole('button', { name: /Find a gateway/ })).not.toBeInTheDocument()
   })
 })
 

@@ -2,6 +2,7 @@ import type { Derived } from '../api/types'
 import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
+import { roleCheck, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
 /** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
@@ -18,6 +19,8 @@ export interface PlanCheck {
   shortfall?: boolean
   /** True when there are cameras and no NVR with room for them, which an NVR could fix. */
   nvrShortfall?: boolean
+  /** On a role check: the role (a gateway, a Network controller...) nothing in the plan that can be had fills, which a product could fix. */
+  roleShortfall?: Role
   /** On the NVR check: how the cameras came out. */
   nvr?: NvrStats
   /** On the switch-port check: how the devices that aren't PoE-powered came out. */
@@ -364,5 +367,5 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
  */
 export function planChecks(lines: DerivedLine[]): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...rackCheck(lines)]
+  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...roleCheck(lines), ...rackCheck(lines)]
 }

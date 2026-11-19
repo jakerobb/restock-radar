@@ -65,7 +65,7 @@ describe('the NVR check', () => {
 
   it('notes the absence of an NVR and says it can be fixed', () => {
     const s = setup([UNVR, cam('c4k', 8.3)])
-    expect(find(s, ['c4k', 3])).toMatchObject({ verdict: 'warn', nvrShortfall: true, text: '3 cameras in the plan, and no NVR to record them.' })
+    expect(find(s, ['c4k', 3])).toMatchObject({ verdict: 'warn', nvrShortfall: true, text: '3 cameras in the plan, and no NVR (Protect controller) to record them.' })
   })
 
   it('adds up each camera as a share of the NVR by class: four 4K and ten 2K on a UNVR', () => {
