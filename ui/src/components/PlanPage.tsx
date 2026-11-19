@@ -115,7 +115,7 @@ function LineRow({ view, editable, linked }: { view: LineView; editable: boolean
             }
           >
             <option value="">{product.linked_none ?? 'Nothing sold with it'}</option>
-            {linked.map(({ product: p, label }) => {
+            {[...linked].sort((a, b) => (a.label ?? a.product.title).localeCompare(b.label ?? b.product.title)).map(({ product: p, label }) => {
               const v = defaultVariant(p)
               const cents = v ? totalCents(v) : null
               return (
@@ -267,7 +267,7 @@ export default function PlanPage() {
   const leaveShared = () => void navigate({ to: '/plan', replace: true })
 
   return (
-    <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
+    <main className="mx-auto max-w-4xl px-4 pt-6 pb-12 xl:max-w-[88rem]">
       <PageNav title="Build plan" />
       <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
 
@@ -328,8 +328,9 @@ export default function PlanPage() {
       )}
 
       {productData && lines.length > 0 && (
-        <>
-          <Card className="mt-4 overflow-x-auto" aria-label="Plan">
+        // Stacked when narrow; wide, the plan and what it needs go on the left and the checks on the right.
+        <div className="xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] xl:items-start xl:gap-x-6">
+          <Card className="mt-4 overflow-x-auto xl:col-start-1 xl:row-start-1" aria-label="Plan">
             <table className="w-full min-w-max border-collapse text-sm">
               <thead className="border-b border-line text-muted">
                 <tr>
@@ -372,7 +373,7 @@ export default function PlanPage() {
           </Card>
 
           {checks.length > 0 && (
-            <Card className="mt-5" aria-label="Checks">
+            <Card className="mt-5 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:mt-4" aria-label="Checks">
               <h2 className="text-lg font-semibold">Does it add up?</h2>
               {answer && (
                 <p className={`mt-1 mb-2 text-4xl font-bold ${VERDICT_TONE[answer.tone]}`} aria-label={`Answer: ${answer.word}`}>
@@ -464,6 +465,7 @@ export default function PlanPage() {
               )}
             </Card>
           )}
+          <div className="xl:col-start-1 xl:row-start-2">
           {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
@@ -476,7 +478,8 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             mine.add(l)
           }} onClose={() => setFindingNvr(false)} />}
-        </>
+          </div>
+        </div>
       )}
     </main>
   )
