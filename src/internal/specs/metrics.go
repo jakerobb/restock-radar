@@ -547,3 +547,49 @@ func deriveManaged(ix *index, r *Result) {
 		r.Metrics = append(r.Metrics, Metric{Name: m.name, Value: n, Unit: "devices", AtLeast: g[2] == "+", Raw: strings.Join(lines, " | ")})
 	}
 }
+
+var (
+	hotSwapRe = regexp.MustCompile(`(?i)hot[- ]?swappable`)
+	psuWordRe = regexp.MustCompile(`(?i)\b(psus?|power|crps)\b`)
+	acceleRe  = regexp.MustCompile(`(?i)hardware|accelerat|offload|^\s*(yes|true|supported)\s*$`)
+)
+
+// deriveFeatures reads three yes-or-no capabilities, each 1 when present: shadow_mode (a gateway that can
+// back another up as a VRRP pair), hot_swap_psu (power supplies that can be changed with the device running,
+// the CRPS form: a flag labelled CRPS, or a power or redundancy entry that says its PSUs or power modules
+// are hot-swappable; fans alone don't count, and RPS, the external backup unit, is no such thing) and
+// pppoe_acceleration (which the store doesn't publish, so it is there only where an override says so: an
+// entry whose label names PPPoE, a flag that is true or a text that speaks of hardware acceleration).
+func deriveFeatures(ix *index, r *Result) {
+	seen := map[string]bool{}
+	add := func(name, raw string) {
+		if !seen[name] {
+			seen[name] = true
+			r.Metrics = append(r.Metrics, Metric{Name: name, Value: 1, Raw: raw})
+		}
+	}
+	for _, e := range ix.std {
+		if e.Kind == unistore.SpecGroup {
+			continue
+		}
+		label := key(e.Label)
+		text := strings.Join(Lines(e.Value), " | ")
+		on := e.Kind == unistore.SpecFlag && e.Value == "true"
+		if strings.Contains(label, "shadow mode") && (on || e.Kind == unistore.SpecText && text != "") || strings.Contains(strings.ToLower(text), "shadow mode") {
+			add("shadow_mode", strings.TrimSpace(e.Label)+": "+text)
+		}
+		if label == "crps" && on {
+			add("hot_swap_psu", "CRPS")
+		}
+		if e.Kind == unistore.SpecText {
+			for _, line := range Lines(e.Value) {
+				if hotSwapRe.MatchString(line) && psuWordRe.MatchString(line) {
+					add("hot_swap_psu", line)
+				}
+			}
+		}
+		if strings.Contains(label, "pppoe") && (on || e.Kind == unistore.SpecText && acceleRe.MatchString(text)) {
+			add("pppoe_acceleration", strings.TrimSpace(e.Label)+": "+text)
+		}
+	}
+}

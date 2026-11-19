@@ -636,3 +636,65 @@ func TestRealManagedCounts(t *testing.T) {
 		t.Errorf("ucg-fiber access hubs = %+v", m)
 	}
 }
+
+func hasMetric(r Result, name string) bool {
+	m := metric(r, name)
+	return m != nil && m.Value == 1
+}
+
+func TestShadowModeAndHotSwappablePowerSupplies(t *testing.T) {
+	// An enterprise gateway: a flag and the redundancy line say shadow mode, the power supply says CRPS.
+	b := &builder{}
+	b.add("Hardware", "", "Shadow Mode (VRRP) High Availability", unistore.SpecFlag, "true", "")
+	b.text("Hardware", "Redundancy", "Shadow Mode (VRRP) Gateway Failover\n(2) Hot-Swappable PSUs")
+	b.text("Hardware", "Power Supply", "(2) Hot-swappable 150W CRPS")
+	r := b.derive()
+	if !hasMetric(r, "shadow_mode") || !hasMetric(r, "hot_swap_psu") || hasMetric(r, "pppoe_acceleration") {
+		t.Errorf("metrics = %+v", r.Metrics)
+	}
+	// A flag labelled CRPS alone is enough.
+	f := &builder{}
+	f.add("Hardware", "", "CRPS", unistore.SpecFlag, "true", "")
+	if !hasMetric(f.derive(), "hot_swap_psu") {
+		t.Error("a CRPS flag should count")
+	}
+	// Hot-swappable fans, an external RPS and a switch that can be stacked are none of them hot-swappable power supplies or shadow mode.
+	n := &builder{}
+	n.text("Hardware", "Fan Method", "(5) Hot-swappable fan modules")
+	n.text("Hardware", "Redundancy", "DC Power Backup\nSwitch Stacking")
+	n.add("Hardware", "", "RPS", unistore.SpecFlag, "true", "")
+	rn := n.derive()
+	if hasMetric(rn, "hot_swap_psu") || hasMetric(rn, "shadow_mode") {
+		t.Errorf("metrics = %+v", rn.Metrics)
+	}
+}
+
+func TestPPPoEAccelerationOnlyWhereSomethingSaysSo(t *testing.T) {
+	if hasMetric((&builder{}).derive(), "pppoe_acceleration") {
+		t.Error("nothing says it, so it is unknown")
+	}
+	b := &builder{}
+	b.add("Software", "", "PPPoE Hardware Acceleration", unistore.SpecFlag, "true", "")
+	if !hasMetric(b.derive(), "pppoe_acceleration") {
+		t.Error("a true flag naming PPPoE should count")
+	}
+	off := &builder{}
+	off.add("Software", "", "PPPoE Hardware Acceleration", unistore.SpecFlag, "false", "")
+	if hasMetric(off.derive(), "pppoe_acceleration") {
+		t.Error("a false flag should not")
+	}
+	text := &builder{}
+	text.text("Software", "PPPoE", "Hardware accelerated")
+	if !hasMetric(text.derive(), "pppoe_acceleration") {
+		t.Error("a text that says hardware accelerated should count")
+	}
+}
+
+func TestPPPoEAccelerationFromAnAddedFact(t *testing.T) {
+	// How the fact is meant to get there: added in the app as an override, beside what the store published.
+	published := []unistore.Spec{{SectionID: "sec-hw", Section: "Hardware", SectionType: "Standard", FeatureID: "f1", Label: "Ports", Kind: unistore.SpecText, Value: "x"}}
+	eff, _ := Apply(published, []Override{{Action: ActionSet, Section: "Hardware", Label: "PPPoE Hardware Acceleration", Kind: unistore.SpecFlag, Value: "true"}})
+	if !hasMetric(Derive(Input{Slug: "x", Specs: eff}), "pppoe_acceleration") {
+		t.Errorf("an added fact should count: %+v", eff)
+	}
+}

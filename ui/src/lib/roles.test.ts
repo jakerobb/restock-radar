@@ -2,6 +2,7 @@ import type { Derived } from '../api/types'
 import { buildCatalog } from './catalog'
 import { viewLine, type PlanLine } from './plan'
 import { planChecks, type DerivedLine } from './planChecks'
+import { NO_FILTERS, type FinderFilters } from './finderFilters'
 import { findRoles } from './roleFinder'
 import { formatRate, gatewayLabel } from './roles'
 import { derived, port, product, variant } from '../test/fixtures'
@@ -120,6 +121,30 @@ describe('findRoles', () => {
 
   it('has nothing to suggest when nothing is missing', () => {
     expect(findRoles(w.plan(['ap', 1], ['udm-pro', 1]), w.rows, w.map).options).toEqual([])
+  })
+})
+
+describe('findRoles with the finder filters', () => {
+  const m = (name: string, value = 1) => ({ name, value, unit: '', at_least: false, raw: '' })
+  const set: Spec[] = [
+    { slug: 'ap', type: 'WiFi' },
+    { slug: 'plain', type: 'Gateways', cents: 20000, d: { metrics: [...app('network'), m('ids_ips_throughput_mbps', 2300)], rack: { mountable: false, units: 0, full_depth: false } } },
+    { slug: 'fiber', type: 'Gateways', cents: 30000, d: { metrics: [...app('network'), m('ids_ips_throughput_mbps', 5000), m('pppoe_acceleration')], rack: { mountable: false, units: 0, full_depth: false } } },
+    { slug: 'ucg-industrial', type: 'Gateways', cents: 70000, d: { metrics: [...app('network'), m('ids_ips_throughput_mbps', 5000), m('pppoe_acceleration')], rack: { mountable: true, units: 0, full_depth: false } } },
+    { slug: 'uacc-ucg-industrial-rm', type: 'Accessories', cents: 5000 },
+  ]
+  const v = world(set)
+  const found = (f: FinderFilters) => findRoles(v.plan(['ap', 1]), v.rows, v.map, {}, f).all.map((o) => `${o.rows.map((r) => r.product.slug).join('+')}${o.mounts.length ? `+${o.mounts.map((x) => x.product.slug).join('+')}` : ''}: ${o.cents}`)
+
+  it('lists them all with no filter, and narrows to the gateways with PPPoE acceleration', () => {
+    expect(found(NO_FILTERS)).toEqual(['plain: 20000', 'fiber: 30000', 'ucg-industrial: 70000'])
+    expect(found({ ...NO_FILTERS, pppoe: true })).toEqual(['fiber: 30000', 'ucg-industrial: 70000'])
+    expect(found({ ...NO_FILTERS, minIdsMbps: 5000 })).toEqual(['fiber: 30000', 'ucg-industrial: 70000'])
+  })
+
+  it('suggests the gateway with its rack mount, at the price of both, when rackmount is asked for', () => {
+    expect(found({ ...NO_FILTERS, rack: 'rack' })).toEqual(['ucg-industrial+uacc-ucg-industrial-rm: 75000'])
+    expect(found({ ...NO_FILTERS, rack: 'desk' })).toEqual(['plain: 20000', 'fiber: 30000', 'ucg-industrial: 70000'])
   })
 })
 

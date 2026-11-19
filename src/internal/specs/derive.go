@@ -100,6 +100,7 @@ func deriveWith(in Input, hook func()) (r Result) {
 	derivePoEBudget(ix, &r)
 	deriveRadios(ix, &r)
 	deriveMetrics(ix, &r)
+	deriveFeatures(ix, &r)
 	derivePower(ix, &r)
 	deriveRack(ix, &r)
 	deriveDims(ix, &r)

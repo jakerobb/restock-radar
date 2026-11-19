@@ -1,12 +1,14 @@
 import { Link } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Derived, Product } from '../api/types'
 import { buildCatalog } from '../lib/catalog'
 import { productRef } from '../lib/compare'
 import { formatPrice } from '../lib/format'
+import { isFiltering, mountLines, NO_FILTERS } from '../lib/finderFilters'
 import { findNvrs, MAX_NVRS, type ListedNvr } from '../lib/nvrFinder'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
+import { FinderFilterBar } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
@@ -24,7 +26,7 @@ function facts(o: ListedNvr): string {
     .join(' · ')
 }
 
-function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (line: PlanLine, replacing: PlanLine[]) => void }) {
+function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void }) {
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0 flex-1 basis-56 text-sm">
@@ -40,6 +42,7 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
           </Badge>
         </div>
         <div className="mt-0.5 text-muted">{facts(o)}</div>
+        {o.mounts.length > 0 && <div className="mt-0.5 text-muted">With {o.mounts.map((m) => `${m.qty > 1 ? `${m.qty} × ` : ''}${m.product.title}`).join(', ')}, which it needs to go in a rack.</div>}
         {o.alsoGateway && <div className="mt-0.5 text-muted">Also a gateway or console, so it takes on the network too; its camera capacity is lower when it also runs other applications.</div>}
         {o.replaces.length > 0 && <div className="mt-0.5 text-muted">Replaces {o.replaces.map((l) => l.view.product?.title ?? l.view.line.ref).join(', ')}, which can't be bought now.</div>}
       </div>
@@ -49,7 +52,7 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
         aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
         onClick={() => {
           const line = lineFor(o.row.product, o.qty)
-          if (line) onAdd(line, o.replaces.map((l) => l.view.line))
+          if (line) onAdd([line, ...mountLines(o.mounts)], o.replaces.map((l) => l.view.line))
         }}
       >
         Add to plan
@@ -59,11 +62,12 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
 }
 
 /** NVRs that, added to the plan, have room for its cameras. */
-export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (line: PlanLine, replacing: PlanLine[]) => void; onClose: () => void }) {
+export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onClose: () => void }) {
+  const [filters, setFilters] = useState(NO_FILTERS)
   const found = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
-    return findNvrs(plan, buildCatalog(products, derived), byRef)
-  }, [plan, products, derived])
+    return findNvrs(plan, buildCatalog(products, derived), byRef, filters)
+  }, [plan, products, derived, filters])
   const extra = found.all.length - found.options.length
 
   return (
@@ -75,8 +79,9 @@ export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: D
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, so an NVR you have already chosen still counts. Only the number of cameras is considered, not storage.</p>
+      <FinderFilterBar filters={filters} onChange={setFilters} />
       {found.options.length === 0 ? (
-        <p className="mt-3 text-sm">No NVR we track, even {MAX_NVRS} of one, has room for these cameras.</p>
+        <p className="mt-3 text-sm">No NVR we track{isFiltering(filters) ? ' that fits the filters' : ''}, even {MAX_NVRS} of one, has room for these cameras.</p>
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {found.options.map((o) => (
