@@ -4,6 +4,7 @@ import { useDerived, useProducts } from '../api/queries'
 import type { Derived, Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
 import { productRef } from '../lib/compare'
+import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
 import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
@@ -79,7 +80,14 @@ interface PowerChoice {
   sibling: (slug: string) => Product | null
 }
 
-function LineRow({ view, editable, linked, power }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null }) {
+/** The drive bays of an NVR line, and the drives the plan can fill them with. */
+interface DriveChoice {
+  bays: number
+  /** Drives by size, smallest first. */
+  options: { product: Product; tb: number }[]
+}
+
+function LineRow({ view, editable, linked, power, drives }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null; drives: DriveChoice | null }) {
   const { lines, remove, changeQty, switchVariant, addOn, swapProduct, power: choosePower } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
@@ -143,6 +151,49 @@ function LineRow({ view, editable, linked, power }: { view: LineView; editable: 
             ))}
           </Select>
         )}
+        {product && editable && drives && (() => {
+          const all = drives.options.map((o) => o.product)
+          const inPlan = drives.options.filter((o) => lines.some((x) => x.ref === productRef(o.product)))
+          const chosen = inPlan[0] ?? null
+          const total = chosen ? (lines.find((x) => x.ref === productRef(chosen.product))?.qty ?? 0) : 0
+          const count = Math.min(drives.bays, Math.max(1, Math.ceil(total / line.qty)))
+          const set = (p: Product | null, n: number) => addOn(all, p, n * line.qty)
+          return (
+            <div className="mt-1 flex max-w-64 items-center gap-1">
+              <Select
+                className="block min-w-0 flex-1 py-1 text-sm"
+                aria-label={`Drives for ${product.title}`}
+                value={chosen?.product.slug ?? ''}
+                onChange={(e) => set(drives.options.find((o) => o.product.slug === e.target.value)?.product ?? null, chosen ? count : drives.bays)}
+              >
+                <option value="">No drives</option>
+                {drives.options.map(({ product: p, tb }) => {
+                  const v = defaultVariant(p)
+                  const cents = v ? totalCents(v) : null
+                  return (
+                    <option key={p.slug} value={p.slug}>
+                      {tb} TB drives
+                      {cents !== null && ` (+${formatPrice(cents, v!.currency)} each)`}
+                      {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
+                    </option>
+                  )
+                })}
+              </Select>
+              {chosen && (
+                <>
+                  <span className="text-sm text-muted">×</span>
+                  <Select className="block w-16 py-1 text-sm" aria-label={`Number of drives for ${product.title}`} value={count} onChange={(e) => set(chosen.product, Number(e.target.value))}>
+                    {Array.from({ length: drives.bays }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </Select>
+                </>
+              )}
+            </div>
+          )
+        })()}
         {product && editable && linked.length > 0 && (
           <Select
             className="mt-1 block max-w-64 py-1 text-sm"
@@ -219,6 +270,18 @@ function HostedRow({ role, editable }: { role: HostedRole; editable: boolean }) 
       )}
     </tr>
   )
+}
+
+/** The drives an NVR with bays can be given: the hard drives of the sizes on offer that the store sells in its region. */
+function driveChoiceOf(d: Derived | null, product: Product | undefined, products: Map<string, Product>): DriveChoice | null {
+  const bays = driveBays(d)
+  if (!product || bays === 0) return null
+  const options = [...products.values()].flatMap((p) => {
+    const sku = defaultVariant(p)?.sku ?? ''
+    const drive = p.region === product.region && /^UACC-HDD-/i.test(sku) ? driveOf(sku) : null
+    return drive && DRIVE_SIZES_TB.includes(drive.tb) ? [{ product: p, tb: drive.tb }] : []
+  })
+  return options.length === 0 ? null : { bays, options: options.sort((a, b) => a.tb - b.tb) }
 }
 
 function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string, Product>, allDerived: Derived[]): PowerChoice | null {
@@ -403,7 +466,7 @@ export default function PlanPage() {
               </thead>
               <tbody>
                 {derivedLines.map(({ view: v, derived: d }) => (
-                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} power={powerChoiceOf({ view: v, derived: d }, powering, products, derived ?? [])} linked={(v.product?.linked ?? []).flatMap((l) => {
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} drives={driveChoiceOf(d, v.product, products)} power={powerChoiceOf({ view: v, derived: d }, powering, products, derived ?? [])} linked={(v.product?.linked ?? []).flatMap((l) => {
                     const p = products.get(`${v.product!.region}/${l.slug}`)
                     return p ? [{ product: p, label: l.label }] : []
                   })} />

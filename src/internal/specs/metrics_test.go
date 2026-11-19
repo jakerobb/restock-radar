@@ -698,3 +698,70 @@ func TestPPPoEAccelerationFromAnAddedFact(t *testing.T) {
 		t.Errorf("an added fact should count: %+v", eff)
 	}
 }
+
+func TestNvrStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name, label, value string
+		metric             string
+		want               float64
+	}{
+		{"UNVR bays", "Storage Capacity", "(4) 2.5/3.5\" drive bays", "nvr_drive_bays", 4},
+		{"a Dream Machine's bays", "NVR Storage", "(2) 3.5\" NVR HDD bays\nBuilt-in 128 GB SSD for Faster Experience", "nvr_drive_bays", 2},
+		{"one bay", "Storage Capacity", "(1) 3.5\" drive bay", "nvr_drive_bays", 1},
+		{"a microSD card", "NVR Storage", "Pre-installed 128 GB microSD for NVR", "nvr_storage_tb", 0.128},
+		{"the CloudKey's SSD", "Hard Drive Capacity", "1 TB 2.5\" SATA SSD \n(User-upgradeable)", "nvr_storage_tb", 1},
+		{"selectable SSD says nothing", "NVR Storage", "Selectable NVMe SSD up to 2 TB", "nvr_storage_tb", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{}
+			b.text("Overview", "Managed Cameras", "(60) HD / (30) 2K / (18) 4K")
+			b.text("Hardware", tc.label, tc.value)
+			m := metric(b.derive(), tc.metric)
+			if tc.want == 0 {
+				if m != nil {
+					t.Errorf("%s = %+v, want none", tc.metric, m)
+				}
+				return
+			}
+			if m == nil || m.Value != tc.want {
+				t.Errorf("%s = %+v, want %v", tc.metric, m, tc.want)
+			}
+		})
+	}
+	b := &builder{}
+	b.text("Hardware", "Storage Capacity", "(4) 2.5/3.5\" drive bays")
+	if m := metric(b.derive(), "nvr_drive_bays"); m != nil {
+		t.Errorf("a product that isn't an NVR has %+v", m)
+	}
+}
+
+func TestCameraSensors(t *testing.T) {
+	for _, tc := range []struct {
+		name, res string
+		want      float64 // 0: none
+	}{
+		{"one sensor has none", "8MP 3840 x 2160 (16:9)", 0},
+		{"a prefixed count", "(4) 8MP 3840 x 2160 (16:9)", 4},
+		{"main and package cameras", "Main camera: 2MP 1600 x 1200 (4:3)\nPackage camera: 2MP 1600 x 1200 (4:3)", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{}
+			b.text("Overview", "Resolution", tc.res)
+			m := metric(b.derive(), "camera_sensors")
+			if tc.want == 0 && m != nil || tc.want != 0 && (m == nil || m.Value != tc.want) {
+				t.Errorf("camera_sensors = %+v, want %v", m, tc.want)
+			}
+		})
+	}
+}
+
+func TestCameraBitrate(t *testing.T) {
+	b := &builder{}
+	b.text("Overview", "Recording Bitrate", "24 Mbps")
+	if m := metric(b.derive(), "camera_bitrate_mbps"); m == nil || m.Value != 24 {
+		t.Errorf("camera_bitrate_mbps = %+v, want 24", m)
+	}
+	if m := metric((&builder{}).derive(), "camera_bitrate_mbps"); m != nil {
+		t.Errorf("a product with no stated bitrate has %+v", m)
+	}
+}
