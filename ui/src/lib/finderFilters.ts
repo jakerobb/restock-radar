@@ -8,6 +8,8 @@ import { isGatewayProduct } from './roles'
 export interface FinderFilters {
   /** 'rack': made for a rack, with the accessory that mounts it where it needs one; 'desk': not rack-mount. */
   rack: 'any' | 'rack' | 'desk'
+  /** Only what can be bought now: in stock, with the accessory that mounts it where it needs one. */
+  inStock: boolean
   /** Power supplies that can be changed with the device running (CRPS). */
   hotSwap: boolean
   /** Gateways only: hardware PPPoE acceleration, which the store doesn't publish, so only where an override says so. */
@@ -18,10 +20,10 @@ export interface FinderFilters {
   minIdsMbps: number
 }
 
-export const NO_FILTERS: FinderFilters = { rack: 'any', hotSwap: false, pppoe: false, shadow: false, minIdsMbps: 0 }
+export const NO_FILTERS: FinderFilters = { inStock: false, rack: 'any', hotSwap: false, pppoe: false, shadow: false, minIdsMbps: 0 }
 
 /** True when any filter narrows anything. */
-export const isFiltering = (f: FinderFilters): boolean => f.rack !== 'any' || f.hotSwap || f.pppoe || f.shadow || f.minIdsMbps > 0
+export const isFiltering = (f: FinderFilters): boolean => f.inStock || f.rack !== 'any' || f.hotSwap || f.pppoe || f.shadow || f.minIdsMbps > 0
 
 const metric = (r: CatalogRow, name: string): number => {
   const v = r.derived?.metrics.find((m) => m.name === name)?.value
@@ -51,6 +53,7 @@ function rackKind(row: CatalogRow, products: Map<string, Product>): 'rack' | 'ra
 
 /** Whether a product passes the filters that don't depend on how many are bought. A property nothing states isn't taken to be there. */
 export function acceptsRow(row: CatalogRow, f: FinderFilters, products: Map<string, Product>): boolean {
+  if (f.inStock && row.price.stock !== 'in') return false
   if (f.hotSwap && metric(row, 'hot_swap_psu') < 1) return false
   if (f.rack !== 'any') {
     const kind = rackKind(row, products)

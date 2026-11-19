@@ -11,7 +11,7 @@ import type { Powering } from '../lib/powering'
 import { formatSpeed } from '../lib/requirements'
 import { isFiltering, mountLines, NO_FILTERS } from '../lib/finderFilters'
 import { DEFAULT_POWER_METHODS, findFits, MAX_SWITCHES, pickOptions, POWER_METHODS, type ListedSwitch, type PowerMethod } from '../lib/switchFinder'
-import { FinderFilterBar } from './FinderFilterBar'
+import { FinderFilterBar, HotSwapBox } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
@@ -80,7 +80,9 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
   const [filters, setFilters] = useState(NO_FILTERS)
   const byRef = useMemo(() => new Map(products.map((p) => [productRef(p), p])), [products])
   const fits = useMemo(() => findFits(plan, buildCatalog(products, derived), byRef, powering), [plan, products, derived, byRef, powering])
-  const found = useMemo(() => pickOptions(fits, methods, filters, byRef), [fits, methods, filters, byRef])
+  // Hot-swappable power supplies are a matter of mains power, so the box is there, and counts, only while AC is accepted.
+  const applied = useMemo(() => ({ ...filters, hotSwap: filters.hotSwap && methods.has('ac') }), [filters, methods])
+  const found = useMemo(() => pickOptions(fits, methods, applied, byRef), [fits, methods, applied, byRef])
   const toggle = (m: PowerMethod) => setMethods((cur) => new Set(cur.has(m) ? [...cur].filter((x) => x !== m) : [...cur, m]))
   const extra = found.all.length - found.options.length
 
@@ -93,7 +95,7 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget and ports counted, so a switch you have already chosen still helps.</p>
-      <FinderFilterBar filters={filters} onChange={setFilters} />
+      <FinderFilterBar filters={filters} onChange={setFilters} hideHotSwap />
       <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <legend className="sr-only">Power methods you can use</legend>
         <span className="text-muted" aria-hidden>
@@ -106,9 +108,14 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
           </label>
         ))}
       </fieldset>
+      {methods.has('ac') && (
+        <div className="mt-2 text-sm">
+          <HotSwapBox filters={filters} onChange={setFilters} />
+        </div>
+      )}
       {found.options.length === 0 ? (
         <p className="mt-3 text-sm">
-          No switch we track{isFiltering(filters) ? ' that fits the filters' : ''}, even {MAX_SWITCHES} of one, gives these devices the power and ports they need
+          No switch we track{isFiltering(applied) ? ' that fits the filters' : ''}, even {MAX_SWITCHES} of one, gives these devices the power and ports they need
           {found.hidden > 0 ? ` on the power methods you've chosen (${found.hidden} would work on others)` : ''}. A device may want a higher PoE class than any switch offers.
         </p>
       ) : (

@@ -195,7 +195,8 @@ export function pickOptions({ fits: allFits, pairs: allPairs, replaces }: Fits, 
   const narrowed = (f: Fit): Fit[] => {
     if (!acceptsRow(f.row, filters, products) || (f.also && !acceptsRow(f.also.row, filters, products))) return []
     const mounts = [...mountsFor(f.row, f.qty, filters, products), ...(f.also ? mountsFor(f.also.row, f.also.qty, filters, products) : [])]
-    return [{ ...f, mounts, ...withMounts(f.cents, f.inStock, mounts) }]
+    const fit = { ...f, mounts, ...withMounts(f.cents, f.inStock, mounts) }
+    return filters.inStock && !fit.inStock ? [] : [fit]
   }
   const every = allFits.flatMap(narrowed)
   const everyPair = allPairs.flatMap(narrowed)
