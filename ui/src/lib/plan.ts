@@ -1,5 +1,6 @@
 import type { Product, Variant } from '../api/types'
 import { totalCents } from './format'
+import { HOSTED_ROLES, type Hosting } from './roles'
 import { cleanRefs, productRef } from './compare'
 
 /** One line of the build plan: a variant of a product, and how many. */
@@ -90,6 +91,18 @@ function readVarint(bytes: number[], at: number): { value: number; next: number 
   return null
 }
 
+/**
+ * Where a controller is run when it isn't a product, in a slug: a number no variant has, above 2^30, for each
+ * (role, where) with a quantity of 1 after it, following the lines.
+ */
+const HOSTING_BASE = 2 ** 30
+const hostingNumber = (role: (typeof HOSTED_ROLES)[number], where: 'cloud' | 'self') => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2 + (where === 'cloud' ? 1 : 0)
+const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'cloud' | 'self'] | null => {
+  const i = num - HOSTING_BASE
+  const role = HOSTED_ROLES[Math.floor(i / 2)]
+  return i >= 0 && role ? [role, i % 2 === 1 ? 'cloud' : 'self'] : null
+}
+
 /** The variants by number: which product (as "region/slug") and which SKU each is. */
 export function variantsByNum(products: Iterable<Product>): Map<number, { ref: string; sku: string }> {
   const out = new Map<number, { ref: string; sku: string }>()
@@ -101,7 +114,7 @@ export function variantsByNum(products: Iterable<Product>): Map<number, { ref: s
  * A plan as a short URL-safe slug. Lines whose variant isn't in the catalogue have no number and
  * are left out, so there may be nothing to share (an empty slug).
  */
-export function encodePlan(lines: PlanLine[], products: Iterable<Product>): string {
+export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosting: Hosting = {}): string {
   const numByKey = new Map<string, number>()
   for (const [num, { ref, sku }] of variantsByNum(products)) numByKey.set(lineKey({ ref, sku }), num)
   const bytes: number[] = []
@@ -111,6 +124,12 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>): stri
     writeVarint(bytes, num)
     writeVarint(bytes, l.qty)
   }
+  for (const role of HOSTED_ROLES) {
+    const where = hosting[role]
+    if (!where) continue
+    writeVarint(bytes, hostingNumber(role, where))
+    writeVarint(bytes, 1)
+  }
   return toBase64Url(bytes)
 }
 
@@ -118,6 +137,8 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>): stri
 export interface DecodedPlan {
   lines: PlanLine[]
   unknown: number
+  /** The controllers it runs elsewhere. */
+  hosting: Hosting
 }
 
 /** The inverse. Null when the slug isn't one we made. */
@@ -132,12 +153,18 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
   const byNum = variantsByNum(products)
   const seen = new Set<string>()
   const lines: PlanLine[] = []
+  const hosting: Hosting = {}
   let unknown = 0
   for (let at = 0; at < bytes.length; ) {
     const num = readVarint(bytes, at)
     const qty = num && readVarint(bytes, num.next)
     if (!num || !qty || num.value < 1 || qty.value < 1 || qty.value > MAX_QTY) return null
     at = qty.next
+    const host = hostingOf(num.value)
+    if (host) {
+      hosting[host[0]] = host[1]
+      continue
+    }
     const target = byNum.get(num.value)
     if (!target) {
       unknown++
@@ -149,7 +176,7 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     lines.push(line)
     if (lines.length + unknown >= MAX_LINES) break
   }
-  return { lines, unknown }
+  return { lines, unknown, hosting }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */

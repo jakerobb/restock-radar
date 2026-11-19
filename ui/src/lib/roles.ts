@@ -11,6 +11,15 @@ export type Role = 'gateway' | 'network' | 'access' | 'talk'
 export const ROLES: readonly Role[] = ['gateway', 'network', 'access', 'talk']
 export const ROLE_LABEL: Record<Role, string> = { gateway: 'Gateway', network: 'Network controller', access: 'Access controller', talk: 'Talk controller' }
 
+/** The controllers that can run somewhere other than on a product in the plan (Protect, which records, can't). */
+export type HostedRole = Exclude<Role, 'gateway'>
+export const HOSTED_ROLES: readonly HostedRole[] = ['network', 'access', 'talk']
+/** Where a controller runs when it isn't on a product in the plan: UniFi's cloud hosting, or on a machine you run yourself. */
+export type HostedWhere = 'cloud' | 'self'
+/** The controllers the plan's owner has decided to run elsewhere. */
+export type Hosting = Partial<Record<HostedRole, HostedWhere>>
+export const APP_NAME: Record<HostedRole, string> = { network: 'UniFi Network', access: 'UniFi Access', talk: 'UniFi Talk' }
+
 const metric = (d: Derived | null, n: string): number => {
   const v = d?.metrics.find((m) => m.name === n)?.value
   return typeof v === 'number' ? v : 0
@@ -97,8 +106,8 @@ function capacityOf(live: DerivedLine[], metricName: string) {
 }
 
 /** Controllers in the plan that manage fewer devices than the plan has, which a bigger one would replace. */
-export function undersized(lines: DerivedLine[]): DerivedLine[] {
-  return roleCheck(lines).flatMap((c) => {
+export function undersized(lines: DerivedLine[], hosting: Hosting = {}): DerivedLine[] {
+  return roleCheck(lines, hosting).flatMap((c) => {
     const role = c.roleShortfall
     const cap = role && CAPACITY[role]
     if (!role || !cap || !c.id.endsWith('-capacity')) return []
@@ -119,10 +128,26 @@ function capacityCheck(role: Role, noun: string, need: number, live: DerivedLine
  * Whether the plan has something to fill each role it needs, and which role is missing when it hasn't. A role
  * only filled by something that can't be bought now counts as missing too (with a warning that says so).
  */
-export function roleCheck(lines: DerivedLine[]): PlanCheck[] {
+export function roleCheck(lines: DerivedLine[], hosting: Hosting = {}): PlanCheck[] {
   const out: PlanCheck[] = []
   for (const role of ROLES) {
+    if (role === 'network') {
+      // A site has one Network controller. Two probably means one belongs to another site (or a mistake).
+      const runners = lines.filter((l) => fills(l.view.product?.type, l.derived, 'network'))
+      const count = qtyOf(runners) + (hosting.network ? 1 : 0)
+      if (count > 1) {
+        const names = [...runners.map((l) => `${l.view.line.qty > 1 ? `${l.view.line.qty} × ` : ''}${name(l)}`), ...(hosting.network ? [hosting.network === 'self' ? 'a self-hosted controller' : 'UniFi cloud hosting'] : [])]
+        out.push({ id: 'role-network-many', label: 'Network controllers', verdict: 'warn', text: `${count} things in the plan run UniFi Network (${names.join(', ')}). A site has one Network controller, so the extra ones probably belong to another site; only the largest is counted here.` })
+      }
+    }
     if (needers(lines, role).length === 0) continue
+    // A controller the owner has decided to run elsewhere is filled, whatever the plan holds.
+    const where = role === 'gateway' ? undefined : hosting[role]
+    if (role !== 'gateway' && where) {
+      const text = where === 'self' ? `Self-hosted: you run ${APP_NAME[role]} yourself (UniFi OS Server, or the application on a machine of your own). How many devices it manages isn't checked.` : `UniFi cloud hosting runs ${APP_NAME[role]} for you. How many devices it manages isn't checked.`
+      out.push({ id: `role-${role}`, label: ROLE_LABEL[role], verdict: 'ok', hosted: role, text })
+      continue
+    }
     const by = lines.filter((l) => fills(l.view.product?.type, l.derived, role))
     const live = by.filter((l) => l.view.state === 'in')
     const base = { id: `role-${role}`, label: ROLE_LABEL[role] }

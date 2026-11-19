@@ -93,7 +93,7 @@ describe('findRoles', () => {
   const options = (...items: [string, number][]) => findRoles(w.plan(...items), w.rows, w.map).options.map((o) => `${o.label}: ${o.rows.map((r) => r.product.slug).join(' + ')}`)
 
   it('suggests the cheapest product that fills every missing role, and the one running the most applications', () => {
-    expect(options(['ap', 2])).toEqual(['Cheapest that fits: ucg-ultra', 'Runs the most applications: udm-pro'])
+    expect(options(['ap', 2])).toEqual(['Cheapest that fits: ucg-ultra', 'Runs the most applications: udm-pro', 'Cheapest as separate products: uxg-lite + cloud-key'])
   })
 
   it('suggests only a controller when the gateway is there', () => {
@@ -187,5 +187,50 @@ describe('what a controller manages', () => {
 
   it('formats the gateway figure for the finder', () => {
     expect([gatewayLabel(x.plan(['big', 1])[0]!.derived), gatewayLabel(x.plan(['silent', 1])[0]!.derived), formatRate(800), formatRate(10000)]).toEqual(['3.5 Gbps gateway', 'gateway', '800 Mbps', '10 Gbps'])
+  })
+})
+
+describe('running a controller somewhere else', () => {
+  const lines = (...items: [string, number][]) => w.plan(...items)
+  const hostedBy = (lines2: DerivedLine[], hosting: Parameters<typeof planChecks>[1]) => Object.fromEntries(planChecks(lines2, hosting).map((c) => [c.id, c]))
+
+  it('counts a self-hosted or cloud-hosted controller as filling the role, and says capacity is not checked', () => {
+    const plan = lines(['ap', 2], ['uxg-lite', 1])
+    expect(hostedBy(plan, {})['role-network']).toMatchObject({ verdict: 'warn', roleShortfall: 'network' })
+    expect(hostedBy(plan, { network: 'self' })['role-network']).toMatchObject({ verdict: 'ok', hosted: 'network', text: expect.stringContaining('Self-hosted') })
+    expect(hostedBy(plan, { network: 'cloud' })['role-network']).toMatchObject({ verdict: 'ok', hosted: 'network', text: expect.stringContaining('UniFi cloud hosting runs UniFi Network') })
+    expect(hostedBy(plan, { network: 'self' })['role-network-capacity']).toBeUndefined()
+  })
+
+  it('does not fill a gateway, which has to be hardware', () => {
+    expect(hostedBy(lines(['ap', 2]), { network: 'self' })['role-gateway']).toMatchObject({ verdict: 'warn', roleShortfall: 'gateway' })
+  })
+
+  it('offers the missing controllers (not the gateway) to be run elsewhere, and then wants only the gateway', () => {
+    const plan = lines(['ap', 2], ['hub', 1])
+    const found = findRoles(plan, w.rows, w.map)
+    expect(found.missing).toEqual(['gateway', 'network', 'access'])
+    expect(found.hostable).toEqual(['network', 'access'])
+    const hosted = findRoles(plan, w.rows, w.map, { network: 'self', access: 'cloud' })
+    expect(hosted.missing).toEqual(['gateway'])
+    expect(hosted.hostable).toEqual([])
+    // Any gateway does then; the cheapest is the one that does nothing else.
+    expect(hosted.options[0]).toMatchObject({ label: 'Cheapest that fits', rows: [expect.objectContaining({ product: expect.objectContaining({ slug: 'uxg-lite' }) })] })
+  })
+
+  it('offers a gateway and a controller as separate products, so a UXG and a Cloud Key can be chosen', () => {
+    const found = findRoles(lines(['ap', 2]), w.rows, w.map)
+    const split = found.all.filter((o) => o.split).map((o) => o.rows.map((r) => r.product.slug).join(' + '))
+    expect(split).toContain('uxg-lite + cloud-key')
+    expect(found.options.find((o) => o.label === 'Cheapest as separate products')?.rows.map((r) => r.product.slug)).toEqual(['uxg-lite', 'cloud-key'])
+  })
+
+  it('warns when more than one thing runs UniFi Network, whatever it is', () => {
+    const many = (l: DerivedLine[], h: Parameters<typeof planChecks>[1] = {}) => hostedBy(l, h)['role-network-many']
+    expect(many(lines(['ap', 1], ['ucg-ultra', 1]))).toBeUndefined()
+    expect(many(lines(['ap', 1], ['ucg-ultra', 1], ['cloud-key', 1]))).toMatchObject({ verdict: 'warn', text: expect.stringContaining('2 things in the plan run UniFi Network (ucg-ultra, cloud-key)') })
+    expect(many(lines(['ap', 1], ['ucg-ultra', 2]))).toMatchObject({ verdict: 'warn', text: expect.stringContaining('2 × ucg-ultra') })
+    expect(many(lines(['ap', 1], ['ucg-ultra', 1]), { network: 'cloud' })).toMatchObject({ text: expect.stringContaining('UniFi cloud hosting') })
+    expect(many(lines(['ap', 1], ['uxg-lite', 1], ['cloud-key', 1]))).toBeUndefined() // a gateway that runs nothing doesn't count
   })
 })

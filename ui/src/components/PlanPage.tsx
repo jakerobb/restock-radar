@@ -6,6 +6,7 @@ import { usePlan } from '../hooks/usePlan'
 import { formatPrice } from '../lib/format'
 import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { planChecks, type CheckVerdict } from '../lib/planChecks'
+import type { HostedRole, Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
 import { RoleFinder } from './RoleFinder'
@@ -119,9 +120,9 @@ function LineRow({ view, editable }: { view: LineView; editable: boolean }) {
   )
 }
 
-function ShareLink({ lines, products }: { lines: PlanLine[]; products: Product[] }) {
+function ShareLink({ lines, products, hosting }: { lines: PlanLine[]; products: Product[]; hosting: Hosting }) {
   const [copied, setCopied] = useState(false)
-  const slug = encodePlan(lines, products)
+  const slug = encodePlan(lines, products, hosting)
   if (slug === '') return null
   const url = `${window.location.origin}/plan/${slug}`
   const copy = async () => {
@@ -170,7 +171,8 @@ export default function PlanPage() {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
     return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null }))
   }, [views, derived])
-  const checks = useMemo(() => planChecks(derivedLines), [derivedLines])
+  const hosting: Hosting = useMemo(() => (shared ? (decoded?.hosting ?? {}) : mine.hosting), [shared, decoded, mine.hosting])
+  const checks = useMemo(() => planChecks(derivedLines, hosting), [derivedLines, hosting])
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
   const [findingRoles, setFindingRoles] = useState(false)
@@ -216,7 +218,7 @@ export default function PlanPage() {
               Add product
             </Button>
           )}
-          <ShareLink lines={lines} products={productData.products} />
+          <ShareLink lines={lines} products={productData.products} hosting={hosting} />
         </div>
       )}
       {searching && productData && (
@@ -241,7 +243,7 @@ export default function PlanPage() {
             variant="secondary"
             className="py-1 text-sm"
             onClick={() => {
-              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })))
+              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting)
               leaveShared()
             }}
           >
@@ -333,6 +335,14 @@ export default function PlanPage() {
                       ) : (
                         c.text
                       )}
+                      {c.hosted && c.hosted !== 'gateway' && !shared && (
+                        <>
+                          {' '}
+                          <button type="button" className="cursor-pointer text-muted underline underline-offset-2 hover:text-ink" onClick={() => mine.host(c.hosted as HostedRole, null)}>
+                            Undo
+                          </button>
+                        </>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -363,7 +373,7 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
-          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
+          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} hosting={hosting} onHost={mine.host} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingRoles(false)} />}

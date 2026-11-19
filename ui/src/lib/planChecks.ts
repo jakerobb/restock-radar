@@ -2,7 +2,7 @@ import type { Derived } from '../api/types'
 import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
-import { roleCheck, type Role } from './roles'
+import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
 /** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
@@ -21,6 +21,8 @@ export interface PlanCheck {
   nvrShortfall?: boolean
   /** On a role check: the role (a gateway, a Network controller...) nothing in the plan that can be had fills, which a product could fix. */
   roleShortfall?: Role
+  /** On a role check: the controller the owner has chosen to run elsewhere (cloud hosting, or self-hosted), which can be undone. */
+  hosted?: Role
   /** On the NVR check: how the cameras came out. */
   nvr?: NvrStats
   /** On the switch-port check: how the devices that aren't PoE-powered came out. */
@@ -365,7 +367,7 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
  * power the PoE devices, whether every other device has a switch port, and how much rack they take. A check appears only when the plan has something
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
-export function planChecks(lines: DerivedLine[]): PlanCheck[] {
+export function planChecks(lines: DerivedLine[], hosting: Hosting = {}): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...roleCheck(lines), ...rackCheck(lines)]
+  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
 }
