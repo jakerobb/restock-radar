@@ -1,5 +1,6 @@
 import type { Product, Variant } from '../api/types'
 import { totalCents } from './format'
+import type { Powering } from './powering'
 import { HOSTED_ROLES, type Hosting } from './roles'
 import { cleanRefs, productRef } from './compare'
 
@@ -96,6 +97,11 @@ function readVarint(bytes: number[], at: number): { value: number; next: number 
  * role that is self-hosted with a quantity of 1 after it, following the lines.
  */
 const HOSTING_BASE = 2 ** 30
+/**
+ * How a switch is powered, in a slug: the number 2^29 plus the variant's, with the scenario's code (from 1) in
+ * place of a quantity. Variant numbers are far below 2^29, and hosting begins at 2^30.
+ */
+const POWER_BASE = 2 ** 29
 const hostingNumber = (role: (typeof HOSTED_ROLES)[number]) => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2
 /** The role a number stands for; null for one that isn't self-hosting (an odd number was cloud hosting, once, before it became a product). */
 const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'self'] | 'ignore' | null => {
@@ -120,7 +126,7 @@ export function variantsByNum(products: Iterable<Product>): Map<number, { ref: s
  * A plan as a short URL-safe slug. Lines whose variant isn't in the catalogue have no number and
  * are left out, so there may be nothing to share (an empty slug).
  */
-export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosting: Hosting = {}): string {
+export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosting: Hosting = {}, powering: Powering = {}): string {
   const numByKey = new Map<string, number>()
   for (const [num, { ref, sku }] of variantsByNum(products)) numByKey.set(lineKey({ ref, sku }), num)
   const bytes: number[] = []
@@ -129,6 +135,13 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosti
     if (num === undefined) continue
     writeVarint(bytes, num)
     writeVarint(bytes, l.qty)
+  }
+  for (const l of lines) {
+    const num = numByKey.get(lineKey(l))
+    const code = powering[lineKey(l)]
+    if (num === undefined || code === undefined) continue
+    writeVarint(bytes, POWER_BASE + num)
+    writeVarint(bytes, code)
   }
   for (const role of HOSTED_ROLES) {
     const where = hosting[role]
@@ -145,6 +158,8 @@ export interface DecodedPlan {
   unknown: number
   /** The controllers it runs elsewhere. */
   hosting: Hosting
+  /** How its switches are powered, by line key. */
+  powering: Powering
 }
 
 /** The inverse. Null when the slug isn't one we made. */
@@ -160,10 +175,18 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
   const seen = new Set<string>()
   const lines: PlanLine[] = []
   const hosting: Hosting = {}
+  const powerEntries: [number, number][] = []
   let unknown = 0
   for (let at = 0; at < bytes.length; ) {
     const num = readVarint(bytes, at)
     const qty = num && readVarint(bytes, num.next)
+    if (num && qty && num.value >= POWER_BASE && num.value < HOSTING_BASE) {
+      // How a switch is powered: the code stands where the quantity does. The variant may come later in the slug, so it is resolved after.
+      if (qty.value < 1 || qty.value > 0xffff) return null
+      powerEntries.push([num.value - POWER_BASE, qty.value])
+      at = qty.next
+      continue
+    }
     if (!num || !qty || num.value < 1 || qty.value < 1 || qty.value > MAX_QTY) return null
     at = qty.next
     const host = hostingOf(num.value)
@@ -182,7 +205,12 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     lines.push(line)
     if (lines.length + unknown >= MAX_LINES) break
   }
-  return { lines, unknown, hosting }
+  const powering: Powering = {}
+  for (const [vnum, code] of powerEntries) {
+    const target = byNum.get(vnum)
+    if (target && seen.has(lineKey(target))) powering[lineKey(target)] = code
+  }
+  return { lines, unknown, hosting, powering }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */
@@ -218,6 +246,14 @@ export function setAddOn(plan: PlanLine[], options: Product[], chosen: Product |
   const kept = plan.filter((l) => !refs.has(l.ref) || (chosen !== null && l.ref === productRef(chosen)))
   const line = chosen ? lineFor(chosen, qty) : null
   return line ? addLine(kept.filter((l) => l.ref !== line.ref), line) : kept
+}
+
+/** Makes sure the plan has at least `qty` of a product (one more line, or a bigger quantity on its line), which is what an adapter for each switch needs. */
+export function ensureQty(plan: PlanLine[], p: Product, qty: number): PlanLine[] {
+  const line = lineFor(p, qty)
+  if (!line) return plan
+  const have = plan.filter((l) => l.ref === line.ref).reduce((n, l) => n + l.qty, 0)
+  return have >= qty ? plan : addLine(plan, { ...line, qty: qty - have })
 }
 
 /** What to add when someone says "add this product": the cheapest variant in stock, else the cheapest, else the first. */

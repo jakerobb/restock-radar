@@ -3,6 +3,7 @@ import type { LineView } from './plan'
 import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
+import { budgetOf, powerOptions, type Powering } from './powering'
 import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 
@@ -74,8 +75,18 @@ const poePortsIn = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== ''
 const poePortsOut = (d: Derived) => dataPorts(d).filter((p) => p.poe_class !== '' && p.poe_direction === 'out')
 const list = (ls: DerivedLine[]) => ls.map(name).join(', ')
 
+/**
+ * The PoE class a line needs to be powered, or null when it isn't a PoE-powered device. A switch that can be
+ * powered several ways is PoE-powered only when it has been chosen to run on a PoE input, and then needs that class.
+ */
+function needOf(l: DerivedLine, powering: Powering): string | null {
+  if (!l.derived) return null
+  if (powerOptions(l.derived)) return budgetOf(l, powering).option?.poeClass ?? null
+  return poeNeed(l.derived)
+}
+
 /** True when a product is a PoE-powered device. */
-export const isPoePowered = (l: DerivedLine): boolean => !!l.derived && poeNeed(l.derived) !== null
+export const isPoePowered = (l: DerivedLine, powering: Powering = {}): boolean => needOf(l, powering) !== null
 
 const rank = (c: string) => POE_CLASSES.indexOf(c as (typeof POE_CLASSES)[number]) + 1
 const lowest = (classes: string[]): string => classes.reduce((a, b) => (rank(b) < rank(a) ? b : a))
@@ -121,6 +132,8 @@ interface Device {
   speed: number
   /** Watts; 0 when not known, which the power check reports separately. */
   draw: number
+  /** Switches (by unit) whose ports it can't take: a switch can't be powered by itself. */
+  exclude?: ReadonlySet<number>
 }
 
 interface Placement {
@@ -154,7 +167,7 @@ function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Pla
       const d = devices[i]!
       let best = -1
       free.forEach((f, k) => {
-        if (f.rank < d.rank || left[f.unit]! < d.draw || !ok(f)) return
+        if (f.rank < d.rank || left[f.unit]! < d.draw || !ok(f) || d.exclude?.has(f.unit)) return
         if (best < 0 || better(f, free[best]!) < 0) best = k
       })
       return best
@@ -221,17 +234,22 @@ function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Pl
   return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', shortfall: true, text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
 }
 
-function poeCheck(lines: DerivedLine[]): PlanCheck[] {
-  const needs = new Map(lines.map((l) => [l, l.derived ? poeNeed(l.derived) : null] as const))
+function poeCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
+  const budget = (l: DerivedLine) => budgetOf(l, powering)
+  const needs = new Map(lines.map((l) => [l, needOf(l, powering)] as const))
   const consumers = lines.filter((l) => needs.get(l) !== null && needs.get(l) !== undefined)
   const suppliers = lines.filter((l) => l.derived?.known.ports && poePortsOut(l.derived!).length > 0)
   if (consumers.length === 0 && suppliers.length === 0) return []
   const qty = (l: DerivedLine) => l.view.line.qty
 
-  const noDraw = consumers.filter((l) => metric(l.derived, 'power_draw_max_w') === null)
-  const noBudget = suppliers.filter((l) => metric(l.derived, 'poe_budget_w') === null)
-  const demand = consumers.reduce((n, l) => n + qty(l) * (metric(l.derived, 'power_draw_max_w') ?? 0), 0)
-  const supply = suppliers.reduce((n, l) => n + qty(l) * (metric(l.derived, 'poe_budget_w') ?? 0), 0)
+  // A switch on a PoE input draws what it uses itself, and what it passes on, which is the devices on it.
+  const poweredSwitches = new Set(consumers.filter((l) => powerOptions(l.derived) !== null))
+  const drawOf = (l: DerivedLine): number | null => (poweredSwitches.has(l) ? (metric(l.derived, 'power_draw_excl_poe_w') ?? 0) : metric(l.derived, 'power_draw_max_w'))
+  const noDraw = consumers.filter((l) => drawOf(l) === null)
+  const noBudget = suppliers.filter((l) => budget(l).watts === null)
+  const unchosen = noBudget.filter((l) => budget(l).choose)
+  const demand = consumers.reduce((n, l) => n + qty(l) * (drawOf(l) ?? 0), 0)
+  const supply = suppliers.reduce((n, l) => n + qty(l) * (budget(l).watts ?? 0), 0)
   const devices = consumers.reduce((n, l) => n + qty(l), 0)
   const need = new Map<string, number>()
   for (const l of consumers) need.set(needs.get(l)!, (need.get(needs.get(l)!) ?? 0) + qty(l))
@@ -258,7 +276,7 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   // Power. Known demand already over the known supply is bad whatever the unknowns are.
   if (demand > supply && noBudget.length === 0) out.push({ id: 'poe-power', label: 'PoE power', verdict: 'bad', shortfall: true, text: `Devices can draw up to ${demand} W, over the ${supply} W the plan supplies.` })
   else if (noDraw.length > 0 || noBudget.length > 0) {
-    const why = [noDraw.length > 0 && `no power draw is known for ${list(noDraw)}`, noBudget.length > 0 && `no PoE budget is known for ${list(noBudget)}`].filter(Boolean).join('; ')
+    const why = [noDraw.length > 0 && `no power draw is known for ${list(noDraw)}`, noBudget.length > unchosen.length && `no PoE budget is known for ${list(noBudget.filter((l) => !unchosen.includes(l)))}`, unchosen.length > 0 && `how ${list(unchosen)} ${unchosen.length === 1 && qty(unchosen[0]!) === 1 ? 'is' : 'are'} powered hasn't been chosen, and the PoE it passes on depends on that`].filter(Boolean).join('; ')
     out.push({ id: 'poe-power', label: 'PoE power', verdict: 'unknown', text: `Can't tell: ${why}. Known so far: ${demand} W drawn, ${supply} W supplied.` })
   } else out.push({ id: 'poe-power', label: 'PoE power', verdict: demand <= supply ? 'ok' : 'bad', shortfall: demand > supply, text: `Devices draw up to ${demand} W of the ${supply} W supplied.` })
 
@@ -274,10 +292,10 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
   if (lost > 0) return out
 
   // Which device goes on which switch: each switch has a budget of its own, so the total isn't enough.
-  const placing: { line: DerivedLine; rank: number; speed: number; draw: number }[] = []
-  for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: metric(l.derived, 'power_draw_max_w') ?? 0 })
+  const placing: { line: DerivedLine; rank: number; speed: number; draw: number; exclude?: ReadonlySet<number> }[] = []
+  for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: drawOf(l) ?? 0 })
   const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
-  const budgets = units.map((u) => metric(u.line.derived, 'poe_budget_w') ?? Infinity)
+  const budgets = units.map((u) => budget(u.line).watts ?? Infinity)
   const groups: { unit: number; label: string; count: number }[] = []
   const socketList: Socket[] = units.flatMap((u, unit) =>
     poePortsOut(u.line.derived!).flatMap((p) => {
@@ -285,7 +303,46 @@ function poeCheck(lines: DerivedLine[]): PlanCheck[] {
       return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group }))
     }),
   )
-  const placed = allocate(placing, socketList, budgets)
+  placing.forEach((d) => {
+    if (poweredSwitches.has(d.line)) d.exclude = new Set(units.flatMap((u, k) => (u.line === d.line ? [k] : [])))
+  })
+  let placed = allocate(placing, socketList, budgets)
+  // A switch on a PoE input draws the load of the devices placed on it, which depends on where it goes: settle it in a few rounds.
+  if (poweredSwitches.size > 0) {
+    const own = placing.map((d) => d.draw)
+    for (let round = 0; round < 4; round++) {
+      const load = new Map<DerivedLine, number>()
+      placing.forEach((d, i) => {
+        const at = placed[i]
+        if (at) load.set(units[at.unit]!.line, (load.get(units[at.unit]!.line) ?? 0) + d.draw)
+      })
+      let changed = false
+      placing.forEach((d, i) => {
+        if (!poweredSwitches.has(d.line)) return
+        const next = own[i]! + (load.get(d.line) ?? 0) / qty(d.line)
+        if (Math.abs(next - d.draw) > 1e-9) changed = true
+        d.draw = next
+      })
+      if (!changed) break
+      placed = allocate(placing, socketList, budgets)
+    }
+    // Two switches can't power each other: where the chain of who powers whom comes back round, none of them is.
+    const hostOf = (line: DerivedLine): DerivedLine | null => {
+      const i = placing.findIndex((d, k) => d.line === line && placed[k] !== null)
+      return i < 0 ? null : units[placed[i]!.unit]!.line
+    }
+    placing.forEach((d, i) => {
+      if (!poweredSwitches.has(d.line) || !placed[i]) return
+      let at: DerivedLine | null = hostOf(d.line)
+      for (let hops = 0; at && hops < 20; hops++) {
+        if (at === d.line) {
+          placed[i] = null
+          return
+        }
+        at = hostOf(at)
+      }
+    })
+  }
   const stranded = placing.filter((_, i) => placed[i] === null)
 
   // Each device on a port group, spelled out: one valid arrangement, not the only one.
@@ -406,14 +463,32 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: flat.join(' '), groups }]
 }
 
+/** A switch set to run on an adapter the store sells separately needs one for each, in the plan. */
+function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
+  const have = (slug: string) => lines.filter((l) => l.view.product?.slug === slug).reduce((n, l) => n + l.view.line.qty, 0)
+  const short: string[] = []
+  const wanted = new Map<string, number>()
+  for (const l of lines) {
+    const a = budgetOf(l, powering).option?.adapter
+    if (a) wanted.set(a.slug, (wanted.get(a.slug) ?? 0) + l.view.line.qty)
+  }
+  for (const l of lines) {
+    const a = budgetOf(l, powering).option?.adapter
+    if (!a || have(a.slug) >= wanted.get(a.slug)!) continue
+    short.push(`${name(l)} runs on the ${a.watts} W AC adapter, which is sold separately: the plan has ${have(a.slug)} of the ${wanted.get(a.slug)} it needs`)
+  }
+  if (short.length === 0) return []
+  return [{ id: 'power-adapter', label: 'Power adapter', verdict: 'warn', text: `${[...new Set(short)].join('; ')}.` }]
+}
+
 /**
  * What the plan adds up to, from the products' derived specifications: whether the PoE switches can
  * power the PoE devices, whether every other device has a switch port, and how much rack they take. A check appears only when the plan has something
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
-export function planChecks(lines: DerivedLine[], hosting: Hosting = {}): PlanCheck[] {
-  const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines), ...netPortCheck(lines, poeDevices, isPoePowered), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
+export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}): PlanCheck[] {
+  const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
+  return [...poeCheck(lines, powering), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering)), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
 }
 
 export interface Answer {

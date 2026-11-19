@@ -1,6 +1,7 @@
 import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
 import { lineFor, viewLine } from './plan'
+import { assumeBest, type Powering } from './powering'
 import { isPoePowered, planChecks, type DerivedLine, type PoeStats } from './planChecks'
 
 /** The most of one switch we'll suggest buying together. */
@@ -83,17 +84,19 @@ export interface Fits {
  * below 1 GbE (or below its own speed, if lower), and when the plan only falls short on speed, one that doesn't
  * speed anything up.
  */
-export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>): Fits {
+export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, powering: Powering = {}): Fits {
   // A switch that can't be bought now gives nothing to count on, so it is checked without and its stand-ins offered.
   const replaces = fullPlan.filter((l) => l.view.state !== 'in' && !!l.derived?.known.ports && l.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out'))
   const plan = fullPlan.filter((l) => !replaces.includes(l))
   // When the plan only falls short on speed, a switch has to speed devices up to be worth suggesting.
-  const before = planChecks(plan)
+  // A switch whose power hasn't been chosen is taken to run on its best input, here: the finder is asked about ports and power, not that.
+  const powered = (lines: DerivedLine[]): Powering => ({ ...assumeBest(lines), ...powering })
+  const before = planChecks(plan, {}, powered(plan))
   const speedOnly = before.some((c) => c.id === 'poe-power' && c.verdict === 'ok') && before.some((c) => c.id === 'poe-ports' && c.verdict === 'ok')
   const slowedBefore = speedOnly ? (before.find((c) => c.id === 'poe-layout')?.stats?.slowed ?? 0) : 0
   const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
   // What the plan needs from a switch: PoE (power and ports), and a port for each device that isn't PoE-powered.
-  const needsPoe = plan.some(isPoePowered)
+  const needsPoe = plan.some((l) => isPoePowered(l, powered(plan)))
   const needsPorts = before.some((c) => c.id === 'net-ports')
   // When only some switch with cages is uplinked over copper, a switch is worth suggesting only if it cuts that down (any switch will do, PoE or not).
   const sfpBefore = before.find((c) => c.id === 'net-sfp')?.net?.sfpMisses ?? 0
@@ -118,7 +121,7 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
       inStock &&= view.state === 'in'
       currency = view.currency
     }
-    const checks = planChecks([...plan, ...added])
+    const checks = planChecks([...plan, ...added], {}, powered([...plan, ...added]))
     const power = checks.find((c) => c.id === 'poe-power')
     const ports = checks.find((c) => c.id === 'poe-ports')
     const poeStats = checks.find((c) => c.id === 'poe-layout')?.stats

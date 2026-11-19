@@ -7,6 +7,7 @@ import { formatPrice } from '../lib/format'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
 import { powerSummary } from '../lib/power'
+import type { Powering } from '../lib/powering'
 import { formatSpeed } from '../lib/requirements'
 import { DEFAULT_POWER_METHODS, findFits, MAX_SWITCHES, pickOptions, POWER_METHODS, type ListedSwitch, type PowerMethod } from '../lib/switchFinder'
 import { Badge } from './ui/Badge'
@@ -70,13 +71,13 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
 }
 
 /** Switches that, added to the plan, give its PoE devices the power and ports they need. */
-export function SwitchFinder({ plan, products, derived, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onClose: () => void }) {
+export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose }: { plan: DerivedLine[]; products: Product[]; derived: Derived[]; powering?: Powering; onAdd: (lines: PlanLine[], replacing: PlanLine[]) => void; onClose: () => void }) {
   const [methods, setMethods] = useState<ReadonlySet<PowerMethod>>(new Set(DEFAULT_POWER_METHODS))
   // Trying every switch is the costly part; the power filter only narrows what it found.
   const fits = useMemo(() => {
     const byRef = new Map(products.map((p) => [productRef(p), p]))
-    return findFits(plan, buildCatalog(products, derived), byRef)
-  }, [plan, products, derived])
+    return findFits(plan, buildCatalog(products, derived), byRef, powering)
+  }, [plan, products, derived, powering])
   const found = useMemo(() => pickOptions(fits, methods), [fits, methods])
   const toggle = (m: PowerMethod) => setMethods((cur) => new Set(cur.has(m) ? [...cur].filter((x) => x !== m) : [...cur, m]))
   const extra = found.all.length - found.options.length
