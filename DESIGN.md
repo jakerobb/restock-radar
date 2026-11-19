@@ -143,6 +143,8 @@ state), `events` (history, with `notified_at`). Schema is versioned with
 
 `variant_numbers` gives every variant a permanent small integer (`num`, served on each variant by `/v1/products`). It is `AUTOINCREMENT`, so a number is never reused, and it identifies the region, product and variant at once. Shared build-plan links are made of these numbers.
 
+A variant the store stops listing for a product (it renames one, which gives it a new id, so the old row would otherwise sit there with a stale price) is marked `delisted_at` when the product is next observed, since every observation carries all of a product's variants. It is kept, for its history and so that an old plan link naming its number still resolves, but `/v1/products` leaves it out of `variants` and gives its number and SKU under `retired`; it isn't counted in the status figures. If the store lists it again the mark is cleared.
+
 `product_specs` holds each product's specification, one row per entry in the
 store's order: its section (id, label, and type, `Standard` or the grid's
 `Overview`), the feature's id and label, its parent group's feature id, the kind

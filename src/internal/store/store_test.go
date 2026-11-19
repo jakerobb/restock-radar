@@ -616,7 +616,7 @@ func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := len(migrations) - 1
+	prior := len(migrations) - 2 // everything before the variant numbers
 	for i := 0; i < prior; i++ {
 		if _, err := raw.Exec(migrations[i]); err != nil {
 			t.Fatal(err)
@@ -649,5 +649,50 @@ func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
 	}
 	if got["W-1"] != 1 || got["W-2"] != 2 {
 		t.Fatalf("numbers = %v, want the earlier variant first", got)
+	}
+}
+
+func TestVariantTheStoreTakesOffIsDelisted(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	p := product("Available", 27900)
+	p.Variants[0].Title = "Default"
+	if _, err := s.Apply(ctx, "us", p, now); err != nil {
+		t.Fatal(err)
+	}
+	// The store renames it: a new variant id, the same SKU, and the old one is gone.
+	renamed := product("Available", 27900)
+	renamed.Variants[0].ID, renamed.Variants[0].Title = "v9", "US Version"
+	if _, err := s.Apply(ctx, "us", renamed, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	state := func() map[string]bool {
+		vs, err := s.Variants(ctx, "us")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, v := range vs {
+			out[v.VariantID] = v.Delisted
+		}
+		return out
+	}
+	if got := state(); len(got) != 2 || !got["v1"] || got["v9"] {
+		t.Fatalf("delisted = %v, want v1 only", got)
+	}
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := st.VariantsByStatus["Available"]; n != 1 {
+		t.Fatalf("stats count %d available variants, want 1", n)
+	}
+	// If the store lists it again it is back.
+	if _, err := s.Apply(ctx, "us", p, now.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(); got["v1"] || !got["v9"] {
+		t.Fatalf("delisted = %v, want v9 only", got)
 	}
 }

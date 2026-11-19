@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -306,6 +307,9 @@ var migrations = []string{
 		UNIQUE (region, variant_id)
 	);
 	INSERT INTO variant_numbers (region, variant_id) SELECT region, id FROM variants ORDER BY first_seen, region, id;`,
+	// A variant the store no longer lists for its product (renamed, replaced) is kept, for its history and so
+	// that links to it still read, but marked so that it isn't offered or counted. Empty while it is listed.
+	`ALTER TABLE variants ADD COLUMN delisted_at TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {
@@ -409,6 +413,8 @@ func firstNonNil(a, b *int64) *int64 {
 
 // VariantState is the latest observed state of a variant.
 type VariantState struct {
+	// Delisted is true when the store no longer lists the variant for its product.
+	Delisted          bool     `json:"delisted,omitempty"`
 	Region            string   `json:"region"`
 	ProductID         string   `json:"product_id"`
 	ProductSlug       string   `json:"product_slug"`
@@ -684,11 +690,23 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		}
 		args = append(args, region, v.ID)
 		_, err = tx.ExecContext(ctx, `UPDATE variants SET sku = ?, title = ?, status = ?, price_cents = ?,
-			regular_price_cents = ?, surcharge_price_cents = ?, currency = ?, restock_eta = ?, last_checked = ?, last_changed = `+lastChanged+`
+			regular_price_cents = ?, surcharge_price_cents = ?, currency = ?, restock_eta = ?, last_checked = ?, delisted_at = '', last_changed = `+lastChanged+`
 			WHERE region = ? AND id = ?`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("updating variant: %w", err)
 		}
+	}
+
+	// What the store lists is the whole product, so a variant of it that isn't there any more has been taken off.
+	listed := make([]any, 0, len(p.Variants)+3)
+	listed = append(listed, ts(now), region, p.ID)
+	marks := make([]string, 0, len(p.Variants))
+	for _, v := range p.Variants {
+		listed = append(listed, v.ID)
+		marks = append(marks, "?")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE variants SET delisted_at = ? WHERE region = ? AND product_id = ? AND delisted_at = '' AND id NOT IN (`+strings.Join(marks, ",")+`)`, listed...); err != nil {
+		return nil, fmt.Errorf("marking delisted variants: %w", err)
 	}
 
 	return events, nil
@@ -715,7 +733,7 @@ const eventSelect = `
 		e.old_status, e.new_status, e.old_price_cents, e.new_price_cents,
 		e.old_regular_price_cents, e.new_regular_price_cents, e.currency, e.notified_at, e.failed_at,
 		e.old_total_cents, e.new_total_cents, e.old_surcharge_types, e.new_surcharge_types,
-		(SELECT COUNT(*) FROM variants c WHERE c.region = e.region AND c.product_id = e.product_id),
+		(SELECT COUNT(*) FROM variants c WHERE c.region = e.region AND c.product_id = e.product_id AND c.delisted_at = ''),
 		(SELECT MAX(x.ts) FROM events x WHERE x.region = e.region AND x.variant_id = e.variant_id
 			AND x.kind = 'status' AND x.id < e.id),
 		v.first_seen
@@ -811,7 +829,7 @@ func (s *Store) Events(ctx context.Context, region string, sinceID int64, limit 
 func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.region, v.product_id, p.slug, p.title, p.short_title, p.group_title, p.techspecs_url, p.category, p.tags, p.collection, v.id, n.num, v.sku, v.title, v.status, v.price_cents,
-			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen
+			v.regular_price_cents, v.surcharge_price_cents, p.surcharge_types, v.currency, v.restock_eta, v.last_checked, v.last_changed, v.first_seen, v.delisted_at != ''
 		FROM variants v
 		JOIN products p ON p.region = v.region AND p.id = v.product_id
 		JOIN variant_numbers n ON n.region = v.region AND n.variant_id = v.id
@@ -828,7 +846,7 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 		var checked, changed, first, tags, surcharges string
 		if err := rows.Scan(&v.Region, &v.ProductID, &v.ProductSlug, &v.ProductTitle, &v.ProductShortTitle, &v.ProductGroup, &v.ProductTechSpecsURL, &v.ProductCategory, &tags, &v.ProductCollection, &v.VariantID, &v.Num, &v.SKU,
 			&v.VariantTitle, &v.Status, &v.PriceCents, &v.RegularPriceCents, &v.PriceWithSurchargesCents, &surcharges, &v.Currency, &v.RestockETA,
-			&checked, &changed, &first); err != nil {
+			&checked, &changed, &first, &v.Delisted); err != nil {
 			return nil, err
 		}
 		v.ProductTags = []string{}
@@ -1169,7 +1187,7 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE notified_at IS NULL AND failed_at IS NULL`).Scan(&st.PendingEvents); err != nil {
 		return st, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM variants GROUP BY status`)
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM variants WHERE delisted_at = '' GROUP BY status`)
 	if err != nil {
 		return st, err
 	}
