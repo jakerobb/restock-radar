@@ -32,7 +32,7 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
   const power = powers.every(Boolean) ? powers.join(' / ') : null
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
-      <div className="min-w-0 text-sm">
+      <div className="min-w-0 flex-1 basis-56 text-sm">
         {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
         <div className="mt-0.5">
           {parts.map((p, i) => (
@@ -56,7 +56,7 @@ function SwitchRow({ o, label, onAdd }: { o: ListedSwitch; label?: string; onAdd
       </div>
       <Button
         variant="secondary"
-        className="py-1 text-sm"
+        className="shrink-0 py-1 text-sm"
         aria-label={`Add ${parts.map((p) => `${p.qty > 1 ? `${p.qty} × ` : ''}${p.row.product.title}`).join(' and ')} to the plan`}
         onClick={() => {
           const lines = parts.flatMap((p) => lineFor(p.row.product, p.qty) ?? [])

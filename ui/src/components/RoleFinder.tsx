@@ -31,7 +31,7 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
   const title = o.rows.map((r) => r.product.title).join(' and ')
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
-      <div className="min-w-0 text-sm">
+      <div className="min-w-0 flex-1 basis-56 text-sm">
         {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
         <div className="mt-0.5">
           {o.rows.map((r, i) => (
@@ -64,7 +64,7 @@ function RoleRow({ o, label, onAdd }: { o: ListedRole; label?: string; onAdd: (l
       </div>
       <Button
         variant="secondary"
-        className="py-1 text-sm"
+        className="shrink-0 py-1 text-sm"
         aria-label={`Add ${title} to the plan`}
         onClick={() => {
           const lines = o.rows.flatMap((r) => lineFor(r.product, 1) ?? [])

@@ -27,7 +27,7 @@ function facts(o: ListedNvr): string {
 function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (line: PlanLine, replacing: PlanLine[]) => void }) {
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
-      <div className="min-w-0 text-sm">
+      <div className="min-w-0 flex-1 basis-56 text-sm">
         {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
         <div className="mt-0.5">
           {o.qty > 1 && `${o.qty} × `}
@@ -45,7 +45,7 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
       </div>
       <Button
         variant="secondary"
-        className="py-1 text-sm"
+        className="shrink-0 py-1 text-sm"
         aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
         onClick={() => {
           const line = lineFor(o.row.product, o.qty)
