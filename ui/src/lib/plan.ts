@@ -199,7 +199,10 @@ export function changeVariant(plan: PlanLine[], key: string, variant: Variant): 
   const line = plan.find((l) => lineKey(l) === key)
   if (!line || variant.sku === line.sku) return plan
   const moved: PlanLine = { ...line, sku: variant.sku, addedCents: totalCents(variant) }
-  return addLine(removeLine(plan, key), moved)
+  // It stays where it was; if the new variant is already in the plan, the two merge into that line.
+  const there = plan.find((l) => lineKey(l) === lineKey(moved))
+  if (there) return addLine(removeLine(plan, key), moved)
+  return plan.map((l) => (l === line ? moved : l))
 }
 
 /** What to add when someone says "add this product": the cheapest variant in stock, else the cheapest, else the first. */

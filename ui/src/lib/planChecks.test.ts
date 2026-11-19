@@ -118,6 +118,16 @@ describe('planChecks', () => {
       expect(byId([racked('sw', 1), instant, key]).rack?.text).toBe('1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: UNVR Instant, CloudKey+.')
     })
 
+    it('counts a PDU Pro and a patch panel, whose height the store does not give, and lays the check out as lists', () => {
+      const none = { rack: { mountable: false, units: 0, full_depth: false } }
+      const c = byId([racked('sw', 1), real('usp-pdu-pro', 'PDU Pro', 'Integrations', 'integrations-power-tech', none), real('uacc-rack-panel-patch-blank-24', 'Patch Panel', 'Accessories', 'accessories-rack-mount', none), desk('xg8')]).rack
+      expect(c?.text).toBe('4U of rack space (sw 1U, PDU Pro 2U, Patch Panel 1U). Not rack-mount, so it needs a shelf or desk space: xg8.')
+      expect(c?.groups).toEqual([
+        { text: '4U of rack space', ordered: true, items: ['sw 1U', 'PDU Pro 2U', 'Patch Panel 1U'] },
+        { text: 'Not rack-mount, so it needs a shelf or desk space:', items: ['xg8'] },
+      ])
+    })
+
     describe('rack-mount accessories', () => {
       const mountOf = (slug: string, title: string, qty = 1) => real(slug, title, 'Accessories', 'accessories-rack-mount', { rack: { mountable: false, units: 0, full_depth: false } }, qty)
       const aiKey = (qty: number) => real('ai-key', 'AI Key', 'Cameras & Security', 'physical-security-nvr', deskDevice, qty)
