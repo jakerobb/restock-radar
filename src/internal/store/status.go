@@ -82,7 +82,7 @@ func (s *Store) Status(ctx context.Context, now time.Time) (Status, error) {
 	}
 
 	var last, oldest, latestEvent sql.NullString
-	if err := one(`SELECT COUNT(*), MAX(last_checked), MIN(last_checked) FROM variants`, nil, &st.Variants, &last, &oldest); err != nil {
+	if err := one(`SELECT COUNT(*), MAX(last_checked), MIN(last_checked) FROM variants WHERE delisted_at = ''`, nil, &st.Variants, &last, &oldest); err != nil {
 		return st, err
 	}
 	st.LastChecked, st.OldestChecked = parseTS(last), parseTS(oldest)
@@ -109,7 +109,7 @@ func (s *Store) Status(ctx context.Context, now time.Time) (Status, error) {
 	if err := s.groupCounts(ctx, `SELECT region, COUNT(*) FROM products GROUP BY region`, st.ProductsByRegion); err != nil {
 		return st, err
 	}
-	if err := s.groupCounts(ctx, `SELECT status, COUNT(*) FROM variants GROUP BY status`, st.VariantsByStatus); err != nil {
+	if err := s.groupCounts(ctx, `SELECT status, COUNT(*) FROM variants WHERE delisted_at = '' GROUP BY status`, st.VariantsByStatus); err != nil {
 		return st, err
 	}
 

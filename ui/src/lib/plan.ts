@@ -108,7 +108,11 @@ const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'self'] | 'igno
 /** The variants by number: which product (as "region/slug") and which SKU each is. */
 export function variantsByNum(products: Iterable<Product>): Map<number, { ref: string; sku: string }> {
   const out = new Map<number, { ref: string; sku: string }>()
-  for (const p of products) for (const v of p.variants) out.set(v.num, { ref: productRef(p), sku: v.sku })
+  for (const p of products) {
+    // Retired first: where one has the SKU of a listed variant, the listed one is the number to give out.
+    for (const v of p.retired ?? []) out.set(v.num, { ref: productRef(p), sku: v.sku })
+    for (const v of p.variants) out.set(v.num, { ref: productRef(p), sku: v.sku })
+  }
   return out
 }
 

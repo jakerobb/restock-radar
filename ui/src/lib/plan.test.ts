@@ -1,4 +1,4 @@
-import { addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
+import { variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
 const line = (over: Partial<PlanLine> = {}): PlanLine => ({ ref: 'us/widget', sku: 'SKU-1', qty: 1, addedCents: 10900, ...over })
@@ -112,6 +112,16 @@ describe('editing a plan', () => {
     const first = line({ ref: 'us/a' })
     const last = line({ ref: 'us/c' })
     expect(changeVariant([first, line(), last], lineKey(line()), other).map((l) => l.ref)).toEqual(['us/a', 'us/widget', 'us/c'])
+  })
+})
+
+describe('variants the store has taken off', () => {
+  it('still resolve in an old link, but the listed variant with the same SKU is the one encoded', () => {
+    const p = product({ variants: [variant({ sku: 'SKU-1', num: 9 })], retired: [{ num: 4, sku: 'SKU-1' }] })
+    expect(variantsByNum([p]).get(4)).toEqual({ ref: 'us/widget', sku: 'SKU-1' })
+    const l = line({ sku: 'SKU-1' })
+    expect(decodePlan(encodePlan([l], [p]), [p])!.lines.map((x) => x.sku)).toEqual(['SKU-1'])
+    expect(encodePlan([l], [p])).toBe(encodePlan([l], [product({ variants: [variant({ sku: 'SKU-1', num: 9 })] })]))
   })
 })
 

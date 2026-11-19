@@ -39,6 +39,12 @@ type variantJSON struct {
 	FirstSeen      time.Time `json:"first_seen"`
 }
 
+// retiredJSON is a variant the store has taken off a product, kept so that old plan links to it still resolve.
+type retiredJSON struct {
+	Num int    `json:"num"`
+	SKU string `json:"sku"`
+}
+
 type productJSON struct {
 	Region string `json:"region"`
 	ID     string `json:"id"`
@@ -60,6 +66,8 @@ type productJSON struct {
 	// TechSpecsURL is the product's page on techspecs.ui.com; empty when it has none or isn't checked yet.
 	TechSpecsURL string        `json:"techspecs_url"`
 	Variants     []variantJSON `json:"variants"`
+	// Retired are variants taken off the product, by number and SKU, so a plan link made earlier still resolves.
+	Retired []retiredJSON `json:"retired,omitempty"`
 }
 
 type pendingJSON struct {
@@ -97,7 +105,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 
 	index := map[[2]string]int{}
 	for _, v := range variants {
-		if resp.LastSync == nil || v.LastChecked.After(*resp.LastSync) {
+		if !v.Delisted && (resp.LastSync == nil || v.LastChecked.After(*resp.LastSync)) {
 			t := v.LastChecked
 			resp.LastSync = &t
 		}
@@ -111,6 +119,11 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 			resp.Products = append(resp.Products, p)
 			i = len(resp.Products) - 1
 			index[key] = i
+		}
+		if v.Delisted {
+			// Not offered, but a link made while it was listed still names it.
+			resp.Products[i].Retired = append(resp.Products[i].Retired, retiredJSON{Num: v.Num, SKU: v.SKU})
+			continue
 		}
 		resp.Products[i].Variants = append(resp.Products[i].Variants, variantJSON{
 			ID: v.VariantID, Num: v.Num, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,

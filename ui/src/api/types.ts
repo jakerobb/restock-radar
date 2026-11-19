@@ -47,6 +47,8 @@ export interface Product {
   /** The product's page on techspecs.ui.com; empty until a poll has seen its category. */
   techspecs_url: string
   variants: Variant[]
+  /** Variants the store has taken off the product, so a plan link made while they were listed still resolves (to the variant with the same SKU, if any). */
+  retired?: { num: number; sku: string }[]
 }
 
 export interface PendingItem {
