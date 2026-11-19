@@ -18,3 +18,9 @@ export const RACK_MOUNTS: Record<string, RackMount> = {
 
 /** Products that go in a rack only with one of those (the store lists some as rack-mount, some as desktop, some both). */
 export const NEEDS_RACK_MOUNT: ReadonlySet<string> = new Set(Object.values(RACK_MOUNTS).flatMap((m) => m.fits))
+
+/** Rack equipment whose height the store doesn't state (it has no form factor), by slug. */
+export const RACK_UNITS: Record<string, number> = {
+  'usp-pdu-pro': 2,
+  'uacc-rack-panel-patch-blank-24': 1,
+}

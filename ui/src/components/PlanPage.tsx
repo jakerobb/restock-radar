@@ -38,6 +38,11 @@ const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
 }
 
 /** A quantity box you can clear and retype in: only a whole number from 1 to 99 changes the plan, and leaving the box shows the real quantity. */
+/** A numbered list when the order is the point (what goes in the rack, top to bottom), else bullets. */
+function ListTag({ ordered, children }: { ordered?: boolean; children: React.ReactNode }) {
+  return ordered ? <ol className="list-decimal pl-5 text-muted">{children}</ol> : <ul className="list-disc pl-5 text-muted">{children}</ul>
+}
+
 function QtyInput({ qty, label, onChange }: { qty: number; label: string; onChange: (qty: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null)
   return (
@@ -359,6 +364,21 @@ export default function PlanPage() {
                             ))}
                           </div>
                         </details>
+                      ) : c.groups ? (
+                        <ul className="mt-1 list-disc space-y-1 pl-5">
+                          {c.groups.map((g) => (
+                            <li key={g.text}>
+                              {g.text}
+                              {g.items && g.items.length > 0 && (
+                                <ListTag ordered={g.ordered}>
+                                  {g.items.map((i) => (
+                                    <li key={i}>{i}</li>
+                                  ))}
+                                </ListTag>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       ) : (
                         c.text
                       )}

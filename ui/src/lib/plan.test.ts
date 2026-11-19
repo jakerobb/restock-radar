@@ -108,6 +108,10 @@ describe('editing a plan', () => {
     expect(changeVariant([line({ qty: 2 })], lineKey(line()), other)).toEqual([line({ sku: 'SKU-2', qty: 2, addedCents: 5000 })])
     // Merged into the line already there, which keeps its own added price.
     expect(changeVariant([line({ qty: 2 }), line({ sku: 'SKU-2', qty: 1, addedCents: 4000 })], lineKey(line()), other)).toEqual([line({ sku: 'SKU-2', qty: 3, addedCents: 4000 })])
+    // It keeps its place in the plan.
+    const first = line({ ref: 'us/a' })
+    const last = line({ ref: 'us/c' })
+    expect(changeVariant([first, line(), last], lineKey(line()), other).map((l) => l.ref)).toEqual(['us/a', 'us/widget', 'us/c'])
   })
 })
 
