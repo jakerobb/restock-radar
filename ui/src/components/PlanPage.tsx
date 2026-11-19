@@ -5,7 +5,7 @@ import type { Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
 import { formatPrice } from '../lib/format'
 import { decodePlan, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
-import { planChecks, type CheckVerdict } from '../lib/planChecks'
+import { overall, planChecks, type CheckVerdict } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { PageNav } from './PageNav'
@@ -28,6 +28,8 @@ const STATE: Record<LineState, { label: string; tone: Tone }> = {
   unlisted: { label: 'Variant no longer listed', tone: 'bad' },
   untracked: { label: 'No longer tracked', tone: 'bad' },
 }
+
+const VERDICT_TONE = { ok: 'text-ok', warn: 'text-warn', bad: 'text-bad' } as const
 
 const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
   ok: { mark: '✓', tone: 'text-ok' },
@@ -202,6 +204,7 @@ export default function PlanPage() {
   }, [views, derived])
   const hosting: Hosting = useMemo(() => (shared ? (decoded?.hosting ?? {}) : mine.hosting), [shared, decoded, mine.hosting])
   const checks = useMemo(() => planChecks(derivedLines, hosting), [derivedLines, hosting])
+  const answer = useMemo(() => overall(checks), [checks])
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
   const [findingRoles, setFindingRoles] = useState(false)
@@ -339,7 +342,12 @@ export default function PlanPage() {
 
           {checks.length > 0 && (
             <Card className="mt-5" aria-label="Checks">
-              <h2 className="mb-1 text-lg font-semibold">Does it add up?</h2>
+              <h2 className="text-lg font-semibold">Does it add up?</h2>
+              {answer && (
+                <p className={`mt-1 mb-2 text-4xl font-bold ${VERDICT_TONE[answer.tone]}`} aria-label={`Answer: ${answer.word}`}>
+                  {answer.word} <span aria-hidden>{answer.emoji}</span>
+                </p>
+              )}
               <ul className="divide-y divide-line text-sm">
                 {checks.map((c) => (
                   <li key={c.id} className="flex gap-2 py-1.5">
