@@ -97,9 +97,14 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
     else groups.set(key, { host: h.host, line: h.line, n: 1, uplink, poe: h.poe })
   }
   const devices = [...groups.entries()].sort((a, b) => name(a[1].line).localeCompare(name(b[1].line)))
+  /** The boxes of a line's units that other devices can be plugged into (an NVR with PoE ports), in unit order, with how many units each holds. */
+  const deviceBoxes = new Map<string, { node: TopoNode; n: number }[]>()
   for (const [key, g] of devices) {
     const { checks, ...rest } = extras(g.line, g.n)
-    add(g.host, { key, title: name(g.line), kind: 'device', qty: g.n, uplink: g.uplink, ...rest, checks: [...(g.poe ? POE_CHECKS : ['net-ports']), ...checks], children: [] })
+    const node: TopoNode = { key, title: name(g.line), kind: 'device', qty: g.n, uplink: g.uplink, ...rest, checks: [...(g.poe ? POE_CHECKS : ['net-ports']), ...checks], children: [] }
+    add(g.host, node)
+    const lk = lineKey(g.line.view.line)
+    deviceBoxes.set(lk, [...(deviceBoxes.get(lk) ?? []), { node, n: g.n }])
   }
 
   const node = (u: { ref: UnitRef; kind: 'gateway' | 'switch' }): TopoNode => {
@@ -133,6 +138,14 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
   for (const [k, kids] of children) {
     const n = nodes.get(k)
     if (n) n.children = [...kids.filter((c) => c.kind === 'switch'), ...kids.filter((c) => c.kind !== 'switch')]
+  }
+  // What is plugged into a device that isn't a switch or gateway (cameras on an NVR's PoE ports) hangs from the box holding that unit.
+  for (const [k, kids] of children) {
+    if (nodes.has(k)) continue
+    const cut = k.lastIndexOf('#')
+    let at = Number(k.slice(cut + 1))
+    const box = deviceBoxes.get(k.slice(0, cut))?.find((b) => (at -= b.n) < 0)
+    if (box) box.node.children = [...box.node.children, ...kids]
   }
   // An orphan is a copy of its node, so it has to be given what was hung from it.
   for (const o of orphans) o.children = nodes.get(o.key)!.children

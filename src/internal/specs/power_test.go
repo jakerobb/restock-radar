@@ -127,7 +127,7 @@ func TestRealPowerMethods(t *testing.T) {
 		"ubb-xg":              {"poe:PoE++", "passive_poe"},
 		"umr-us":              {"poe:PoE+", "usb", "dc"},
 		"u7-pro":              {"poe:PoE+"},
-		"ucg-fiber":           {"dc"},
+		"ucg-fiber":           {"dc", "ac"}, // the DC jack is fed by an adapter, whose mains range is listed separately
 		"utr":                 {"usb"},
 		"toolless-mini-rack":  {}, // states no power method at all
 	} {

@@ -25,6 +25,12 @@ describe('buildTopology', () => {
     expect(t.roots.map(show)).toEqual(['GW[SW[CAM × 4, NVR]]'])
   })
 
+  it('hangs the devices an NVR powers from the NVR', () => {
+    const recorder = item('nvr', 1, 'Storage', { ports: [port({ max_speed_mbps: 1000 }), port(poeOut(4))] })
+    const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }]), recorder, cam(2)])!
+    expect(t.roots.map(show)).toEqual(['GW[SW[NVR[CAM × 2]]]'])
+  })
+
   it('puts a switch that uplinks to another under it, switches before devices', () => {
     const t = buildTopology([gw(1), sw('a', [{ count: 1, max_speed_mbps: 10000, media: 'sfp+' }, { count: 4, max_speed_mbps: 1000 }]), sw('b', [{ count: 8, max_speed_mbps: 1000 }]), nvr()])!
     expect(t.roots).toHaveLength(1)
