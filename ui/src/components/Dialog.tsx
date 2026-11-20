@@ -2,12 +2,14 @@ import { useEffect, useRef, type ReactNode } from 'react'
 
 interface DialogProps {
   title: string
+  /** 'wide' for content that would otherwise wrap. */
+  size?: 'normal' | 'wide'
   onClose: () => void
   children: ReactNode
 }
 
 /** A modal dialog (native <dialog>: focus trap, Esc to close). Mount it to open it, unmount to close. An element marked data-autofocus gets the focus. */
-export function Dialog({ title, onClose, children }: DialogProps) {
+export function Dialog({ title, size = 'normal', onClose, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const el = ref.current
@@ -24,11 +26,16 @@ export function Dialog({ title, onClose, children }: DialogProps) {
       onClose={onClose}
       onCancel={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-line bg-surface p-5 text-ink backdrop:bg-black/50"
+      className={`m-auto ${size === 'wide' ? 'w-[min(44rem,calc(100%-2rem))]' : 'w-[min(32rem,calc(100%-2rem))]'} rounded-xl border border-line bg-surface p-5 text-ink backdrop:bg-black/50`}
     >
       <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-lg font-semibold">{title}</h2>
-        <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer rounded px-2 text-2xl leading-none text-muted hover:text-ink">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="cursor-pointer rounded px-2 text-2xl leading-none text-muted hover:text-ink"
+        >
           ×
         </button>
       </div>
