@@ -252,6 +252,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
     return kind(devices[a]!) - kind(devices[b]!) || Math.max(devices[b]!.rj45 ?? 0, devices[b]!.sfp ?? 0) - Math.max(devices[a]!.rj45 ?? 0, devices[a]!.sfp ?? 0)
   })
   const sockets = units.flatMap((u) => u.groups.filter(downstream))
+  const freeOn = (u: Unit) => u.groups.filter(downstream).reduce((n, g) => n + g.free, 0)
   const fit = (dev: Device, g: Group): { speed: number; module: boolean; cage: boolean } | null => {
     if (g.media === 'either') return { speed: Math.min(g.speed, Math.max(dev.rj45 ?? 0, dev.sfp ?? 0)), module: false, cage: dev.sfp !== null }
     if (g.media === 'rj45') return dev.rj45 === null ? null : { speed: Math.min(g.speed, dev.rj45), module: false, cage: false }
@@ -267,7 +268,8 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
       const f = fit(dev, g)
       if (!f) continue
       // A switch's port before a gateway's; no module; a cage for a device with an SFP port; the fastest; the slowest port that gives it (so quicker ones stay free); a plain port over a combo.
-      const key = [g.unit.kind === 'gateway' ? 1 : 0, f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, -rankSpeed(f.speed), rankSpeed(g.speed), g.media === 'either' ? 1 : 0]
+      // Ties then go to the switch nearest the root, then to the one with the most ports left, so the result doesn't depend on the order of the plan's lines.
+      const key = [g.unit.kind === 'gateway' ? 1 : 0, f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, -rankSpeed(f.speed), rankSpeed(g.speed), g.media === 'either' ? 1 : 0, g.unit.depth, -freeOn(g.unit)]
       if (!best || lex(key, best.key) < 0) best = { g, key, f }
     }
     if (best) {
