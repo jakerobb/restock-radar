@@ -18,7 +18,7 @@ import (
 // derived again at startup. TestDerivationVersion fails when the derived output
 // for the captured products changes without a bump; after bumping, record the
 // new output with: go test ./internal/specs -run TestDerivationVersion -update
-const Version = 9
+const Version = 11
 
 var (
 	tagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)

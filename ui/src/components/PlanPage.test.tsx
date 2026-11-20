@@ -400,6 +400,33 @@ describe('PlanPage', () => {
     expect(screen.queryByRole('button', { name: 'Find a switch' })).not.toBeInTheDocument()
   })
 
+  it('offers a PoE injector for the device the switch has no power left for, and adds the one chosen', async () => {
+    catalog()
+    const user = userEvent.setup()
+    const injector = product({ id: '9', slug: 'injector', title: 'PoE+ Injector', type: 'Accessories', variants: [variant({ id: 'i', num: 9, sku: 'INJ-30', price_cents: 1500 })] })
+    const weak = product({ id: '8', slug: 'weak', title: 'PoE Injector', type: 'Accessories', variants: [variant({ id: 'w', num: 8, sku: 'INJ-15', price_cents: 800 })] })
+    const inj = (slug: string, cls: string, watts: number) =>
+      derived({ slug, known, ports: [port({ count: 1, source: 'injector' }), port({ count: 1, poe_class: cls, poe_direction: 'out', source: 'injector' })], metrics: [metric('poe_budget_w', watts)], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] })
+    const ds = [
+      derived({ slug: 'switch', known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)], power: [{ kind: 'ac', poe_class: '', detail: 'AC' }] }),
+      derived({ slug: 'ap', known, ports: [port({ count: 1, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 20)] }),
+      inj('injector', 'PoE+', 30),
+      inj('weak', 'PoE', 15.4),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products: [...products, injector, weak] }) }, 'GET /v1/derived': { body: ds } })
+    // Six access points draw 120 W of the switch's 100 W, and it has ports to spare.
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', qty: 6, addedCents: 15000 })])
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Find a PoE injector' }))
+    const finder = await screen.findByLabelText('Find a PoE injector')
+    expect(finder).toHaveTextContent('Cheapest that fits')
+    expect(finder).toHaveTextContent('PoE+ Injector')
+    expect(finder).not.toHaveTextContent('1 × PoE Injector') // too low a class for a PoE+ device
+    await user.click(within(finder).getByRole('button', { name: 'Add PoE+ Injector to the plan' }))
+    await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('Devices draw up to 120 W of the 130 W supplied.'))
+    expect(screen.queryByRole('button', { name: 'Find a PoE injector' })).not.toBeInTheDocument()
+  })
+
   it('shows how each suggested switch is powered, with AC and PoE accepted and DC not by default', async () => {
     catalog()
     const user = userEvent.setup()

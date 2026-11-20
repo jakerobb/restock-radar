@@ -102,3 +102,13 @@ describe('buildTopology', () => {
     expect(buildTopology([gw()])).toBeNull()
   })
 })
+
+describe('buildTopology with a PoE injector', () => {
+  it('hangs the device an injector powers from the injector, which is plugged into the switch', () => {
+    const injector = item('inj', 1, 'Accessories', { ports: [port({ count: 1, max_speed_mbps: 1000, source: 'injector' }), port({ count: 1, max_speed_mbps: 1000, poe_class: 'PoE', poe_direction: 'out', source: 'injector' })], metrics: [metric('poe_budget_w', 15.4)] })
+    // The switch has no PoE of its own, so the camera is on the injector.
+    const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }]), injector, cam(1)])!
+    expect(t.roots.map(show)).toEqual(['GW[SW[INJ[CAM]]]'])
+  })
+})
+
