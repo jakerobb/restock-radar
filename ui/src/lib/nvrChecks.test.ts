@@ -122,15 +122,15 @@ describe('the storage of an NVR', () => {
     const s = four()
     const r = rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 4], ['c4k', 10]))
     expect(r).toContain('4 × 16 TB drives, 64 TB in all:')
-    expect(r).toContain('RAID 5: 48 TB effective, 37 days of footage')
-    expect(r).toContain('RAID 10: 32 TB effective, 25 days of footage')
+    expect(r).toContain('RAID 5: 48 TB effective; approximately 37 days of footage')
+    expect(r).toContain('RAID 10: 32 TB effective; approximately 25 days of footage')
   })
 
   it('has one way to protect two or three drives, and none for one', () => {
     const s = four()
-    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 2], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 1: 16 TB effective, 12 days of footage'])
-    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 3], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 5: 32 TB effective, 25 days of footage'])
-    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 1], ['c4k', 10])).some((x) => x.startsWith('16 TB effective, 12'))).toBe(true)
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 2], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 1: 16 TB effective; approximately 12 days of footage'])
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 3], ['c4k', 10])).filter((x) => x.startsWith('RAID'))).toEqual(['RAID 5: 32 TB effective; approximately 25 days of footage'])
+    expect(rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 1], ['c4k', 10])).some((x) => x.startsWith('16 TB effective; approximately 12'))).toBe(true)
   })
 
   it('shares the plan’s drives among the NVRs, and never puts more in one than it has bays', () => {
@@ -159,8 +159,8 @@ describe('the storage of an NVR', () => {
     const gw = nvr('gw', 20000, [30, 15, 9], { metrics: [] })
     const s = setup([gw, drive('uacc-ssd-2tb'), cam('c4k', 8.3), nvr('uck', 25000, [20, 10, 5], { metrics: [metric('nvr_storage_tb', 1, 'TB')] })])
     s.map.get('us/gw')!.linked = [{ slug: 'uacc-ssd-2tb' }]
-    expect(rows(find(s, ['gw', 1], ['uacc-ssd-2tb', 1], ['c4k', 2]))).toContain('2 TB effective, 7.7 days of footage')
-    expect(rows(find(s, ['uck', 1], ['c4k', 2]))).toContain('1 TB of storage built in: 3.9 days of footage')
+    expect(rows(find(s, ['gw', 1], ['uacc-ssd-2tb', 1], ['c4k', 2]))).toContain('2 TB effective; approximately 7.7 days of footage')
+    expect(rows(find(s, ['uck', 1], ['c4k', 2]))).toContain('1 TB of storage built in: approximately 3.9 days of footage')
   })
 })
 
