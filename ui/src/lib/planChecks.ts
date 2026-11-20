@@ -325,7 +325,7 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
     const bare = consumers.filter((l) => powerOptions(l.derived) === null)
     if (outcome) outcome.stranded = bare.reduce((n, l) => n + qty(l), 0)
     if (trace) trace.poeLost = bare.flatMap((l) => Array.from({ length: qty(l) }, () => l))
-    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', shortfall: true, text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
+    out.push({ id: 'poe-power', label: 'PoE power', verdict: 'bad', shortfall: true, text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
     return out
   }
   if (consumers.length === 0) {
