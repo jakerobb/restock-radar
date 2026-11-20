@@ -4,6 +4,8 @@ import { useDerived, useProducts } from '../api/queries'
 import type { Derived, Product } from '../api/types'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlan } from '../hooks/usePlan'
+import { useRegion } from '../hooks/useRegion'
+import { inRegion } from '../lib/region'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
@@ -369,6 +371,9 @@ export default function PlanPage() {
   const mine = usePlan()
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived } = useDerived()
+  const { region } = useRegion()
+  // What can be added is what the chosen store sells; the plan itself may hold lines from any.
+  const offered = useMemo(() => inRegion(productData?.products ?? [], region), [productData?.products, region])
   const [confirmClear, setConfirmClear] = useState(false)
 
   const shared = slug !== undefined
@@ -437,7 +442,7 @@ export default function PlanPage() {
         </div>
       )}
       {searching && productData && (
-        <PlanSearch products={productData.products} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
+        <PlanSearch products={offered} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
       )}
 
       {shared && decoded === null && (
@@ -623,15 +628,15 @@ export default function PlanPage() {
           )
           const finders = (
           <div>
-          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} powering={powering} onAdd={(added, replacing) => {
+          {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={offered} derived={derived ?? []} powering={powering} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
-          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} hosting={hosting} onHost={(role) => mine.host(role, 'self')} onAdd={(added, replacing) => {
+          {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={offered} derived={derived ?? []} hosting={hosting} onHost={(role) => mine.host(role, 'self')} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingRoles(false)} />}
-          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} onAdd={(added, replacing) => {
+          {nvrShortfall && !shared && findingNvr && <NvrFinder plan={derivedLines} products={offered} derived={derived ?? []} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingNvr(false)} />}

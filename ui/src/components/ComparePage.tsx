@@ -2,6 +2,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import { buildCatalog, type CatalogRow } from '../lib/catalog'
+import { useRegion } from '../hooks/useRegion'
 import { buildComparison, cleanRefs, MAX_COMPARE, productRef } from '../lib/compare'
 import { cn } from '../lib/cn'
 import { matchesQuery, typeOf } from '../lib/filter'
@@ -79,6 +80,7 @@ export default function ComparePage() {
   const navigate = useNavigate()
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived, isError: derivedError } = useDerived()
+  const { region } = useRegion()
 
   const refs = search.p ?? []
   const catalog = useMemo(() => buildCatalog(productData?.products ?? [], derived ?? []), [productData?.products, derived])
@@ -109,7 +111,7 @@ export default function ComparePage() {
 
       {productData && (
         <>
-          <AddProduct catalog={catalog} chosen={rows} onAdd={(ref) => setRefs(cleanRefs([...refs, ref]))} />
+          <AddProduct catalog={catalog.filter((r) => r.product.region === region)} chosen={rows} onAdd={(ref) => setRefs(cleanRefs([...refs, ref]))} />
           {rows.length < 2 && (
             <p className="py-6 text-muted">
               {rows.length === 0 ? 'Choose at least two products to compare, here or from the ' : 'Choose one more product, or pick several in the '}

@@ -2,6 +2,8 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import { buildCatalog, columnById, defaultColumns, COLUMNS, NAME_SORT, PRICE_SORT, sortRows, type CatalogRow } from '../lib/catalog'
+import { useRegion } from '../hooks/useRegion'
+import { inRegion } from '../lib/region'
 import { MAX_COMPARE, productRef } from '../lib/compare'
 import { matchesQuery, typeCounts, typeOf } from '../lib/filter'
 import { formatPrice } from '../lib/format'
@@ -151,6 +153,7 @@ export default function FindPage() {
   const navigate = useNavigate()
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived, isError: derivedError } = useDerived()
+  const { region } = useRegion()
 
   const type = search.type ?? ''
   const reqs = useMemo(() => parseRequirements(search.r), [search.r])
@@ -162,7 +165,7 @@ export default function FindPage() {
     // Replace, not push: each tweak of a filter isn't a page to go "back" to.
     void navigate({ to: '/find', search: ((prev: FindSearch) => ({ ...validateFindSearch(prev as Record<string, unknown>), ...patch })) as never, replace: true })
 
-  const catalog = useMemo(() => buildCatalog(productData?.products ?? [], derived ?? []), [productData?.products, derived])
+  const catalog = useMemo(() => buildCatalog(inRegion(productData?.products ?? [], region), derived ?? []), [productData?.products, derived, region])
   const types = useMemo(() => typeCounts(catalog.map((r) => r.product)), [catalog])
 
   const scoped = useMemo(
