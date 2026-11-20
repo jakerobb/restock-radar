@@ -1,20 +1,23 @@
 import { useState, type FormEvent } from 'react'
 import { ApiError } from '../api/client'
 import { useAddProduct } from '../api/queries'
+import { useRegion } from '../hooks/useRegion'
 import { Button } from './ui/Button'
 import { Notice } from './ui/Notice'
 import { TextInput } from './ui/TextInput'
 
-/** Adds a product by slug or store URL, and reports what happened. */
+/** Adds a product by slug or store URL, and reports what happened. The region starts as the one the site is showing. */
 export function AddProductForm({ regions }: { regions: string[] }) {
   const [item, setItem] = useState('')
-  const [region, setRegion] = useState('')
+  const [chosen, setRegion] = useState<string | null>(null)
+  const { region: shown } = useRegion()
+  const region = chosen ?? (regions.includes(shown) ? shown : (regions[0] ?? ''))
   const add = useAddProduct()
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!item.trim()) return
-    add.mutate({ item, region: region || undefined }, { onSuccess: () => setItem('') })
+    add.mutate({ item, region: regions.length > 1 ? region : undefined }, { onSuccess: () => setItem('') })
   }
 
   return (

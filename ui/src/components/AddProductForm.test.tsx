@@ -52,4 +52,37 @@ describe('AddProductForm', () => {
     renderWithClient(<AddProductForm regions={['us', 'gb']} />)
     expect(screen.getByRole('combobox', { name: 'Region' })).toBeInTheDocument()
   })
+
+  describe('with several regions', () => {
+    const serve = () =>
+      stubFetch({
+        'POST /v1/items': { body: { region: 'eu', slug: 'unas-2', title: 'UNAS 2', variants: 2, already_tracked: false } },
+        'GET /v1/products': { body: { last_sync: null, regions: ['us', 'eu', 'jp'], products: [], pending: [] } },
+      })
+    const posted = (calls: { key: string; body?: string | null }[]) => JSON.parse(calls.find((c) => c.key === 'POST /v1/items')!.body!)
+
+    it('starts at the region the site is showing, and sends it', async () => {
+      window.localStorage.setItem('restock-radar.region', 'eu')
+      const calls = serve()
+      renderWithClient(<AddProductForm regions={['us', 'eu', 'jp']} />)
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Region' })).toHaveValue('eu'))
+      await userEvent.type(screen.getByRole('textbox', { name: /slug or url/i }), 'unas-2')
+      await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+      await screen.findByRole('status')
+      expect(posted(calls)).toEqual({ item: 'unas-2', region: 'eu' })
+    })
+
+    it('lets another region be chosen, which then sticks', async () => {
+      window.localStorage.setItem('restock-radar.region', 'eu')
+      const calls = serve()
+      renderWithClient(<AddProductForm regions={['us', 'eu', 'jp']} />)
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Region' })).toHaveValue('eu'))
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Region' }), 'jp')
+      await userEvent.type(screen.getByRole('textbox', { name: /slug or url/i }), 'unas-2')
+      await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+      await screen.findByRole('status')
+      expect(posted(calls)).toEqual({ item: 'unas-2', region: 'jp' })
+      expect(screen.getByRole('combobox', { name: 'Region' })).toHaveValue('jp')
+    })
+  })
 })
