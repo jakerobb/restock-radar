@@ -2,17 +2,20 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useMemo, useState, type ReactNode } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import type { Derived, Product } from '../api/types'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlan } from '../hooks/usePlan'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
 import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
+import { buildTopology } from '../lib/topology'
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { Dialog } from './Dialog'
 import { PageNav } from './PageNav'
+import { TopologyGraph } from './TopologyGraph'
 import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
 import { PlanSearch } from './PlanSearch'
@@ -383,6 +386,8 @@ export default function PlanPage() {
   const powering = useMemo(() => (shared ? (decoded?.powering ?? {}) : mine.powering), [shared, decoded, mine.powering])
   const checks = useMemo(() => planChecks(derivedLines, hosting, powering), [derivedLines, hosting, powering])
   const answer = useMemo(() => overall(checks), [checks])
+  const topology = useMemo(() => buildTopology(derivedLines, hosting, powering), [derivedLines, hosting, powering])
+  const wide = useMediaQuery('(min-width: 80rem)') // Tailwind's xl: two columns, with the topology open
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
   const [findingRoles, setFindingRoles] = useState(false)
@@ -479,8 +484,9 @@ export default function PlanPage() {
 
       {productData && lines.length > 0 && (
         // Stacked when narrow; wide, the plan and what it needs go on the left and the checks on the right.
-        <div className="xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] xl:items-start xl:gap-x-6">
-          <Card className="mt-4 overflow-x-auto xl:col-start-1 xl:row-start-1" aria-label="Plan">
+        (() => {
+          const planCard = (
+          <Card className="mt-4 overflow-x-auto" aria-label="Plan">
             <table className="w-full border-collapse text-sm">
               <thead className="border-b border-line text-muted">
                 <tr>
@@ -521,9 +527,9 @@ export default function PlanPage() {
               </div>
             </div>
           </Card>
-
-          {checks.length > 0 && (
-            <Card className="mt-5 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:mt-4" aria-label="Checks">
+          )
+          const checksCard = checks.length > 0 && (
+            <Card className="mt-4" aria-label="Checks">
               <h2 className="text-lg font-semibold">Does it add up?</h2>
               {answer && (
                 <p className={`mt-1 mb-2 text-4xl font-bold ${VERDICT_TONE[answer.tone]}`} aria-label={`Answer: ${answer.word}`}>
@@ -614,8 +620,9 @@ export default function PlanPage() {
                 </div>
               )}
             </Card>
-          )}
-          <div className="xl:col-start-1 xl:row-start-2">
+          )
+          const finders = (
+          <div>
           {shortfall && !shared && finding && <SwitchFinder plan={derivedLines} products={productData?.products ?? []} derived={derived ?? []} powering={powering} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
@@ -629,7 +636,28 @@ export default function PlanPage() {
             for (const l of added) mine.add(l)
           }} onClose={() => setFindingNvr(false)} />}
           </div>
-        </div>
+          )
+          const topologyCard = topology && <TopologyGraph topology={topology} open={wide} />
+          return wide ? (
+            <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,4fr)] items-start gap-x-6">
+              <div>
+                {planCard}
+                {finders}
+              </div>
+              <div>
+                {topologyCard}
+                {checksCard}
+              </div>
+            </div>
+          ) : (
+            <>
+              {planCard}
+              {topologyCard}
+              {checksCard}
+              {finders}
+            </>
+          )
+        })()
       )}
     </main>
   )
