@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useMemo, useState, type ReactNode } from 'react'
-import { useDerived, useProducts } from '../api/queries'
+import { useDerived, useProducts, useSpecsGaps } from '../api/queries'
 import type { Derived, Product } from '../api/types'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlan } from '../hooks/usePlan'
@@ -9,6 +9,7 @@ import { inRegion } from '../lib/region'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
+import { specsGapOf } from '../lib/specsGaps'
 import { decodePlan, DEFAULT_PLAN_NAME, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
 import { buildTopology, type TopoNode } from '../lib/topology'
@@ -41,7 +42,7 @@ const STATE: Record<LineState, { label: string; tone: Tone }> = {
   untracked: { label: 'No longer tracked', tone: 'bad' },
 }
 
-const VERDICT_TONE = { ok: 'text-ok', warn: 'text-warn', bad: 'text-bad' } as const
+const VERDICT_TONE = { ok: 'text-ok', warn: 'text-warn', bad: 'text-bad', unsure: 'text-muted' } as const
 
 const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
   ok: { mark: '✓', tone: 'text-ok' },
@@ -453,6 +454,7 @@ export default function PlanPage() {
   const mine = usePlan()
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived } = useDerived()
+  const { data: gaps } = useSpecsGaps()
   const { region } = useRegion()
   // What can be added is what the chosen store sells; the plan itself may hold lines from any.
   const offered = useMemo(() => inRegion(productData?.products ?? [], region), [productData?.products, region])
@@ -468,8 +470,8 @@ export default function PlanPage() {
   const totals = useMemo(() => planTotals(views), [views])
   const derivedLines = useMemo(() => {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
-    return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null }))
-  }, [views, derived])
+    return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null, gap: specsGapOf(view.product, gaps) }))
+  }, [views, derived, gaps])
   const hosting: Hosting = useMemo(() => (shared ? (decoded?.hosting ?? {}) : mine.hosting), [shared, decoded, mine.hosting])
   const powering = useMemo(() => (shared ? (decoded?.powering ?? {}) : mine.powering), [shared, decoded, mine.powering])
   const checks = useMemo(() => planChecks(derivedLines, hosting, powering), [derivedLines, hosting, powering])

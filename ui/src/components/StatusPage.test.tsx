@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { StatusResponse } from '../api/types'
-import { renderWithClient, stubFetch } from '../test/render'
+import { renderRoute, renderWithClient, stubFetch } from '../test/render'
 import StatusPage, { every } from './StatusPage'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -152,5 +153,32 @@ describe('the per-region breakdown', () => {
 
   it('says how often in plain words', () => {
     expect([60, 300, 3600, 7200, 90].map(every)).toEqual(['1 minute', '5 minutes', '1 hour', '2 hours', '90 seconds'])
+  })
+})
+
+
+describe('products with no tech specs', () => {
+  const gap = (o: object) => ({ region: 'us', id: 'p', slug: 'cable', title: 'Cable', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', not_expected: false, ...o })
+
+  it('lists the ones the store has been read for, once for all their regions, and lets an editor mark one', async () => {
+    const calls = stubFetch({
+      'GET /v1/status': { body: status() },
+      'GET /v1/specs/gaps': {
+        body: {
+          products: [gap({}), gap({ region: 'eu', id: 'p2', slug: 'cable-eu' }), gap({ id: 'p3', slug: 'soon', title: 'Soon', fetched_at: null }), gap({ id: 'p4', slug: 'tie', title: 'Tie', not_expected: true })],
+          not_expected: [{ slug: 'tie', reason: '', created_at: '2026-11-15T10:00:00Z' }],
+        },
+      },
+      'PUT /v1/specs/not-expected': { body: { slug: 'cable', reason: '', created_at: '2026-11-15T10:00:00Z' } },
+    })
+    renderRoute('/status')
+    const card = await screen.findByRole('region', { name: 'Products with no tech specs' })
+    expect(within(card).getAllByRole('listitem')).toHaveLength(2) // the cable (both regions) and the tie; not the one yet to be read
+    expect(within(card).queryByText('Soon')).not.toBeInTheDocument()
+    expect(card).toHaveTextContent('1 of 2 products are not marked')
+    expect(card).toHaveTextContent('none expected')
+
+    await userEvent.click(within(card).getByRole('button', { name: 'None expected' }))
+    expect(calls.some((c) => c.key === 'PUT /v1/specs/not-expected' && c.body === JSON.stringify({ slug: 'cable', reason: '' }))).toBe(true)
   })
 })

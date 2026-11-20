@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
-import { useStatus } from '../api/queries'
+import { Link } from '@tanstack/react-router'
+import { useCan, useSetSpecsNotExpected, useSpecsGaps, useStatus } from '../api/queries'
 import type { Presence, StatusRegion, StatusResponse } from '../api/types'
+import { baseSlug } from '../lib/convertPlan'
 import { formatExact } from '../lib/format'
 import { regionName } from '../lib/region'
 import { statusInfo } from '../lib/status'
@@ -158,6 +160,64 @@ function PresenceCard({ title, data, withLabel, withoutLabel, notCheckedLabel }:
   )
 }
 
+/**
+ * The products the store has been read for and published no tech specs, one row for the product in all its regions,
+ * with whether none are expected. Those are either products that have none (a cable) or ones whose specs are still to
+ * come (newly announced), which is why an editor decides which.
+ */
+function NoSpecsCard() {
+  const { data } = useSpecsGaps()
+  const canEdit = useCan('overrides:write')
+  const { mark, unmark } = useSetSpecsNotExpected()
+  if (!data) return null
+  const rows = new Map<string, { slug: string; title: string; regions: { region: string; slug: string }[]; notExpected: boolean }>()
+  for (const g of data.products) {
+    if (g.fetched_at === null) continue
+    const key = baseSlug(g.slug)
+    const row = rows.get(key) ?? { slug: key, title: g.title, regions: [], notExpected: g.not_expected }
+    row.regions.push({ region: g.region, slug: g.slug })
+    rows.set(key, row)
+  }
+  const list = [...rows.values()]
+  if (list.length === 0) return null
+  const open = list.filter((r) => !r.notExpected).length
+  const error = mark.error ?? unmark.error
+  return (
+    <Card aria-label="Products with no tech specs" className="sm:col-span-2">
+      <h2 className="font-semibold">Products the store publishes no tech specs for</h2>
+      <p className="mt-1 text-sm text-muted">
+        {nf.format(open)} of {nf.format(list.length)} {list.length === 1 ? 'product is' : 'products are'} not marked as having none to expect. Plans holding an unmarked one are called unsure.
+      </p>
+      {error && <p role="alert" className="mt-1 text-sm text-bad">{error.message}</p>}
+      <ul className="mt-2">
+        {list.map((r) => (
+          <li key={r.slug} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line py-1.5">
+            <span>
+              <Link to="/p/$region/$slug" params={r.regions[0]!} className="underline underline-offset-2">
+                {r.title}
+              </Link>{' '}
+              <span className="text-sm text-muted">
+                {r.regions.map((x) => regionName(x.region)).join(', ')}
+                {r.notExpected ? ' · none expected' : ''}
+              </span>
+            </span>
+            {canEdit && (
+              <button
+                type="button"
+                className="cursor-pointer text-sm underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={mark.isPending || unmark.isPending}
+                onClick={() => (r.notExpected ? unmark.mutate(r.slug) : mark.mutate({ slug: r.slug }))}
+              >
+                {r.notExpected ? 'Expect specs again' : 'None expected'}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
 function StatusContent({ s }: { s: StatusResponse }) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const regions = Object.entries(s.regions).sort(([a], [b]) => a.localeCompare(b))
@@ -215,6 +275,7 @@ function StatusContent({ s }: { s: StatusResponse }) {
         withoutLabel="Without URL"
         notCheckedLabel="not checked yet"
       />
+      <NoSpecsCard />
 
       <Card aria-label="Stock">
         <h2 className="font-semibold">Variants by stock status</h2>

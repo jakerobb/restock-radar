@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -616,7 +618,10 @@ func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := len(migrations) - 4 // everything before the variant numbers
+	prior := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, "CREATE TABLE variant_numbers") }) // everything before the variant numbers
+	if prior < 0 {
+		t.Fatal("no migration creates variant_numbers")
+	}
 	for i := 0; i < prior; i++ {
 		if _, err := raw.Exec(migrations[i]); err != nil {
 			t.Fatal(err)

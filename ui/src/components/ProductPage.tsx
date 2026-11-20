@@ -11,6 +11,7 @@ import { ProductCard } from './ProductCard'
 import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
 import { PageNav } from './PageNav'
 import { RefreshButton } from './RefreshButton'
+import { SpecsExpectation } from './SpecsExpectation'
 import { HistoryRangePicker } from './HistoryRangePicker'
 import { Badge } from './ui/Badge'
 import { Card } from './ui/Card'
@@ -228,6 +229,9 @@ export default function ProductPage() {
               <HistoryRangePicker days={days} onChange={setDays} />
             </div>
             <ProductCard product={product} showRegion={(productData?.regions.length ?? 0) > 1} history={index} onPage />
+            <div className="mt-2">
+              <SpecsExpectation region={region} slug={slug} />
+            </div>
           </div>
         )}
         {specs.data?.derived && <DerivedSummary d={specs.data.derived} />}

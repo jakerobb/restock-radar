@@ -31,8 +31,22 @@ describe('planChecks', () => {
     expect(byId([item('rackonly', 1, { known: { ...known, ports: false, poe: false, radios: false, dims: false } })])['specs']).toBeUndefined()
   })
 
-  it('makes the answer "Mostly" when only a specs gap is wrong', () => {
-    expect(overall(planChecks([ap(2), sw(1, 100), item('newbie', 1, null)]))).toMatchObject({ word: 'Mostly' })
+  it('makes the answer "Unsure" when a product has no specs, unless something is plainly wrong', () => {
+    expect(overall(planChecks([ap(2), sw(1, 100), item('newbie', 1, null)]))).toMatchObject({ word: 'Unsure', emoji: '🤷🏻‍♂️', tone: 'unsure' })
+    expect(overall(planChecks([ap(20, 13), sw(1, 100), item('newbie', 1, null)]))).toMatchObject({ word: 'No.' })
+  })
+
+  it('leaves a product that no specs are expected for out of the check, and says nothing when that is all there is', () => {
+    const cable = { ...item('cable', 1, null), gap: 'not-expected' as const }
+    expect(byId([ap(2), sw(1, 100), cable])['specs']).toBeUndefined()
+    expect(overall(planChecks([ap(2), sw(1, 100), cable]))).toEqual(overall(planChecks([ap(2), sw(1, 100)]))) // as if it weren't there
+    expect(byId([ap(2), sw(1, 100), cable, item('newbie', 1, null)])['specs']!.text).toContain('for newbie,')
+  })
+
+  it('says whether a product has yet to be read from the store or the store publishes none', () => {
+    const c = byId([{ ...item('soon', 1, null), gap: 'pending' as const }, { ...item('bare', 1, null), gap: 'none' as const }])['specs']!
+    expect(c.text).toContain("soon hasn't been read from the store yet")
+    expect(c.text).toContain('the store publishes none for bare')
   })
 
   it('says the devices fit, with the numbers', () => {

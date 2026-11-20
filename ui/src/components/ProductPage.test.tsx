@@ -1,4 +1,5 @@
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ProductSpecsResponse, SpecEntry } from '../api/types'
 import { derived, historyResponse, port, product, productsResponse } from '../test/fixtures'
 import { renderRoute, stubFetch } from '../test/render'
@@ -90,5 +91,46 @@ describe('ProductPage', () => {
     renderRoute('/p/us/widget')
     expect(await screen.findByText('No specification has been collected for this product yet.')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'At a glance' })).not.toBeInTheDocument()
+  })
+})
+
+
+describe('a product with no tech specs', () => {
+  const gaps = (o: object = {}) => ({
+    products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', not_expected: false }],
+    not_expected: [],
+    ...o,
+  })
+  const routes = (g: object) => ({
+    'GET /v1/products': { body: productsResponse({ products: [product({ slug: 'widget', title: 'Widget' })] }) },
+    'GET /v1/products/us/widget/specs': { body: specsResponse({ specs: [], derived: null, overrides: [] }) },
+    'GET /v1/history?days=90': { body: historyResponse() },
+    'GET /v1/specs/gaps': { body: g },
+  })
+
+  it('says the store publishes none, and lets an editor mark it as having none to expect', async () => {
+    const calls = stubFetch({ ...routes(gaps()), 'PUT /v1/specs/not-expected': { body: { slug: 'widget', reason: '', created_at: '2026-11-15T10:00:00Z' } } })
+    renderRoute('/p/us/widget')
+    expect(await screen.findByText(/The store publishes no tech specs for this product/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'No specs expected for this' }))
+    expect(calls.some((c) => c.key === 'PUT /v1/specs/not-expected' && c.body === JSON.stringify({ slug: 'widget', reason: '' }))).toBe(true)
+  })
+
+  it('says nothing for a product that has yet to be read from the store', async () => {
+    stubFetch(routes(gaps({ products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: '', fetched_at: null, not_expected: false }] })))
+    renderRoute('/p/us/widget')
+    await screen.findByRole('heading', { level: 1, name: 'Widget' })
+    expect(screen.queryByText(/publishes no tech specs/)).not.toBeInTheDocument()
+  })
+
+  it('says none are expected once marked, and lets an editor take the mark off', async () => {
+    const calls = stubFetch({
+      ...routes(gaps({ not_expected: [{ slug: 'widget', reason: 'just a cover', created_at: '2026-11-15T10:00:00Z' }] })),
+      'DELETE /v1/specs/not-expected/widget': { status: 200, body: null },
+    })
+    renderRoute('/p/us/widget')
+    expect(await screen.findByText(/No tech specs are expected for this product \(in any region\): just a cover/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Expect specs again' }))
+    expect(calls.some((c) => c.key === 'DELETE /v1/specs/not-expected/widget')).toBe(true)
   })
 })

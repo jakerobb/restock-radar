@@ -1,4 +1,4 @@
-import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, Me, OverrideChange, OverrideRequest, ProductSpecsResponse, SpecOverride, ProductsResponse, RefreshResult, StatusResponse } from './types'
+import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, Me, OverrideChange, OverrideRequest, ProductSpecsResponse, SpecOverride, SpecsGapsResponse, SpecsNotExpected, ProductsResponse, RefreshResult, StatusResponse } from './types'
 
 /** An error response from the API; message is safe to show to the user. */
 export class ApiError extends Error {
@@ -59,3 +59,15 @@ export const deleteOverride = (id: number) => request<null>(`/v1/overrides/${id}
 
 export const getOverrideHistory = (region: string, slug: string) =>
   request<OverrideChange[]>(`/v1/overrides/history?region=${encodeURIComponent(region)}&slug=${encodeURIComponent(slug)}`)
+
+export const getSpecsGaps = () => request<SpecsGapsResponse>('/v1/specs/gaps')
+
+/** Says no tech specs are expected for a product (by its slug in any region; it is covered in every region). */
+export const markSpecsNotExpected = (slug: string, reason = '') =>
+  request<SpecsNotExpected>('/v1/specs/not-expected', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, reason }),
+  })
+
+export const unmarkSpecsNotExpected = (slug: string) => request<null>(`/v1/specs/not-expected/${encodeURIComponent(slug)}`, { method: 'DELETE' })

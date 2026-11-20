@@ -382,6 +382,33 @@ export interface RefreshResult {
 
 // ---- Who may do what (GET /v1/me) ----
 
+/** A tracked product with no tech specs stored. */
+export interface SpecsGap {
+  region: string
+  id: string
+  slug: string
+  title: string
+  category: string
+  /** When the product page was read and the store published no specs; null when it hasn't been read yet, so they may just not be collected. */
+  fetched_at: string | null
+  /** The product is on the list of those that have no specs to expect. */
+  not_expected: boolean
+}
+
+/** A product marked as having no tech specs to expect, by slug without its region suffix. */
+export interface SpecsNotExpected {
+  slug: string
+  reason: string
+  created_at: string
+  /** Who marked it; only given to those who may review corrections. */
+  created_by?: string
+}
+
+export interface SpecsGapsResponse {
+  products: SpecsGap[]
+  not_expected: SpecsNotExpected[]
+}
+
 export type Permission = 'overrides:write' | 'watchlist:write' | 'products:refresh'
 
 export interface Me {
