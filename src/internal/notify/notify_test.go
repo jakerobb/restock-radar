@@ -126,3 +126,24 @@ func TestStatusBodyUsesSurchargePrice(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestMoneyUsesTheCurrencysOwnUnits(t *testing.T) {
+	cases := []struct {
+		amount   int64
+		currency string
+		want     string
+	}{
+		{19900, "USD", "$199.00"},
+		{15900, "GBP", "£159.00"},
+		{33727, "JPY", "¥33727"},
+		{769900, "TWD", "NT$7699.00"},
+		{169900, "BRL", "R$1699.00"},
+		{30900, "SGD", "S$309.00"},
+		{1250, "XYZ", "12.50 XYZ"},
+	}
+	for _, c := range cases {
+		if got := money(&c.amount, c.currency); got != c.want {
+			t.Errorf("money(%d, %s) = %q, want %q", c.amount, c.currency, got, c.want)
+		}
+	}
+}

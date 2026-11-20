@@ -108,6 +108,31 @@ type Region struct {
 	Path string `yaml:"path"`
 }
 
+// KnownRegions are the storefronts that answer with product data, as the store's
+// own region list gives them. A configured region naming one of these ids may
+// leave base_url and path out. Each has its own host, and its path carries the
+// storefront's default language ("jp/ja"), which is what the store redirects to.
+var KnownRegions = []Region{
+	{ID: "us", BaseURL: "https://store.ui.com", Path: "us/en"},
+	{ID: "ca", BaseURL: "https://ca.store.ui.com", Path: "ca/en"},
+	{ID: "eu", BaseURL: "https://eu.store.ui.com", Path: "eu/en"},
+	{ID: "uk", BaseURL: "https://uk.store.ui.com", Path: "uk/en"},
+	{ID: "jp", BaseURL: "https://jp.store.ui.com", Path: "jp/ja"},
+	{ID: "br", BaseURL: "https://br.store.ui.com", Path: "br/pt"},
+	{ID: "tw", BaseURL: "https://tw.store.ui.com", Path: "tw/zh-tw"},
+	{ID: "sg", BaseURL: "https://sg.store.ui.com", Path: "sg/en"},
+}
+
+// knownRegion returns the built-in storefront with the given id.
+func knownRegion(id string) (Region, bool) {
+	for _, r := range KnownRegions {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return Region{}, false
+}
+
 // Item is a product to watch, identified by its store slug (not by URL, so it
 // survives category reshuffles).
 type Item struct {
@@ -247,6 +272,16 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("regions[%d]: duplicate id %q", i, r.ID)
 		}
 		regions[r.ID] = true
+		// A bare `{id: eu}` means that storefront, not the US one at another name.
+		if known, ok := knownRegion(r.ID); ok {
+			if r.BaseURL == "" {
+				r.BaseURL = known.BaseURL
+			}
+			if r.Path == "" {
+				r.Path = known.Path
+			}
+			cfg.Regions[i] = r
+		}
 		if r.BaseURL == "" {
 			cfg.Regions[i].BaseURL = DefaultBaseURL
 		}

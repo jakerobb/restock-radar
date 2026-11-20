@@ -1,11 +1,17 @@
+/** How many of a currency's minor units make one whole unit. The store sends yen in whole yen; everything else it sells in is in hundredths. */
+export function minorPerUnit(currency: string): number {
+  return currency === 'JPY' ? 1 : 100
+}
+
 /** Formats minor units (cents) as currency, e.g. 10900 USD -> "$109.00". */
 export function formatMoney(cents: number | null, currency: string): string {
   if (cents === null) return 'n/a'
+  const amount = cents / minorPerUnit(currency)
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(cents / 100)
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
   } catch {
     // An empty or unknown currency code.
-    return (cents / 100).toFixed(2)
+    return amount.toFixed(minorPerUnit(currency) === 1 ? 0 : 2)
   }
 }
 
@@ -17,11 +23,12 @@ export function totalCents(v: { price_cents: number | null; price_with_surcharge
 /** Like formatMoney, but whole-dollar amounts drop the ".00": "$175", while "$2.49" keeps its cents. */
 export function formatPrice(cents: number | null, currency: string): string {
   if (cents === null) return 'n/a'
-  const whole = cents % 100 === 0
+  const per = minorPerUnit(currency)
+  const whole = cents % per === 0
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2 }).format(cents / 100)
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2 }).format(cents / per)
   } catch {
-    return (cents / 100).toFixed(whole ? 0 : 2)
+    return (cents / per).toFixed(whole ? 0 : 2)
   }
 }
 

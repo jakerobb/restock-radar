@@ -38,11 +38,19 @@ ntfy:
   topic: restock-radar
   token: ${NTFY_TOKEN}     # optional
 
-# Optional; defaults to the US store. Add regions as {id, base_url, path}.
+# Optional; defaults to the US store. The store's other regions are built in, so a
+# bare id is enough: us, ca, eu, uk, jp, br, tw, sg. (An entry may still give
+# `base_url` and `path` to point somewhere else.) Stock and prices don't sync
+# across regions. The first region is the default for items that name none.
 regions:
   - id: us
-    base_url: https://store.ui.com
-    path: us/en
+  - id: ca
+  - id: eu
+  - id: uk
+  - id: jp
+  - id: br
+  - id: tw
+  - id: sg
 
 # Items are the product slug from the store URL (store.ui.com/us/en/.../products/<slug>).
 # Every variant of a product is watched. Old slugs that the store redirects also work.
