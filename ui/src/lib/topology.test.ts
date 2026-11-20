@@ -49,6 +49,24 @@ describe('buildTopology', () => {
     expect(t.unconnected.map((n) => n.title)).toEqual(['NVR2'])
   })
 
+  it('labels how each box is plugged in, and how many ports a switch has spare', () => {
+    const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }]), nvr()])!
+    const swNode = t.roots[0]!.children[0]!
+    expect(t.roots[0]!.uplink).toBeUndefined()
+    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', slow: false })
+    expect(swNode.spare).toBe(6)
+    expect(swNode.children[0]!.uplink).toEqual({ label: '1GbE RJ45', slow: false })
+    expect(swNode.children[0]!.spare).toBeUndefined()
+  })
+
+  it('marks an uplink slower than the device could do', () => {
+    const fast: P = { count: 2, max_speed_mbps: 10000, media: 'sfp+' }
+    const t = buildTopology([gw(2), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, fast])])!
+    const swNode = t.roots[0]!.children[0]!
+    // The gateway has no cage, so the switch's 10G cage can't be used: it runs at 1 GbE.
+    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', slow: true })
+  })
+
   it('is null with nothing to hang from, or with a single box', () => {
     expect(buildTopology([cam(2), nvr()])).toBeNull()
     expect(buildTopology([gw()])).toBeNull()
