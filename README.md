@@ -110,6 +110,23 @@ one from the config unwatches it at the next start. Products added through the
 UI are kept separately and survive restarts and config changes. If you later
 put a UI-added product in the config, the config takes it over.
 
+## Investigating a deployment
+
+The image has no shell or `sqlite3`, but `kubectl exec` can run the binary itself:
+
+```sh
+kubectl -n restock-radar exec deploy/restock-radar -- /restock-radar query --schema
+kubectl -n restock-radar exec deploy/restock-radar -- /restock-radar query \
+  "SELECT * FROM events ORDER BY id DESC LIMIT 20"
+```
+
+`restock-radar query` runs one read-only SQL statement against the database (the config's `db_path`, or `--db`)
+and prints tab-separated rows (`--json` for JSON, `--limit N` to cap them, `-` to read the statement from stdin).
+The connection refuses writes and doesn't hold the write lock, so it is safe against the running service. For the
+state that isn't in the database, `GET /v1/debug/poller` reports the poller's cycle timing and backoff and every
+item whose fetches are failing, with the last error. See
+[`.claude/skills/restock-radar-debug`](.claude/skills/restock-radar-debug/SKILL.md) for the full playbook.
+
 ## API
 
 ```
@@ -121,6 +138,7 @@ GET /v1/history?days=30   per-variant price and status timeline
 GET /v1/variants?region=us
 GET /v1/events?region=us&since=0&limit=100
 GET /v1/status           counts behind the /status dashboard page
+GET /v1/debug/poller      the poller's in-memory state: cycle timing, backoff, failing items and why
 GET /v1/products/us/ucg-fiber/specs   effective specification, overrides, derived facts
 GET /v1/derived?region=us             ports, PoE budgets, radios, numbers, rack and size for every product
 POST /v1/products/us/ucg-fiber/refresh  fetch this tracked product from the store now (price, stock, specs)

@@ -22,6 +22,11 @@ import (
 )
 
 func main() {
+	// The query subcommand needs no logging, config load or migration.
+	if len(os.Args) > 1 && os.Args[1] == "query" {
+		os.Exit(runQuery(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+
 	logLevel := slog.LevelInfo
 	if strings.ToLower(os.Getenv("LOG_LEVEL")) == "debug" {
 		logLevel = slog.LevelDebug
