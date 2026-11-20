@@ -82,7 +82,8 @@ export function TopologyGraph({ topology, open, hotCheck = null, onHot = () => {
             +
           </Button>
         </div>
-        <div className="mt-2 overflow-x-auto pb-1">
+        {/* Padded so the 2px ring on a highlighted box at an edge isn't clipped by the scroll area. */}
+        <div className="mt-2 overflow-x-auto p-1">
           {/* The CSS zoom property resizes the layout, so the scroll area follows it. */}
           <div style={{ zoom: zoom / 100 }}>
             <ul className="topo-roots topo mx-auto w-max gap-8" aria-label="Device topology">
