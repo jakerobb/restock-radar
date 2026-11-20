@@ -11,7 +11,7 @@ import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
 import { decodePlan, DEFAULT_PLAN_NAME, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
-import { buildTopology } from '../lib/topology'
+import { buildTopology, type TopoNode } from '../lib/topology'
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
@@ -475,6 +475,9 @@ export default function PlanPage() {
   const checks = useMemo(() => planChecks(derivedLines, hosting, powering), [derivedLines, hosting, powering])
   const answer = useMemo(() => overall(checks), [checks])
   const topology = useMemo(() => buildTopology(derivedLines, hosting, powering), [derivedLines, hosting, powering])
+  // Pointing at a check outlines the boxes it is about, and pointing at a box outlines its checks.
+  const [hotCheck, setHotCheck] = useState<string | null>(null)
+  const [hotNode, setHotNode] = useState<TopoNode | null>(null)
   const wide = useMediaQuery('(min-width: 80rem)') // Tailwind's xl: two columns under a full-width topology, which is open
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
@@ -657,7 +660,7 @@ export default function PlanPage() {
               )}
               <ul className="divide-y divide-line text-sm">
                 {checks.map((c) => (
-                  <li key={c.id} className="flex gap-2 py-1.5">
+                  <li key={c.id} className={`flex gap-2 py-1.5 ${hotNode?.checks.includes(c.id) ? 'bg-accent/10' : ''}`} onMouseEnter={() => setHotCheck(c.id)} onMouseLeave={() => setHotCheck(null)} onFocus={() => setHotCheck(c.id)} onBlur={() => setHotCheck(null)}>
                     <span aria-hidden className={`w-4 shrink-0 text-center font-bold ${VERDICT[c.verdict].tone}`}>
                       {VERDICT[c.verdict].mark}
                     </span>
@@ -756,7 +759,7 @@ export default function PlanPage() {
           }} onClose={() => setFindingNvr(false)} />}
           </div>
           )
-          const topologyCard = topology && <TopologyGraph topology={topology} open={wide} />
+          const topologyCard = topology && <TopologyGraph topology={topology} open={wide} hotCheck={hotCheck} onHot={setHotNode} />
           return wide ? (
             <>
               {topologyCard}

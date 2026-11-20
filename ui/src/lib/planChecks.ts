@@ -41,6 +41,14 @@ export interface Trace {
   portHosts?: { line: DerivedLine; host: UnitRef; link: Link }[]
   /** The ports each switch or gateway has left once everything is plugged in. */
   spare?: { unit: UnitRef; spare: number }[]
+  /** Switches uplinked over copper for want of a free SFP cage upstream. */
+  sfpMisses?: UnitRef[]
+  /** What each PoE switch carries: watts drawn of its budget (null when not known), and PoE ports left. */
+  poe?: { unit: UnitRef; usedW: number; budgetW: number | null; sparePorts: number }[]
+  /** Rack height of each line that goes in a rack, per unit of the line; null for one that sits on a shelf or desk. */
+  rack?: { line: DerivedLine; units: number | null }[]
+  /** The lines that each take a wall outlet, per unit of the line. */
+  outlets?: DerivedLine[]
   /** Devices that got no port. */
   portLost?: DerivedLine[]
 }
@@ -396,6 +404,12 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
   if (trace) {
     trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]!, link: { speed: Math.min(groups[placed[i]!.group]!.speed, d.speed > 0 ? d.speed : Infinity), media: 'RJ45', capable: d.speed > 0 ? d.speed : Infinity } }] : []))
     trace.poeLost = stranded.filter((d) => !poweredSwitches.has(d.line)).map((d) => d.line)
+    trace.poe = units.map((u, k) => ({
+      unit: u,
+      usedW: placing.reduce((n, d, i) => n + (placed[i]?.unit === k ? d.draw : 0), 0),
+      budgetW: budgets[k] === Infinity ? null : budgets[k]!,
+      sparePorts: socketList.filter((x) => x.unit === k).length - placed.filter((a) => a?.unit === k).length,
+    }))
   }
 
   // Each device on a port group, spelled out: one valid arrangement, not the only one.
@@ -458,7 +472,7 @@ const RACKABLE_TYPES = new Set(['Switches', 'Gateways', 'Storage'])
 /** Store categories that could too: the recorders and consoles filed with the cameras (the Instant and the CloudKey+ are desktop). */
 const RACKABLE_CATEGORIES = new Set(['physical-security-nvr'])
 
-function rackCheck(lines: DerivedLine[]): PlanCheck[] {
+function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
   const slugOf = (l: DerivedLine) => l.view.product?.slug ?? ''
   const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '') || RACKABLE_CATEGORIES.has(l.view.product?.category ?? '') || NEEDS_RACK_MOUNT.has(slugOf(l))
 
@@ -485,6 +499,7 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   const unsureMounting = lines.filter((l) => rackable(l) && !l.derived?.known.rack && !NEEDS_RACK_MOUNT.has(slugOf(l)))
   if (mounted.length === 0 && stated.length === 0 && mounts.length === 0 && desktop.length === 0 && unsureMounting.length === 0) return []
 
+  if (trace) trace.rack = [...mounted.filter((l) => l.derived!.rack.units > 0).map((l) => ({ line: l, units: l.derived!.rack.units })), ...stated.map((l) => ({ line: l, units: statedUnits(l)! })), ...desktop.map((l) => ({ line: l, units: null }))]
   const unitsOf = (l: DerivedLine) => l.derived!.rack.units
   const unsureHeight = mounted.filter((l) => unitsOf(l) <= 0)
   const sized = [...mounted.filter((l) => unitsOf(l) > 0).map((l) => ({ l, u: unitsOf(l) })), ...stated.map((l) => ({ l, u: statedUnits(l)! })), ...mounts.map((l) => ({ l, u: RACK_MOUNTS[slugOf(l)]!.units }))]
@@ -520,7 +535,7 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
  * The wall outlets the plan needs: a device that runs on mains power (its own cord or an adapter) and isn't powered over PoE
  * takes one, each. A switch that can run either way counts by the input chosen for it; until that's chosen it can't be told.
  */
-function outletCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
+function outletCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
   const counted: { l: DerivedLine; n: number }[] = []
   const undecided: DerivedLine[] = []
   for (const l of lines) {
@@ -531,6 +546,7 @@ function outletCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
     else if (!b.option || b.option.poeClass === null) counted.push({ l, n: l.view.line.qty })
   }
   if (counted.length === 0 && undecided.length === 0) return []
+  if (trace) trace.outlets = counted.map((x) => x.l)
   const total = counted.reduce((n, x) => n + x.n, 0)
   const heading = `${total} AC ${total === 1 ? 'outlet' : 'outlets'}`
   const items = counted.map((x) => `${x.n > 1 ? `${x.n} × ` : ''}${name(x.l)}`)
@@ -572,7 +588,7 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
  */
 export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines), ...outletCheck(lines, powering)]
+  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
 }
 
 export interface Answer {
