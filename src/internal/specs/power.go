@@ -104,4 +104,31 @@ func derivePower(ix *index, r *Result) {
 			}
 		}
 	}
+	deriveAdapterPower(ix, r)
+}
+
+// deriveAdapterPower adds the mains input of a product whose "Power Method" names only the DC jack its adapter
+// plugs into ("DC jack (54V DC/1.1A)"), and says the mains range it takes under "Supported Voltage Range".
+func deriveAdapterPower(ix *index, r *Result) {
+	hasDC := false
+	for _, s := range r.Power {
+		if s.Kind == PowerAC {
+			return
+		}
+		hasDC = hasDC || s.Kind == PowerDC
+	}
+	if !hasDC {
+		return
+	}
+	for _, e := range ix.std {
+		if e.Kind != unistore.SpecText || key(e.Label) != "supported voltage range" {
+			continue
+		}
+		for _, line := range Lines(e.Value) {
+			if acRe.MatchString(line) && len(r.Power) < 8 {
+				r.Power = append(r.Power, PowerSource{Kind: PowerAC, Detail: strings.TrimSpace(line)})
+				return
+			}
+		}
+	}
 }
