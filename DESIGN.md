@@ -291,6 +291,9 @@ cross-site form can't send, and refuses a foreign `Origin` or
 | `GET /v1/overrides?region=&slug=` | overrides, each with its status (`overrides`, `hides`, `adds`, `orphan`), `stale`, and the value published now |
 | `PUT /v1/overrides` | create or replace an override: `{"slug", "region" (optional), "action": "set"\|"hide", "section", "group" (optional), "label", "kind" (optional), "value", "note", "source_url", "reason"}` |
 | `DELETE /v1/overrides/{id}` | remove an override |
+| `GET /v1/specs/gaps` | the tracked products with no tech specs stored (`fetched_at` is null when the product page hasn't been read yet, so they may just not be collected) and the list of products marked as having none to expect, by slug without its region suffix (`created_by` only for those with `overrides:write`) |
+| `PUT /v1/specs/not-expected` | `{"slug", "reason" (optional)}`: say no tech specs are expected for a product (a cable, a bracket), so a plan holding it isn't called unsure for lack of them. Keyed by the slug with its region suffix dropped, so it covers the product in every region. Needs `overrides:write` and takes the same cross-site checks and rate limit as overrides |
+| `DELETE /v1/specs/not-expected/{slug}` | take a product off that list. Needs `overrides:write` |
 
 `POST /v1/products/{region}/{slug}/refresh` has no body, so its only cross-site guard is the `Origin`/`Sec-Fetch-Site` check; it is limited to 10 a minute, since each one is a request to the live store. A refresh doesn't count toward the consecutive-failure alert: the caller sees the error.
 

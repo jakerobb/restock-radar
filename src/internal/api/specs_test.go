@@ -332,3 +332,43 @@ func TestSpecsEndpointsAreNotTheUI(t *testing.T) {
 		}
 	}
 }
+
+func TestSpecsGapsListsProductsWithoutSpecsAndLetsAnEditorMarkThemNotExpected(t *testing.T) {
+	srv, _ := newSpecsServer(t)
+	type gaps struct {
+		Products []struct {
+			Slug        string
+			NotExpected bool `json:"not_expected"`
+		}
+		NotExpected []struct{ Slug, Reason string } `json:"not_expected"`
+	}
+	g := decode[gaps](t, request(srv, "GET", "/v1/specs/gaps", "", nil))
+	if len(g.Products) != 1 || g.Products[0].Slug != "plain-cover" || g.Products[0].NotExpected || len(g.NotExpected) != 0 {
+		t.Fatalf("gaps = %+v", g)
+	}
+
+	rec := request(srv, "PUT", "/v1/specs/not-expected", `{"slug":"plain-cover","reason":"just a cover"}`, jsonHeader)
+	if rec.Code != 200 {
+		t.Fatalf("mark = %d %s", rec.Code, rec.Body.String())
+	}
+	g = decode[gaps](t, request(srv, "GET", "/v1/specs/gaps", "", nil))
+	if !g.Products[0].NotExpected || len(g.NotExpected) != 1 || g.NotExpected[0].Reason != "just a cover" {
+		t.Fatalf("gaps after marking = %+v", g)
+	}
+
+	if rec := request(srv, "PUT", "/v1/specs/not-expected", `{"slug":"nope"}`, jsonHeader); rec.Code != 404 {
+		t.Errorf("unknown product = %d", rec.Code)
+	}
+	if rec := request(srv, "PUT", "/v1/specs/not-expected", `{"slug":" "}`, jsonHeader); rec.Code != 400 {
+		t.Errorf("blank slug = %d", rec.Code)
+	}
+	if rec := request(srv, "PUT", "/v1/specs/not-expected", `{"slug":"plain-cover"}`, map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}); rec.Code != 403 {
+		t.Errorf("cross-site = %d", rec.Code)
+	}
+	if rec := request(srv, "DELETE", "/v1/specs/not-expected/plain-cover", "", nil); rec.Code != 204 {
+		t.Errorf("unmark = %d", rec.Code)
+	}
+	if rec := request(srv, "DELETE", "/v1/specs/not-expected/plain-cover", "", nil); rec.Code != 404 {
+		t.Errorf("unmark again = %d", rec.Code)
+	}
+}

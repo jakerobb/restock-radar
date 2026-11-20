@@ -14,7 +14,7 @@ export function renderWithClient(ui: ReactElement) {
 /** A fetch stub that answers by "METHOD /path". */
 export function stubFetch(routes: Record<string, { status?: number; body: unknown }>) {
   // Unless a test says otherwise, the server is one where nobody is asked who they are, so everything is allowed.
-  routes = { 'GET /v1/me': { body: openMe() }, ...routes }
+  routes = { 'GET /v1/me': { body: openMe() }, 'GET /v1/specs/gaps': { body: { products: [], not_expected: [] } }, ...routes }
   const calls: { key: string; body?: string }[] = []
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? 'GET'} ${String(input)}`

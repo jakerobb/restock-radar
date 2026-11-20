@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrideHistory, getProductSpecs, getProducts, getStatus, putOverride, refreshProduct } from './client'
+import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrideHistory, getProductSpecs, getProducts, getSpecsGaps, getStatus, markSpecsNotExpected, putOverride, refreshProduct, unmarkSpecsNotExpected } from './client'
 import type { OverrideRequest, Permission } from './types'
 
 const productsKey = ['products'] as const
@@ -100,4 +100,19 @@ export function useDeleteOverride(region: string, slug: string) {
 /** The changes made to a product's overrides, newest first; only those who may review them can read it. */
 export function useOverrideHistory(region: string, slug: string, enabled: boolean) {
   return useQuery({ queryKey: ['override-history', region, slug], queryFn: () => getOverrideHistory(region, slug), enabled })
+}
+
+/** The products with no tech specs, and those marked as having none to expect. */
+export function useSpecsGaps() {
+  return useQuery({ queryKey: ['specs-gaps'], queryFn: getSpecsGaps, staleTime: 5 * 60_000 })
+}
+
+/** Marks a product (in every region) as having no tech specs to expect, or takes the mark off. */
+export function useSetSpecsNotExpected() {
+  const queryClient = useQueryClient()
+  const done = () => queryClient.invalidateQueries({ queryKey: ['specs-gaps'] })
+  return {
+    mark: useMutation({ mutationFn: (v: { slug: string; reason?: string }) => markSpecsNotExpected(v.slug, v.reason), onSuccess: done }),
+    unmark: useMutation({ mutationFn: (slug: string) => unmarkSpecsNotExpected(slug), onSuccess: done }),
+  }
 }

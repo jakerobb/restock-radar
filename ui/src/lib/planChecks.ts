@@ -98,10 +98,18 @@ export interface PoeStats {
   netSpare: number | null
 }
 
+/**
+ * Why a product has no tech specs, when that is known: 'pending' (not read from the store yet, so they may just
+ * not be collected), 'none' (the store publishes none), or 'not-expected' (someone has said it has none to expect).
+ */
+export type SpecsGap = 'pending' | 'none' | 'not-expected'
+
 /** A line with what is derived from its product's specification. */
 export interface DerivedLine {
   view: LineView
   derived: Derived | null
+  /** What is known of why the product has no specs; undefined when it isn't known. */
+  gap?: SpecsGap
 }
 
 const name = (l: DerivedLine) => l.view.product?.title ?? l.view.line.ref
@@ -581,8 +589,9 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
   return [{ id: 'power-adapter', label: 'Power adapter', verdict: 'warn', text: `${[...new Set(short)].join('; ')}.` }]
 }
 
-/** True when nothing could be read from a product's specification: it has none yet (newly announced, or not collected yet), or none of it is usable. */
+/** True when nothing could be read from a product's specification: it has none yet (newly announced, or not collected yet), or none of it is usable. Not for a product none are expected for. */
 export function lacksSpecs(l: DerivedLine): boolean {
+  if (l.gap === 'not-expected') return false
   const d = l.derived
   if (!d) return true
   const k = d.known
@@ -593,17 +602,23 @@ export function lacksSpecs(l: DerivedLine): boolean {
  * Says which products have no tech specs to check against. The other checks can only judge what the specs state, so
  * a product without them is left out of them (it may need PoE, a port, rack space or an outlet, or be a controller
  * or recorder, and the plan won't know). That is common for newly announced products, and for a catalogue just
- * collected from the store.
+ * collected from the store. A product that has none and shouldn't is not named (see `SpecsGap`).
  */
 function specsCheck(lines: DerivedLine[]): PlanCheck[] {
   const missing = lines.filter((l) => l.view.product && lacksSpecs(l))
   if (missing.length === 0) return []
   const n = missing.length
+  const pending = missing.filter((l) => l.gap === 'pending')
+  const none = missing.filter((l) => l.gap === 'none')
+  const why = [
+    pending.length > 0 ? `${list(pending)} ${pending.length === 1 ? "hasn't" : "haven't"} been read from the store yet` : '',
+    none.length > 0 ? `the store publishes none for ${list(none)}` : '',
+  ].filter(Boolean)
   return [{
     id: 'specs',
     label: 'Tech specs',
     verdict: 'unknown',
-    text: `No tech specs are known yet for ${list(missing)}, so ${n === 1 ? 'it is' : 'they are'} left out of the checks below: ${n === 1 ? 'its' : 'their'} power, ports, rack space, and whether ${n === 1 ? 'it is' : 'they are'} a controller or recorder, aren't counted. The results may be incomplete.`,
+    text: `No tech specs are known yet for ${list(missing)}, so ${n === 1 ? 'it is' : 'they are'} left out of the checks below: ${n === 1 ? 'its' : 'their'} power, ports, rack space, and whether ${n === 1 ? 'it is' : 'they are'} a controller or recorder, aren't counted. The results may be incomplete.${why.length > 0 ? ` (${why.join('; ')}.)` : ''}`,
   }]
 }
 
@@ -620,17 +635,19 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
 export interface Answer {
   word: string
   emoji: string
-  tone: 'ok' | 'warn' | 'bad'
+  tone: 'ok' | 'warn' | 'bad' | 'unsure'
 }
 
 /**
- * The one-line answer to "does it add up?": no if anything is wrong, mostly if anything is a warning or can't be told,
+ * The one-line answer to "does it add up?": no if anything is wrong (whatever else is unknown), unsure if a product has
+ * no tech specs to check it with (which could change any answer), mostly if anything is a warning or can't be told,
  * yes if every check passed. Notes (info) don't count; with nothing but notes there is no answer.
  */
 export function overall(checks: PlanCheck[]): Answer | null {
   const vs = checks.map((c) => c.verdict).filter((v) => v !== 'info')
   if (vs.length === 0) return null
   if (vs.includes('bad')) return { word: 'No.', emoji: '❌', tone: 'bad' }
+  if (checks.some((c) => c.id === 'specs')) return { word: 'Unsure', emoji: '🤷🏻‍♂️', tone: 'unsure' }
   if (vs.some((v) => v !== 'ok')) return { word: 'Mostly', emoji: '👍', tone: 'warn' }
   return { word: 'Yes!', emoji: '🎉', tone: 'ok' }
 }

@@ -36,7 +36,7 @@ traffic scales with the CDN, never with requests to the UniFi store.
 In: read-only public site, snapshot generation, upload, UI read-only mode,
 public-field allowlist, config, metrics, tests.
 
-Out (stays private, LAN only): `POST /v1/items`, `PUT`/`DELETE /v1/overrides`,
+Out (stays private, LAN only): `POST /v1/items`, `PUT`/`DELETE /v1/overrides`, `PUT`/`DELETE /v1/specs/not-expected`,
 `GET /v1/overrides/history`, `POST .../refresh`, `/metrics`, `/health`,
 `/v1/me`. Per-user wish lists and saved-search alerts (see
 [ui-roadmap.md](ui-roadmap.md)) need accounts and writes and can't be static;
@@ -56,6 +56,7 @@ SPA needs no new response shapes.
 |------|--------|-------|
 | `v1/products.json` | `GET /v1/products` | |
 | `v1/derived.json` | `GET /v1/derived` | |
+| `v1/specs/gaps.json` | `GET /v1/specs/gaps` | the plan page reads it to know which products have no specs to expect; `created_by` is already left out for anonymous requests |
 | `v1/status.json` | `GET /v1/status` | |
 | `v1/variants.json`, `v1/variants/{region}.json` | `GET /v1/variants` | one per configured region |
 | `v1/history-30.json`, `-90`, `-365` | `GET /v1/history?days=` | fixed windows only |

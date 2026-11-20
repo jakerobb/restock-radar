@@ -321,6 +321,15 @@ var migrations = []string{
 	// What the store's page calls each choice: "1 TB" for a linked product, "No Storage" for having none of them.
 	`ALTER TABLE linked_products ADD COLUMN label TEXT NOT NULL DEFAULT '';
 	ALTER TABLE products ADD COLUMN linked_base_label TEXT NOT NULL DEFAULT '';`,
+	// Products for which the store publishes no tech specs and none are expected (a cable, a mounting
+	// bracket), so a plan holding one shouldn't be called unsure for lack of them. It is keyed by the
+	// product's slug without its region suffix, so that one entry covers the product in every region.
+	`CREATE TABLE specs_not_expected (
+		slug       TEXT PRIMARY KEY,
+		reason     TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		created_by TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 type Store struct {
