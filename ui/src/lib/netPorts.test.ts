@@ -75,6 +75,17 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     expect(net(lines)).toMatchObject({ net: { spare: 4 } })
   })
 
+  it('puts a device on the root switch rather than a downstream one when both have an equally good free port, whatever order the lines are in', () => {
+    // The root has four cages and the other switch two: the gateway and the other switch take one of the root's, so both switches have a cage left.
+    const root = sw([{ count: 4, max_speed_mbps: 1000 }, sfp(4)], 'root')
+    const leaf = sw([{ count: 4, max_speed_mbps: 1000 }, sfp(2)], 'leaf')
+    const gateway = gw([sfp(1)])
+    for (const lines of [[nvr(), leaf, root, gateway], [nvr(), root, leaf, gateway]]) {
+      expect(rows(lines, 'root')).toEqual(['10 GbE SFP+ ports: 1 × nvr'])
+      expect(rows(lines, 'leaf')).toBeUndefined()
+    }
+  })
+
   it('takes the ports PoE-powered devices are on out of what is free, and keeps uplinks off the PoE ports', () => {
     // 8 PoE ports and 2 others; 6 cameras are on PoE ports, the uplink takes a plain port, so 3 ports are left.
     const lines = (n: number) => [camera(6), copperOnly(n), poeSwitch([poeOut(8), { count: 2 }])]
