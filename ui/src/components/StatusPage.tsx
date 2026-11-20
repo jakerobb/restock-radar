@@ -161,20 +161,21 @@ function PresenceCard({ title, data, withLabel, withoutLabel, notCheckedLabel }:
 }
 
 /**
- * The products the store has been read for and published no tech specs, one row for the product in all its regions,
- * with whether none are expected. Those are either products that have none (a cable) or ones whose specs are still to
- * come (newly announced), which is why an editor decides which.
+ * The products the store has been read for that have no usable tech specs (the store published none, or nothing the
+ * checks can read), one row for the product in all its regions, with whether none are expected. Those are either
+ * products that have none (a cable) or ones whose specs are still to come (newly announced), which is why an editor
+ * decides which.
  */
 function NoSpecsCard() {
   const { data } = useSpecsGaps()
   const canEdit = useCan('overrides:write')
   const { mark, unmark } = useSetSpecsNotExpected()
   if (!data) return null
-  const rows = new Map<string, { slug: string; title: string; regions: { region: string; slug: string }[]; notExpected: boolean }>()
+  const rows = new Map<string, { slug: string; title: string; regions: { region: string; slug: string }[]; notExpected: boolean; published: boolean }>()
   for (const g of data.products) {
     if (g.fetched_at === null) continue
     const key = baseSlug(g.slug)
-    const row = rows.get(key) ?? { slug: key, title: g.title, regions: [], notExpected: g.not_expected }
+    const row = rows.get(key) ?? { slug: key, title: g.title, regions: [], notExpected: g.not_expected, published: g.published }
     row.regions.push({ region: g.region, slug: g.slug })
     rows.set(key, row)
   }
@@ -184,7 +185,7 @@ function NoSpecsCard() {
   const error = mark.error ?? unmark.error
   return (
     <Card aria-label="Products with no tech specs" className="sm:col-span-2">
-      <h2 className="font-semibold">Products the store publishes no tech specs for</h2>
+      <h2 className="font-semibold">Products with no usable tech specs</h2>
       <p className="mt-1 text-sm text-muted">
         {nf.format(open)} of {nf.format(list.length)} {list.length === 1 ? 'product is' : 'products are'} not marked as having none to expect. Plans holding an unmarked one are called unsure.
       </p>
@@ -198,6 +199,7 @@ function NoSpecsCard() {
               </Link>{' '}
               <span className="text-sm text-muted">
                 {r.regions.map((x) => regionName(x.region)).join(', ')}
+                {r.published ? ' · specs published, nothing usable' : ' · none published'}
                 {r.notExpected ? ' · none expected' : ''}
               </span>
             </span>

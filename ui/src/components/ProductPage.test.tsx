@@ -97,7 +97,7 @@ describe('ProductPage', () => {
 
 describe('a product with no tech specs', () => {
   const gaps = (o: object = {}) => ({
-    products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', not_expected: false }],
+    products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', published: false, not_expected: false }],
     not_expected: [],
     ...o,
   })
@@ -116,8 +116,15 @@ describe('a product with no tech specs', () => {
     expect(calls.some((c) => c.key === 'PUT /v1/specs/not-expected' && c.body === JSON.stringify({ slug: 'widget', reason: '' }))).toBe(true)
   })
 
+  it('says so when the store publishes specs but nothing usable came of them (the OCD panels)', async () => {
+    stubFetch(routes(gaps({ products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: '', fetched_at: '2026-11-15T10:00:00Z', published: true, not_expected: false }] })))
+    renderRoute('/p/us/widget')
+    expect(await screen.findByText(/gives the plan checks nothing to use/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'No specs expected for this' })).toBeInTheDocument()
+  })
+
   it('says nothing for a product that has yet to be read from the store', async () => {
-    stubFetch(routes(gaps({ products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: '', fetched_at: null, not_expected: false }] })))
+    stubFetch(routes(gaps({ products: [{ region: 'us', id: 'p1', slug: 'widget', title: 'Widget', category: '', fetched_at: null, published: false, not_expected: false }] })))
     renderRoute('/p/us/widget')
     await screen.findByRole('heading', { level: 1, name: 'Widget' })
     expect(screen.queryByText(/publishes no tech specs/)).not.toBeInTheDocument()

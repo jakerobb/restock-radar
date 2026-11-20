@@ -47,6 +47,7 @@ describe('planChecks', () => {
     const c = byId([{ ...item('soon', 1, null), gap: 'pending' as const }, { ...item('bare', 1, null), gap: 'none' as const }])['specs']!
     expect(c.text).toContain("soon hasn't been read from the store yet")
     expect(c.text).toContain('the store publishes none for bare')
+    expect(byId([{ ...item('panels', 1, null), gap: 'unusable' as const }])['specs']!.text).toContain('what the store publishes for panels gives nothing to check with')
   })
 
   it('says the devices fit, with the numbers', () => {

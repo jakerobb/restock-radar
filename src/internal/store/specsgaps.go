@@ -19,16 +19,20 @@ func BaseSlug(slug string) string {
 	return regionSuffix.ReplaceAllString(strings.ToLower(strings.TrimSpace(slug)), "")
 }
 
-// SpecsGap is a tracked product that has no tech specs stored.
+// SpecsGap is a tracked product that has no tech specs to check a plan with: none are stored, or what the store
+// publishes gives nothing to derive (a table laid out per variant, say, which the derivation doesn't read).
 type SpecsGap struct {
 	Region   string `json:"region"`
 	ID       string `json:"id"`
 	Slug     string `json:"slug"`
 	Title    string `json:"title"`
 	Category string `json:"category"`
-	// FetchedAt is when the product endpoint last supplied the product, with no specs; nil when it
-	// hasn't been fetched yet, in which case the specs may simply not have been collected.
+	// FetchedAt is when the product endpoint last supplied the product; nil when it hasn't been fetched
+	// yet, in which case the specs may simply not have been collected.
 	FetchedAt *time.Time `json:"fetched_at"`
+	// Published says the store published some specs for it, but nothing could be derived from them. When false,
+	// the store published none.
+	Published bool `json:"published"`
 	// NotExpected says the product is on the list of those that have no tech specs and shouldn't.
 	NotExpected bool `json:"not_expected"`
 }
@@ -42,8 +46,9 @@ type SpecsNotExpected struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
-// SpecsGaps lists the tracked products with no tech specs stored, by title, and the list of products no
-// specs are expected for.
+// SpecsGaps lists the tracked products with no usable tech specs, by title (those with none stored, and those whose
+// stored specs gave nothing derived: no ports, PoE, radios, rack, size, numbers or power), and the list of products
+// no specs are expected for.
 func (s *Store) SpecsGaps(ctx context.Context) ([]SpecsGap, []SpecsNotExpected, error) {
 	expected, err := s.SpecsNotExpectedList(ctx)
 	if err != nil {
@@ -54,9 +59,15 @@ func (s *Store) SpecsGaps(ctx context.Context) ([]SpecsGap, []SpecsNotExpected, 
 		listed[e.Slug] = true
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.region, p.id, p.slug, p.title, p.category, p.specs_fetched_at
+		SELECT p.region, p.id, p.slug, p.title, p.category, p.specs_fetched_at,
+		       EXISTS (SELECT 1 FROM product_specs ps WHERE ps.region = p.region AND ps.product_id = p.id) AS published
 		FROM products p
+		LEFT JOIN product_derived d ON d.region = p.region AND d.product_id = p.id
 		WHERE NOT EXISTS (SELECT 1 FROM product_specs ps WHERE ps.region = p.region AND ps.product_id = p.id)
+		   OR (d.product_id IS NOT NULL
+		       AND d.known_ports = 0 AND d.known_poe = 0 AND d.known_radios = 0 AND d.known_rack = 0 AND d.known_dims = 0
+		       AND NOT EXISTS (SELECT 1 FROM product_metrics m WHERE m.region = p.region AND m.product_id = p.id)
+		       AND NOT EXISTS (SELECT 1 FROM product_power w WHERE w.region = p.region AND w.product_id = p.id))
 		ORDER BY p.title, p.region`)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +77,7 @@ func (s *Store) SpecsGaps(ctx context.Context) ([]SpecsGap, []SpecsNotExpected, 
 	for rows.Next() {
 		var g SpecsGap
 		var fetched sql.NullString
-		if err := rows.Scan(&g.Region, &g.ID, &g.Slug, &g.Title, &g.Category, &fetched); err != nil {
+		if err := rows.Scan(&g.Region, &g.ID, &g.Slug, &g.Title, &g.Category, &fetched, &g.Published); err != nil {
 			return nil, nil, err
 		}
 		g.FetchedAt = parseTS(fetched)

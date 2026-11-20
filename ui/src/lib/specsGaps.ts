@@ -17,5 +17,6 @@ export function specsGapOf(product: Product | undefined, r: SpecsGapsResponse | 
   if (isSpecsNotExpected(product.slug, notExpectedSlugs(r))) return 'not-expected'
   const g = r.products.find((x) => x.region === product.region && x.slug === product.slug)
   if (!g) return undefined
-  return g.fetched_at === null ? 'pending' : 'none'
+  if (g.fetched_at === null) return 'pending'
+  return g.published ? 'unusable' : 'none'
 }

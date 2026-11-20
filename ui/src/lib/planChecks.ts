@@ -99,10 +99,11 @@ export interface PoeStats {
 }
 
 /**
- * Why a product has no tech specs, when that is known: 'pending' (not read from the store yet, so they may just
- * not be collected), 'none' (the store publishes none), or 'not-expected' (someone has said it has none to expect).
+ * Why a product has no usable tech specs, when that is known: 'pending' (not read from the store yet, so they may
+ * just not be collected), 'none' (the store publishes none), 'unusable' (it publishes some, but nothing the checks can
+ * read), or 'not-expected' (someone has said it has none to expect).
  */
-export type SpecsGap = 'pending' | 'none' | 'not-expected'
+export type SpecsGap = 'pending' | 'none' | 'unusable' | 'not-expected'
 
 /** A line with what is derived from its product's specification. */
 export interface DerivedLine {
@@ -610,9 +611,11 @@ function specsCheck(lines: DerivedLine[]): PlanCheck[] {
   const n = missing.length
   const pending = missing.filter((l) => l.gap === 'pending')
   const none = missing.filter((l) => l.gap === 'none')
+  const unusable = missing.filter((l) => l.gap === 'unusable')
   const why = [
     pending.length > 0 ? `${list(pending)} ${pending.length === 1 ? "hasn't" : "haven't"} been read from the store yet` : '',
     none.length > 0 ? `the store publishes none for ${list(none)}` : '',
+    unusable.length > 0 ? `what the store publishes for ${list(unusable)} gives nothing to check with` : '',
   ].filter(Boolean)
   return [{
     id: 'specs',
