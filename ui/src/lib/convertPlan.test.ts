@@ -1,5 +1,5 @@
 import type { Product } from '../api/types'
-import { baseSku, convertPlan, matchVariant } from './convertPlan'
+import { baseSku, baseSlug, convertPlan, counterpart, matchVariant } from './convertPlan'
 import type { PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
@@ -75,5 +75,63 @@ describe('convertPlan', () => {
     const c = convertPlan([line()], {}, products, 'us')
     expect(c.lines).toEqual([{ ...line(), addedCents: null }])
     expect(c.outcomes[0]?.result).toBe('same')
+  })
+})
+
+describe('a region that sells two regional versions of a SKU', () => {
+  // The European store lists an EU and a UK plug for one product; the US lists one version.
+  const us = product({ region: 'us', id: 'xg', slug: 'usw-pro-xg-8-poe', variants: [variant({ sku: 'USW-Pro-XG-8-PoE', title: 'US Version' })] })
+  const eu = product({ region: 'eu', id: 'xg', slug: 'usw-pro-xg-8-poe', variants: [variant({ sku: 'USW-Pro-XG-8-PoE-EU', title: 'EU Version' }), variant({ sku: 'USW-Pro-XG-8-PoE-UK', title: 'UK Version' })] })
+
+  it('takes the one made for that region', () => {
+    expect(matchVariant(us.variants[0]!, us, eu, 'eu')?.sku).toBe('USW-Pro-XG-8-PoE-EU')
+    expect(matchVariant(us.variants[0]!, us, eu, 'uk')?.sku).toBe('USW-Pro-XG-8-PoE-UK')
+  })
+  it('takes the one that names no region when none is made for it', () => {
+    const mixed = product({ region: 'jp', variants: [variant({ sku: 'USW-Pro-XG-8-PoE' }), variant({ sku: 'USW-Pro-XG-8-PoE-UK' })] })
+    expect(matchVariant(us.variants[0]!, us, mixed, 'jp')?.sku).toBe('USW-Pro-XG-8-PoE')
+  })
+  it('gives up when it still cannot tell', () => {
+    const odd = product({ region: 'sg', variants: [variant({ sku: 'USW-Pro-XG-8-PoE-EU', title: 'a' }), variant({ sku: 'USW-Pro-XG-8-PoE-UK', title: 'b' })] })
+    expect(matchVariant(us.variants[0]!, us, odd, 'sg')).toBeUndefined()
+  })
+  it('converts the line, and back again', () => {
+    const c = convertPlan([{ ref: 'us/usw-pro-xg-8-poe', sku: 'USW-Pro-XG-8-PoE', qty: 1, addedCents: null }], {}, [us, eu], 'eu')
+    expect(c.lines).toEqual([{ ref: 'eu/usw-pro-xg-8-poe', sku: 'USW-Pro-XG-8-PoE-EU', qty: 1, addedCents: null }])
+    const back = convertPlan(c.lines, {}, [us, eu], 'us')
+    expect(back.lines).toEqual([{ ref: 'us/usw-pro-xg-8-poe', sku: 'USW-Pro-XG-8-PoE', qty: 1, addedCents: null }])
+  })
+})
+
+describe('a product the store sells separately in each region', () => {
+  const tower = (region: string, suffix: string, id: string) =>
+    product({ region, id, slug: `ups-tower-${suffix}`, title: 'UPS Tower', variants: [variant({ sku: `UPS-Tower-${suffix.toUpperCase()}` })] })
+  const products = [tower('us', 'us', 'a'), tower('eu', 'eu', 'b'), tower('uk', 'uk', 'c')]
+
+  it('is found by its slug bar the region, and its SKU follows', () => {
+    expect(baseSlug('ups-tower-eu')).toBe('ups-tower')
+    expect(baseSlug('usw-pro-hd-24-poe')).toBe('usw-pro-hd-24-poe')
+    const c = convertPlan([{ ref: 'us/ups-tower-us', sku: 'UPS-Tower-US', qty: 2, addedCents: null }], {}, products, 'eu')
+    expect(c.lines).toEqual([{ ref: 'eu/ups-tower-eu', sku: 'UPS-Tower-EU', qty: 2, addedCents: null }])
+    expect(c.outcomes[0]?.result).toBe('counterpart')
+  })
+  it('works from a European product to the US one', () => {
+    expect(counterpart(products[1]!, 'us', products)?.slug).toBe('ups-tower-us')
+  })
+  it('falls back to the title, but only for one product', () => {
+    const renamed = product({ region: 'br', id: 'z', slug: 'torre-ups', title: 'UPS Tower', variants: [variant({ sku: 'UPS-Tower-BR' })] })
+    expect(counterpart(products[0]!, 'br', [...products, renamed])?.slug).toBe('torre-ups')
+    const twin = product({ region: 'br', id: 'y', slug: 'torre-ups-2', title: 'UPS Tower' })
+    expect(counterpart(products[0]!, 'br', [...products, renamed, twin])).toBeUndefined()
+  })
+  it('does not take a different product that merely starts the same', () => {
+    const hd = product({ region: 'us', id: 'h', slug: 'usw-pro-hd-24', title: 'Switch Pro HD 24' })
+    const poe = product({ region: 'eu', id: 'p', slug: 'usw-pro-hd-24-poe', title: 'Switch Pro HD 24 PoE' })
+    expect(counterpart(hd, 'eu', [hd, poe])).toBeUndefined()
+  })
+  it('prefers the slug made for the region when several share a base', () => {
+    const a = product({ region: 'eu', id: 'q', slug: 'ups-tower-eu', title: 'UPS Tower' })
+    const b = product({ region: 'eu', id: 'r', slug: 'ups-tower-uk', title: 'UPS Tower' })
+    expect(counterpart(products[0]!, 'eu', [products[0]!, b, a])?.slug).toBe('ups-tower-eu')
   })
 })
