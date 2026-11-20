@@ -639,7 +639,7 @@ describe('Converting to another region', () => {
     const dialog = screen.getByRole('dialog', { name: 'Convert this plan' })
     expect(within(dialog).getByRole('combobox')).toHaveValue('eu') // not the region it is in
     expect(within(dialog).getByText(/1 of 2 lines carry over to Europe/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/SW-8 is SW-8-EU/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/SW-8 → SW-8-EU/)).toBeInTheDocument()
     expect(within(dialog).getByText(/Access Point is not sold there/)).toBeInTheDocument()
 
     const link = within(dialog).getByRole('link', { name: /Open the converted plan in a new tab/ })
