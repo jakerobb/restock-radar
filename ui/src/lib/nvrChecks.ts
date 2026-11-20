@@ -191,8 +191,8 @@ function storageRows(u: Unit, someUnknown: boolean): DetailRow[] {
   const mixed = new Set(u.drives).size > 1
   const raw = u.drives.reduce((a, b) => a + b, 0)
   const head = mixed
-    ? `${u.drives.length} drives, ${formatTb(raw)} in all (counted at the smallest, ${formatTb(size)}, as drives of different sizes are in an array)`
-    : `${u.drives.length} × ${formatTb(size)} drive${u.drives.length === 1 ? '' : 's'}, ${formatTb(raw)} in all`
+    ? `${u.drives.length} drives, ${formatTb(raw)} raw storage (counted at the smallest, ${formatTb(size)}, as drives of different sizes are in an array)`
+    : `${u.drives.length} × ${formatTb(size)} drive${u.drives.length === 1 ? '' : 's'}, ${formatTb(raw)} raw storage`
   const options = bays > 0 ? raidOptions(u.drives.length, bays) : [{ level: '', usable: 1 }]
   const items = options.map((o) => `${o.level ? `${o.level}: ` : ''}${formatTb(o.usable * size)} effective; ${retention(o.usable * size)}${note}`)
   return [{ text: `${head}:`, items }]

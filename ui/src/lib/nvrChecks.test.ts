@@ -121,7 +121,7 @@ describe('the storage of an NVR', () => {
   it('gives each way to protect four drives, with the effective storage and days of footage', () => {
     const s = four()
     const r = rows(find(s, ['bays4', 1], ['uacc-hdd-e-16tb', 4], ['c4k', 10]))
-    expect(r).toContain('4 × 16 TB drives, 64 TB in all:')
+    expect(r).toContain('4 × 16 TB drives, 64 TB raw storage:')
     expect(r).toContain('RAID 5: 48 TB effective; approximately 37 days of footage')
     expect(r).toContain('RAID 10: 32 TB effective; approximately 25 days of footage')
   })
@@ -138,7 +138,7 @@ describe('the storage of an NVR', () => {
     const c = find(s, ['a', 2], ['uacc-hdd-e-16tb', 4], ['c4k', 1]) // no cameras defined: just the drives
     expect(c).toBeUndefined()
     const s2 = setup([bayNvr('a', 2), drive('uacc-hdd-e-16tb'), cam('c4k', 8.3)])
-    expect(rows(find(s2, ['a', 1], ['uacc-hdd-e-16tb', 6], ['c4k', 1]))).toContain('2 × 16 TB drives, 32 TB in all:')
+    expect(rows(find(s2, ['a', 1], ['uacc-hdd-e-16tb', 6], ['c4k', 1]))).toContain('2 × 16 TB drives, 32 TB raw storage:')
   })
 
   it('says so when there are no drives, and not that the plan fails', () => {
