@@ -1,4 +1,4 @@
-import { createPlan, deletePlan, getActiveId, getPlan, getPlanName, getPlans, renamePlan, resetPlanStore, selectPlan, setPlan, subscribePlan } from './planStore'
+import { createPlan, deletePlan, nameTaken, uniqueName, getActiveId, getPlan, getPlanName, getPlans, renamePlan, resetPlanStore, selectPlan, setPlan, subscribePlan } from './planStore'
 import { serializeLine } from './plan'
 
 const KEY = 'restock-radar.plans'
@@ -95,5 +95,29 @@ describe('planStore', () => {
     expect(getPlans()).toHaveLength(1)
     expect(getPlan()).toEqual([])
     expect(getPlanName()).toBe('My Plan')
+  })
+
+  it('won’t give two plans the same name, however it is capitalised', () => {
+    createPlan('Garage')
+    expect(createPlan('garage ')).toBeNull()
+    expect(getPlans()).toHaveLength(2)
+    expect(renamePlan('MY PLAN')).toBe(false)
+    expect(getPlanName()).toBe('Garage')
+    expect(renamePlan('GARAGE')).toBe(true) // its own name, in other capitals
+    expect(nameTaken(getPlans(), 'my plan')).toBe(true)
+  })
+
+  it('finds a free name by numbering, within 50 characters', () => {
+    createPlan('Garage')
+    createPlan('Garage (2)')
+    expect(uniqueName(getPlans(), 'Garage')).toBe('Garage (3)')
+    expect(uniqueName(getPlans(), 'Shop')).toBe('Shop')
+    createPlan('x'.repeat(50))
+    expect(uniqueName(getPlans(), 'x'.repeat(50))).toBe('x'.repeat(46) + ' (2)')
+  })
+
+  it('numbers duplicates it finds in storage', () => {
+    localStorage.setItem(KEY, JSON.stringify({ active: 'a', plans: [{ id: 'a', name: 'Same', lines: [] }, { id: 'b', name: 'same', lines: [] }] }))
+    expect(getPlans().map((p) => p.name)).toEqual(['Same', 'same (2)'])
   })
 })

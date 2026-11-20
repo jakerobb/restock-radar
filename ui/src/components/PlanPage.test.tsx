@@ -509,6 +509,24 @@ describe('several plans', () => {
     expect(screen.getByRole('combobox', { name: 'Which plan' }).querySelectorAll('option')).toHaveLength(1)
   })
 
+  it('won’t take a name another plan has, and numbers the suggestion for a shared plan saved twice', async () => {
+    catalog()
+    const user = userEvent.setup()
+    const { router } = renderRoute(`/plan/${encodePlan([line({})], products, {}, {}, 'Garage rack')}`)
+    await user.click(await screen.findByRole('button', { name: 'Save as a new plan' }))
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/plan'))
+    await router.navigate({ to: '/plan/$slug', params: { slug: encodePlan([line({})], products, {}, {}, 'Garage rack') } })
+    await user.click(await screen.findByRole('button', { name: 'Save as a new plan' }))
+    expect(screen.getByRole('textbox')).toHaveValue('Garage rack (2)')
+    await user.clear(screen.getByRole('textbox'))
+    await user.type(screen.getByRole('textbox'), 'garage RACK')
+    expect(screen.getByRole('alert')).toHaveTextContent('already have a plan called')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('dialog', { name: 'Save as a new plan' })).toBeInTheDocument()
+  })
+
   it('keeps a name to 50 characters', async () => {
     catalog()
     renderRoute('/plan')
