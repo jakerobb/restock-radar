@@ -531,3 +531,32 @@ describe('a shared plan', () => {
     await waitFor(() => expect(rowFor('PoE Switch')).toBeInTheDocument())
   })
 })
+
+describe('Converting to another region', () => {
+  it('opens the plan as a new plan in the other region, and says what could not come along', async () => {
+    const eu = (over: Parameters<typeof product>[0]) => product({ region: 'eu', ...over })
+    const all = [
+      product({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'a', num: 1, sku: 'SW-8', price_cents: 20000 })] }),
+      product({ id: '2', slug: 'ap', title: 'Access Point', variants: [variant({ id: 'c', num: 3, sku: 'AP-1', price_cents: 15000 })] }),
+      eu({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'e', num: 11, sku: 'SW-8-EU', currency: 'EUR', price_cents: 18000 })] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ regions: ['us', 'eu'], products: all }) }, 'GET /v1/derived': { body: [] } })
+    setPlan([line({ qty: 2 }), line({ ref: 'us/ap', sku: 'AP-1', qty: 1, addedCents: 15000 })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+
+    await user.click(await screen.findByRole('button', { name: 'Convert to another region' }))
+    const dialog = screen.getByRole('dialog', { name: 'Convert this plan' })
+    expect(within(dialog).getByRole('combobox')).toHaveValue('eu') // not the region it is in
+    expect(within(dialog).getByText(/1 of 2 lines carry over to Europe/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/SW-8 is SW-8-EU/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Access Point is not sold there/)).toBeInTheDocument()
+
+    const link = within(dialog).getByRole('link', { name: /Open the converted plan in a new tab/ })
+    expect(link).toHaveAttribute('target', '_blank')
+    const slug = link.getAttribute('href')!.replace('/plan/', '')
+    expect(slug).toBe(encodePlan([{ ref: 'eu/switch', sku: 'SW-8-EU', qty: 2, addedCents: null }], all))
+    // Hers is untouched.
+    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toHaveLength(2)
+  })
+})

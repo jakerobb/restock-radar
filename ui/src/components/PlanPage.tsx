@@ -21,6 +21,7 @@ import { TopologyGraph } from './TopologyGraph'
 import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
 import { PlanSearch } from './PlanSearch'
+import { ConvertPlan } from './ConvertPlan'
 import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -438,6 +439,14 @@ export default function PlanPage() {
               Add product
             </Button>
           )}
+          <ConvertPlan
+            lines={lines}
+            hosting={hosting}
+            powering={powering}
+            products={productData.products}
+            regions={productData.regions}
+            suggested={lines.some((l) => !l.ref.startsWith(`${region}/`)) ? region : (productData.regions.find((r) => r !== region) ?? region)}
+          />
           <ShareLink lines={lines} products={productData.products} hosting={hosting} powering={powering} />
         </div>
       )}
