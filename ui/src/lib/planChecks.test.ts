@@ -20,6 +20,21 @@ const sw = (qty: number, budget: number | null, ports = 8) => item('sw', qty, { 
 const byId = (lines: DerivedLine[]) => Object.fromEntries(planChecks(lines).map((c) => [c.id, c]))
 
 describe('planChecks', () => {
+  it('calls out products with no tech specs, and says the other checks leave them out', () => {
+    const c = byId([ap(2), sw(1, 100), item('newbie', 1, null), item('blank', 1, { known: { ports: false, poe: false, radios: false, rack: false, dims: false } })])
+    expect(c['specs']).toMatchObject({ verdict: 'unknown', text: expect.stringContaining('No tech specs are known yet for newbie, blank') })
+    expect(c['specs']!.text).toContain('left out of the checks')
+  })
+
+  it('does not call out products whose specs gave something, or say anything when all are known', () => {
+    expect(byId([ap(2), sw(1, 100)])['specs']).toBeUndefined()
+    expect(byId([item('rackonly', 1, { known: { ...known, ports: false, poe: false, radios: false, dims: false } })])['specs']).toBeUndefined()
+  })
+
+  it('makes the answer "Mostly" when only a specs gap is wrong', () => {
+    expect(overall(planChecks([ap(2), sw(1, 100), item('newbie', 1, null)]))).toMatchObject({ word: 'Mostly' })
+  })
+
   it('says the devices fit, with the numbers', () => {
     const c = byId([ap(4), sw(1, 100)])
     expect(c['poe-power']).toMatchObject({ verdict: 'ok', text: 'Devices draw up to 52 W of the 100 W supplied.' })
@@ -88,7 +103,8 @@ describe('planChecks', () => {
   })
 
   it('ignores products whose ports aren’t known, and says nothing when nothing applies', () => {
-    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)])).toEqual([])
+    // Only the note about the product with no specs at all; nothing from the PoE or port checks.
+    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['specs'])
   })
 
   it('counts the AC outlets: mains-powered devices that aren’t on PoE', () => {
