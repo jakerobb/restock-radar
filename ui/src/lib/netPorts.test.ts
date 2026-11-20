@@ -93,6 +93,15 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     expect(net(lines(4))).toMatchObject({ verdict: 'bad', net: { unplaced: 1 } })
   })
 
+  it('does not charge a switch for the cameras that are on an NVR’s PoE ports', () => {
+    // The recorder has three PoE ports and the switch two PoE++ ones. Cameras take the lowest class that will do, so three go on the recorder
+    // and one on the switch, whose other port is the recorder's own: the cameras on the recorder must not be taken out of the switch's ports.
+    const recorder = item('rec', 1, 'Storage', { ports: [port({ max_speed_mbps: 1000 }), port(poeOut(3))] })
+    const lines = [camera(4), recorder, poeSwitch([{ ...poeOut(2), poe_class: 'PoE++' }, sfp(1)])]
+    expect(net(lines)).toMatchObject({ verdict: 'ok', net: { unplaced: 0, spare: 0 } })
+    expect(rows(lines, 'psw')).toEqual(['1 GbE RJ45 ports: 1 × rec'])
+  })
+
   it('notices when the switch’s uplink takes a PoE port a PoE-powered device needed', () => {
     // 8 PoE ports and nothing else: 8 cameras fill them, and the uplink has no port left.
     expect(net([camera(8), poeSwitch([poeOut(8)])])).toMatchObject({ verdict: 'bad', shortfall: true, net: { unplaced: 1 }, text: expect.stringContaining('PoE-powered device') })

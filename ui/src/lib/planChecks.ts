@@ -4,7 +4,7 @@ import { netPortCheck, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
-import { roleCheck, type Hosting, type Role } from './roles'
+import { isGatewayProduct, roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
 import { isInjector } from './injectors'
 
@@ -437,7 +437,9 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
   }
   const stranded = placing.filter((_, i) => placed[i] === null)
   if (outcome) {
-    outcome.onSwitches = placed.filter((at) => at !== null && !injectorUnit[at.unit]).length
+    // Cameras on an NVR's PoE ports take none of a switch's or gateway's, so only a switch or gateway counts as a host.
+    const onNetwork = (k: number) => units[k]!.line.view.product?.type === 'Switches' || isGatewayProduct(units[k]!.line.view.product, units[k]!.line.derived)
+    outcome.onSwitches = placed.filter((at) => at !== null && !injectorUnit[at.unit] && onNetwork(at.unit)).length
     outcome.stranded = stranded.length
   }
   if (trace) {
