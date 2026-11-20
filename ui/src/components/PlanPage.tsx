@@ -9,12 +9,13 @@ import { inRegion } from '../lib/region'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
-import { decodePlan, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
+import { decodePlan, DEFAULT_PLAN_NAME, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
 import { buildTopology } from '../lib/topology'
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
+import { MAX_PLANS } from '../lib/planStore'
 import { Dialog } from './Dialog'
 import { PageNav } from './PageNav'
 import { TopologyGraph } from './TopologyGraph'
@@ -22,6 +23,7 @@ import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
 import { PlanSearch } from './PlanSearch'
 import { ConvertPlan } from './ConvertPlan'
+import { NamePlanDialog } from './NamePlanDialog'
 import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -307,10 +309,10 @@ function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string,
   }
 }
 
-function ShareLink({ lines, products, hosting, powering }: { lines: PlanLine[]; products: Product[]; hosting: Hosting; powering: Powering }) {
+function ShareLink({ name, lines, products, hosting, powering }: { name: string; lines: PlanLine[]; products: Product[]; hosting: Hosting; powering: Powering }) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  const slug = encodePlan(lines, products, hosting, powering)
+  const slug = encodePlan(lines, products, hosting, powering, name)
   if (slug === '') return null
   const url = `${window.location.origin}/plan/${slug}`
   const copy = async () => {
@@ -366,6 +368,81 @@ function ShareLink({ lines, products, hosting, powering }: { lines: PlanLine[]; 
   )
 }
 
+/** Which plan is being edited, and the ways to start, rename and delete them. */
+function PlanSwitcher() {
+  const { plans, activeId, name, select, create, rename, destroy } = usePlan()
+  const [dialog, setDialog] = useState<'new' | 'rename' | 'delete' | null>(null)
+  const close = () => setDialog(null)
+  const small = 'cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink'
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <Select className="min-w-0 max-w-full py-1 text-sm font-medium" value={activeId} onChange={(e) => select(e.target.value)} aria-label="Which plan">
+        {plans.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </Select>
+      <button type="button" className={small} onClick={() => setDialog('rename')}>
+        Rename
+      </button>
+      <button type="button" className={small} onClick={() => setDialog('new')} disabled={plans.length >= MAX_PLANS}>
+        New plan
+      </button>
+      <button type="button" className={small} onClick={() => setDialog('delete')}>
+        Delete
+      </button>
+      {dialog === 'rename' && (
+        <NamePlanDialog
+          title="Rename this plan"
+          label="Name"
+          initial={name}
+          submit="Rename"
+          onSubmit={(n) => {
+            rename(n)
+            close()
+          }}
+          onClose={close}
+        />
+      )}
+      {dialog === 'new' && (
+        <NamePlanDialog
+          title="New plan"
+          label="Name"
+          initial={`Plan ${plans.length + 1}`}
+          submit="Create"
+          onSubmit={(n) => {
+            create(n)
+            close()
+          }}
+          onClose={close}
+        />
+      )}
+      {dialog === 'delete' && (
+        <Dialog title="Delete this plan?" onClose={close}>
+          <p className="mb-4 text-sm">
+            “{name}” will be gone for good{plans.length === 1 ? ' (you always have a plan, so it will be emptied and named “' + DEFAULT_PLAN_NAME + '” again)' : ''}.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={close}>
+              Keep it
+            </Button>
+            <Button
+              data-autofocus
+              onClick={() => {
+                destroy()
+                close()
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </Dialog>
+      )}
+    </div>
+  )
+}
+
 export default function PlanPage() {
   const { slug } = useParams({ strict: false }) as { slug?: string }
   const navigate = useNavigate()
@@ -376,6 +453,7 @@ export default function PlanPage() {
   // What can be added is what the chosen store sells; the plan itself may hold lines from any.
   const offered = useMemo(() => inRegion(productData?.products ?? [], region), [productData?.products, region])
   const [confirmClear, setConfirmClear] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const shared = slug !== undefined
   // Numbers in a link mean something only next to the catalogue, so a shared plan waits for it.
@@ -430,7 +508,12 @@ export default function PlanPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 pt-6 pb-12 xl:max-w-[88rem]">
       <PageNav title="Build plan" />
-      <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. The plan is kept in this browser.</p>
+      <p className="mt-1 text-sm text-muted">What you intend to use, with current prices and whether it adds up. Nothing is bought here. Your plans are kept in this browser.</p>
+      {!shared && (
+        <div className="mt-3">
+          <PlanSwitcher />
+        </div>
+      )}
 
       {productData && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -440,6 +523,7 @@ export default function PlanPage() {
             </Button>
           )}
           <ConvertPlan
+            name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name}
             lines={lines}
             hosting={hosting}
             powering={powering}
@@ -447,7 +531,7 @@ export default function PlanPage() {
             regions={productData.regions}
             suggested={lines.some((l) => !l.ref.startsWith(`${region}/`)) ? region : (productData.regions.find((r) => r !== region) ?? region)}
           />
-          <ShareLink lines={lines} products={productData.products} hosting={hosting} powering={powering} />
+          <ShareLink name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name} lines={lines} products={productData.products} hosting={hosting} powering={powering} />
         </div>
       )}
       {searching && productData && (
@@ -465,23 +549,30 @@ export default function PlanPage() {
       {shared && decoded && (
         <Notice tone="ok" className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <span>
-            This is a plan someone shared with you, not yours.
+            This is a plan someone shared with you: <strong>{decoded.name}</strong>. It isn’t one of yours.
             {decoded.unknown > 0 && ` ${decoded.unknown === 1 ? '1 item in it isn’t' : `${decoded.unknown} items in it aren’t`} tracked here, so ${decoded.unknown === 1 ? 'it is' : 'they are'} left out.`}
           </span>
-          <Button
-            variant="secondary"
-            className="py-1 text-sm"
-            onClick={() => {
-              mine.replace(views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting, decoded.powering)
-              leaveShared()
-            }}
-          >
-            {mine.lines.length > 0 ? 'Replace my plan with it' : 'Keep it as my plan'}
+          <Button variant="secondary" className="py-1 text-sm" onClick={() => setSaving(true)} disabled={mine.plans.length >= MAX_PLANS}>
+            Save as a new plan
           </Button>
           <button type="button" className="cursor-pointer text-sm underline underline-offset-2" onClick={leaveShared}>
             Back to my plan
           </button>
         </Notice>
+      )}
+      {saving && decoded && (
+        <NamePlanDialog
+          title="Save as a new plan"
+          label="Name for your copy"
+          initial={decoded.name}
+          submit="Save"
+          onSubmit={(n) => {
+            mine.create(n, views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting, decoded.powering)
+            setSaving(false)
+            leaveShared()
+          }}
+          onClose={() => setSaving(false)}
+        />
       )}
       {isPending && <p className="py-8 text-center text-muted">Loading…</p>}
       {isError && <Notice tone="bad" className="mt-4">Couldn't load the catalogue.</Notice>}

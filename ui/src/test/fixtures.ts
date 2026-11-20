@@ -90,3 +90,9 @@ export function derived(overrides: Partial<Derived> = {}): Derived {
     ...overrides,
   }
 }
+
+/** What the browser has stored for the plan being edited: `lines` as the texts kept, or its `hosting`, `powering` or `name`. */
+export function stored(part: 'lines' | 'hosting' | 'powering' | 'name'): unknown {
+  const raw = JSON.parse(localStorage.getItem('restock-radar.plans')!) as { active: string; plans: { id: string; name: string; lines: string[]; hosting: unknown; powering: unknown }[] }
+  return raw.plans.find((p) => p.id === raw.active)![part]
+}

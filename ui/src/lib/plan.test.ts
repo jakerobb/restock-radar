@@ -1,4 +1,4 @@
-import { setAddOn, variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
+import { setAddOn, variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, MAX_NAME, cleanName, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
 const line = (over: Partial<PlanLine> = {}): PlanLine => ({ ref: 'us/widget', sku: 'SKU-1', qty: 1, addedCents: 10900, ...over })
@@ -36,7 +36,7 @@ describe('plan slugs', () => {
   it('round-trips, in order, without the price, and is URL-safe', () => {
     const slug = encodePlan(lines, catalogue)
     expect(slug).toMatch(/^[A-Za-z0-9_-]+$/)
-    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: {}, powering: {} })
+    expect(decodePlan(slug, catalogue)).toEqual({ lines: lines.map((l) => ({ ...l, addedCents: null })), unknown: 0, hosting: {}, powering: {}, name: 'My Plan' })
   })
 
   it('takes two bytes a line while numbers are small', () => {
@@ -48,7 +48,7 @@ describe('plan slugs', () => {
   it('leaves out lines that are not in the catalogue, and counts the ones it cannot place', () => {
     const slug = encodePlan([...lines, { ref: 'us/gone', sku: 'G', qty: 1, addedCents: null }], catalogue)
     expect(decodePlan(slug, catalogue)!.lines).toHaveLength(3)
-    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1, hosting: {}, powering: {} })
+    expect(decodePlan(slug, catalogue.slice(0, 2))).toEqual({ lines: lines.slice(0, 2).map((l) => ({ ...l, addedCents: null })), unknown: 1, hosting: {}, powering: {}, name: 'My Plan' })
   })
 
   it('merges a repeated variant and holds an empty plan', () => {
@@ -83,6 +83,36 @@ describe('plan slugs', () => {
     extra.push(n, 1)
     const old = btoa(String.fromCharCode(...bytes, ...extra)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     expect(decodePlan(old, catalogue)?.hosting).toEqual({ network: 'self' })
+  })
+})
+
+describe('plan names', () => {
+  const p = product({ variants: [variant({ sku: 'SKU-1', num: 9 })] })
+  const l: PlanLine = { ref: 'us/' + p.slug, sku: 'SKU-1', qty: 2, addedCents: null }
+
+  it('tidies a name and cuts it to 50 characters', () => {
+    expect(cleanName('  a \n  b ')).toBe('a b')
+    expect(cleanName('x'.repeat(60))).toBe('x'.repeat(MAX_NAME))
+    expect(Array.from(cleanName('🙂'.repeat(60)))).toHaveLength(MAX_NAME)
+    expect(cleanName(5)).toBe('')
+  })
+
+  it('travels in the share link, accents and emoji included', () => {
+    for (const name of ['Garage rack', 'Café ünï 🙂', 'x'.repeat(MAX_NAME), '🙂'.repeat(MAX_NAME)]) {
+      const slug = encodePlan([l], [p], { network: 'self' }, {}, name)
+      expect(slug.length).toBeLessThanOrEqual(MAX_SLUG)
+      expect(decodePlan(slug, [p])).toMatchObject({ name, lines: [{ sku: 'SKU-1', qty: 2 }], hosting: { network: 'self' } })
+    }
+  })
+
+  it('is “My Plan” when the link has none, and a name alone is no link', () => {
+    expect(decodePlan(encodePlan([l], [p]), [p])!.name).toBe('My Plan')
+    expect(encodePlan([], [p], {}, {}, 'Name')).toBe('')
+  })
+
+  it('rejects a name that is cut short', () => {
+    const slug = encodePlan([l], [p], {}, {}, 'Garage rack')
+    expect(decodePlan(slug.slice(0, 6), [p])).toBeNull()
   })
 })
 
