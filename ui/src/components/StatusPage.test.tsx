@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { StatusResponse } from '../api/types'
+import { derived } from '../test/fixtures'
 import { renderRoute, renderWithClient, stubFetch } from '../test/render'
 import StatusPage, { every } from './StatusPage'
 
@@ -181,5 +182,32 @@ describe('products with no tech specs', () => {
 
     await userEvent.click(within(within(card).getByText('Cable').closest('li')!).getByRole('button', { name: 'None expected' }))
     expect(calls.some((c) => c.key === 'PUT /v1/specs/not-expected' && c.body === JSON.stringify({ slug: 'cable', reason: '' }))).toBe(true)
+  })
+
+  it('lists the products whose specs the parsers had trouble with, and what the trouble was', async () => {
+    stubFetch({
+      'GET /v1/status': { body: status() },
+      'GET /v1/derived': {
+        body: [
+          derived({ slug: 'clean', title: 'Clean One' }),
+          derived({ slug: 'u-poe-plus', title: 'PoE+ Adapter', issues: [{ area: 'poe_injector', label: 'Output Voltage', value: '48V DC @ 0.65A', problem: 'its name says PoE++ but its output rating says PoE+; using PoE++' }] }),
+          derived({ slug: 'sw', title: 'A Switch', issues: [{ area: 'ports', label: 'Port Layout', value: '', problem: 'unrecognised port type' }, { area: 'ports', label: '', value: '', problem: 'no port count' }] }),
+        ],
+      },
+    })
+    renderRoute('/status')
+    const card = await screen.findByRole('region', { name: 'Spec issues' })
+    expect(card).toHaveTextContent('3 issues in 2 products')
+    const items = within(card).getAllByRole('link').map((a) => a.textContent)
+    expect(items).toEqual(['A Switch', 'PoE+ Adapter']) // by name; the clean one isn't listed
+    expect(card).toHaveTextContent('poe_injector · Output Voltage: its name says PoE++ but its output rating says PoE+; using PoE++ (“48V DC @ 0.65A”)')
+    expect(card).toHaveTextContent('ports · Port Layout: unrecognised port type')
+  })
+
+  it('has no issues card when no product has an issue', async () => {
+    stubFetch({ 'GET /v1/status': { body: status() }, 'GET /v1/derived': { body: [derived({ slug: 'clean' })] } })
+    renderRoute('/status')
+    await screen.findByRole('region', { name: 'Overview' })
+    expect(screen.queryByRole('region', { name: 'Spec issues' })).not.toBeInTheDocument()
   })
 })

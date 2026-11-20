@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useCan, useSetSpecsNotExpected, useSpecsGaps, useStatus } from '../api/queries'
+import { useCan, useDerived, useSetSpecsNotExpected, useSpecsGaps, useStatus } from '../api/queries'
 import type { Presence, StatusRegion, StatusResponse } from '../api/types'
 import { baseSlug } from '../lib/convertPlan'
 import { formatExact } from '../lib/format'
@@ -220,6 +220,45 @@ function NoSpecsCard() {
   )
 }
 
+/**
+ * What the parsers noticed in the products' tech specs and couldn't read, or read in two ways that disagree (an
+ * injector whose name and output rating give different PoE classes). Nothing is lost when one appears: the product
+ * is derived from whatever could be read. They are here for whoever keeps the parsers and the overrides.
+ */
+function IssuesCard() {
+  const { data } = useDerived()
+  const rows = (data ?? []).filter((d) => d.issues.length > 0).sort((a, b) => a.title.localeCompare(b.title) || a.region.localeCompare(b.region))
+  if (rows.length === 0) return null
+  const total = rows.reduce((n, d) => n + d.issues.length, 0)
+  return (
+    <Card aria-label="Spec issues" className="sm:col-span-2">
+      <h2 className="font-semibold">Specs the parsers couldn't read or had doubts about</h2>
+      <p className="mt-1 text-sm text-muted">
+        {nf.format(total)} {total === 1 ? 'issue' : 'issues'} in {nf.format(rows.length)} {rows.length === 1 ? 'product' : 'products'}. The checks use what could be read; a correction or a parser fix clears one.
+      </p>
+      <ul className="mt-2">
+        {rows.map((d) => (
+          <li key={`${d.region}/${d.slug}`} className="border-b border-line py-1.5">
+            <Link to="/p/$region/$slug" params={{ region: d.region, slug: d.slug }} className="underline underline-offset-2">
+              {d.title}
+            </Link>{' '}
+            <span className="text-sm text-muted">{regionName(d.region)}</span>
+            <ul className="mt-0.5 text-sm">
+              {d.issues.map((i, k) => (
+                <li key={k}>
+                  <span className="text-muted">{i.area}</span>
+                  {i.label && <span className="text-muted"> · {i.label}</span>}: {i.problem}
+                  {i.value && <span className="text-muted"> (“{i.value}”)</span>}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
 function StatusContent({ s }: { s: StatusResponse }) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const regions = Object.entries(s.regions).sort(([a], [b]) => a.localeCompare(b))
@@ -278,6 +317,7 @@ function StatusContent({ s }: { s: StatusResponse }) {
         notCheckedLabel="not checked yet"
       />
       <NoSpecsCard />
+      <IssuesCard />
 
       <Card aria-label="Stock">
         <h2 className="font-semibold">Variants by stock status</h2>
