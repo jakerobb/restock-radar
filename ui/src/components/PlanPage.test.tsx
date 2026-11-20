@@ -446,6 +446,32 @@ describe('PlanPage', () => {
   })
 })
 
+describe('the topology', () => {
+  it('draws the gateway, what hangs from it and the devices on it, below the plan and shut when narrow', async () => {
+    products = [
+      product({ id: '1', slug: 'gw', title: 'Gateway', type: 'Gateways', variants: [variant({ id: 'a', num: 1, sku: 'GW', price_cents: 20000 })] }),
+      product({ id: '2', slug: 'switch', title: 'PoE Switch', type: 'Switches', variants: [variant({ id: 'b', num: 2, sku: 'SW-8', price_cents: 20000 })] }),
+      product({ id: '3', slug: 'ap', title: 'Access Point', type: 'WiFi', variants: [variant({ id: 'c', num: 3, sku: 'AP-1', price_cents: 15000 })] }),
+    ]
+    const ds = [
+      derived({ slug: 'gw', known, ports: [port({ count: 2, max_speed_mbps: 1000 })] }),
+      derived({ slug: 'switch', known, ports: [port({ count: 8, poe_class: 'PoE+', poe_direction: 'out' })], metrics: [metric('poe_budget_w', 100)] }),
+      derived({ slug: 'ap', known, ports: [port({ count: 1, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 20)] }),
+    ]
+    stubFetch({ 'GET /v1/products': { body: productsResponse({ products }) }, 'GET /v1/derived': { body: ds } })
+    setPlan([line({ ref: 'us/gw', sku: 'GW' }), line({}), line({ ref: 'us/ap', sku: 'AP-1', qty: 3 })])
+    renderRoute('/plan')
+    const tree = await screen.findByRole('list', { name: 'Device topology' })
+    const top = within(tree).getAllByRole('listitem')
+    expect(top[0]).toHaveTextContent('Gateway')
+    expect(within(tree).getByText(/Access Point/)).toHaveTextContent('Access Point × 3')
+    const section = screen.getByLabelText('Topology')
+    expect(section.querySelector('details')).not.toHaveAttribute('open') // no wide screen in a test
+    const labels = [...document.querySelectorAll('[aria-label="Plan"],[aria-label="Topology"],[aria-label="Checks"]')].map((e) => e.getAttribute('aria-label'))
+    expect(labels).toEqual(['Plan', 'Topology', 'Checks'])
+  })
+})
+
 describe('a shared plan', () => {
   const link = (lines: PlanLine[]) => `/plan/${encodePlan(lines, products)}`
 

@@ -1,5 +1,5 @@
 import type { Port } from '../api/types'
-import type { DerivedLine, PlanCheck } from './planChecks'
+import type { DerivedLine, PlanCheck, Trace } from './planChecks'
 import { formatSpeed } from './requirements'
 import { isGatewayProduct } from './roles'
 
@@ -180,7 +180,7 @@ interface Placed {
  *
  * A second check warns when a switch with SFP cages has been uplinked over copper for want of a free cage upstream.
  */
-export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean): PlanCheck[] {
+export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace): PlanCheck[] {
   const devices: Device[] = lines.flatMap((l) => {
     if (isSwitch(l) || isGateway(l) || poePowered(l)) return []
     const d = deviceOf(l)
@@ -277,6 +277,11 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   }
 
   const lostDevices = devices.filter((_, i) => placed[i] === null)
+  if (trace) {
+    trace.uplinks = links.map((l) => ({ unit: l.unit, parent: l.parent }))
+    trace.portHosts = devices.flatMap((d, i) => (placed[i] ? [{ line: d.line, host: placed[i]!.group.unit }] : []))
+    trace.portLost = lostDevices.map((d) => d.line)
+  }
   const lost = lostDevices.length + noUplink.length + poeShort
   const demands = devices.length + switches.length + poeShort
   const spare = units.flatMap((u) => u.groups).reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0)

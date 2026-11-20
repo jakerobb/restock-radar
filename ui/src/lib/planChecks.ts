@@ -13,6 +13,26 @@ export type CheckVerdict = 'ok' | 'bad' | 'warn' | 'unknown' | 'info'
 /** A line of a breakdown: plain, or with a list under it. */
 export type DetailRow = string | { text: string; items: string[] }
 
+/** One switch or gateway, by line and which of the line's quantity it is. */
+export interface UnitRef {
+  line: DerivedLine
+  n: number
+}
+
+/** Where the checks put things, for drawing the plan as a graph: filled in by the checks as they run. */
+export interface Trace {
+  /** The devices on a switch for their power (and so their port): a PoE one, but not a switch. */
+  poeHosts?: { line: DerivedLine; host: UnitRef }[]
+  /** PoE devices with no switch to be on. */
+  poeLost?: DerivedLine[]
+  /** What each switch plugs into; null for the network outside the plan. */
+  uplinks?: { unit: UnitRef; parent: UnitRef | null }[]
+  /** The other devices on a switch or gateway port. */
+  portHosts?: { line: DerivedLine; host: UnitRef }[]
+  /** Devices that got no port. */
+  portLost?: DerivedLine[]
+}
+
 export interface PlanCheck {
   id: string
   label: string
@@ -236,7 +256,7 @@ function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Pl
   return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', shortfall: true, text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
 }
 
-function poeCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
+function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
   const budget = (l: DerivedLine) => budgetOf(l, powering)
   const needs = new Map(lines.map((l) => [l, needOf(l, powering)] as const))
   const consumers = lines.filter((l) => needs.get(l) !== null && needs.get(l) !== undefined)
@@ -361,6 +381,10 @@ function poeCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
     })
   }
   const stranded = placing.filter((_, i) => placed[i] === null)
+  if (trace) {
+    trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]! }] : []))
+    trace.poeLost = stranded.filter((d) => !poweredSwitches.has(d.line)).map((d) => d.line)
+  }
 
   // Each device on a port group, spelled out: one valid arrangement, not the only one.
   const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
@@ -503,9 +527,9 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
  * power the PoE devices, whether every other device has a switch port, and how much rack they take. A check appears only when the plan has something
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
-export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}): PlanCheck[] {
+export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines, powering), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering)), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
+  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
 }
 
 export interface Answer {

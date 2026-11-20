@@ -74,3 +74,68 @@
     @apply bg-canvas text-ink font-sans text-[15px] leading-snug antialiased;
   }
 }
+
+/* The topology graph: a family tree of nested lists, joined by lines. */
+.topo,
+.topo ul {
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  position: relative;
+}
+.topo ul {
+  padding-top: 1rem;
+}
+.topo ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 1rem;
+  border-left: 1px solid var(--muted);
+}
+.topo li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0.375rem 0;
+}
+.topo-roots > li {
+  padding-top: 0;
+}
+.topo ul > li::before,
+.topo ul > li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 1rem;
+  border-top: 1px solid var(--muted);
+}
+.topo ul > li::after {
+  right: auto;
+  left: 50%;
+  border-left: 1px solid var(--muted);
+}
+.topo ul > li:only-child {
+  padding-top: 0;
+}
+.topo ul > li:only-child::before,
+.topo ul > li:only-child::after {
+  display: none;
+}
+.topo ul > li:first-child::before,
+.topo ul > li:last-child::after {
+  border: 0 none;
+}
+.topo ul > li:last-child::before {
+  border-right: 1px solid var(--muted);
+  border-radius: 0 0.5rem 0 0;
+}
+.topo ul > li:first-child::after {
+  border-radius: 0.5rem 0 0 0;
+}
