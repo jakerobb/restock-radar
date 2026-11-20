@@ -28,7 +28,7 @@ func TestSpecsGapsListsProductsWithNoSpecsAndWhichAreNotExpected(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 	now := time.Now()
-	withSpecs := []unistore.Spec{{SectionID: "s", Section: "Overview", SectionType: "Standard", FeatureID: "f", Label: "Weight", Kind: unistore.SpecText, Value: "1 kg"}}
+	withSpecs := []unistore.Spec{{SectionID: "s", Section: "Overview", SectionType: "Standard", FeatureID: "f", Label: "Dimensions", Kind: unistore.SpecText, Value: "442.4 x 63.5 x 43.7 mm"}}
 	for _, p := range []struct {
 		region string
 		p      *unistore.Product
@@ -96,6 +96,27 @@ func TestSpecsGapsTellsNotFetchedFromFetchedWithNone(t *testing.T) {
 	}
 	gaps, _, err := s.SpecsGaps(ctx)
 	if err != nil || len(gaps) != 1 || gaps[0].FetchedAt != nil {
+		t.Fatalf("gaps = %+v (%v)", gaps, err)
+	}
+}
+
+func TestSpecsGapsIncludesProductsWhoseSpecsGiveNothingToDerive(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now()
+	text := func(label, value string) unistore.Spec {
+		return unistore.Spec{SectionID: "s", Section: "Overview", SectionType: "Standard", FeatureID: "f-" + label, Label: label, Kind: unistore.SpecText, Value: value}
+	}
+	// Published, but nothing the derivation reads (a per-variant table puts its values under a group).
+	if _, err := s.Apply(ctx, "us", plainProduct("us", "p1", "panels", []unistore.Spec{text("Materials", "Steel"), text("Treatment", "Painting")}), now); err != nil {
+		t.Fatal(err)
+	}
+	// Published, and a size can be read from it.
+	if _, err := s.Apply(ctx, "us", plainProduct("us", "p2", "bracket", []unistore.Spec{text("Dimensions", "442.4 x 63.5 x 43.7 mm")}), now); err != nil {
+		t.Fatal(err)
+	}
+	gaps, _, err := s.SpecsGaps(ctx)
+	if err != nil || len(gaps) != 1 || gaps[0].Slug != "panels" || !gaps[0].Published || gaps[0].FetchedAt == nil {
 		t.Fatalf("gaps = %+v (%v)", gaps, err)
 	}
 }

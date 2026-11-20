@@ -38,7 +38,12 @@ export function SpecsExpectation({ region, slug }: { region: string; slug: strin
   if (!gap || gap.fetched_at === null) return null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
-      <span>The store publishes no tech specs for this product, so plan checks can't tell what it needs. A plan holding it is called unsure.</span>
+      <span>
+        {gap.published
+          ? "What the store publishes for this product gives the plan checks nothing to use (its specs may be laid out per variant), so they can't tell what it needs."
+          : "The store publishes no tech specs for this product, so plan checks can't tell what it needs."}{' '}
+        A plan holding it is called unsure.
+      </span>
       {canEdit && (
         <Button type="button" variant="secondary" className="px-3 text-sm" disabled={mark.isPending} onClick={() => mark.mutate({ slug })}>
           {mark.isPending ? 'Saving…' : 'No specs expected for this'}

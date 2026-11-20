@@ -389,8 +389,10 @@ export interface SpecsGap {
   slug: string
   title: string
   category: string
-  /** When the product page was read and the store published no specs; null when it hasn't been read yet, so they may just not be collected. */
+  /** When the product page was read; null when it hasn't been read yet, so its specs may just not be collected. */
   fetched_at: string | null
+  /** The store published some specs for it, but nothing the checks can use came of them; false when it published none. */
+  published: boolean
   /** The product is on the list of those that have no specs to expect. */
   not_expected: boolean
 }

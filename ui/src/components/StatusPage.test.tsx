@@ -158,14 +158,14 @@ describe('the per-region breakdown', () => {
 
 
 describe('products with no tech specs', () => {
-  const gap = (o: object) => ({ region: 'us', id: 'p', slug: 'cable', title: 'Cable', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', not_expected: false, ...o })
+  const gap = (o: object) => ({ region: 'us', id: 'p', slug: 'cable', title: 'Cable', category: 'accessories', fetched_at: '2026-11-15T10:00:00Z', published: false, not_expected: false, ...o })
 
   it('lists the ones the store has been read for, once for all their regions, and lets an editor mark one', async () => {
     const calls = stubFetch({
       'GET /v1/status': { body: status() },
       'GET /v1/specs/gaps': {
         body: {
-          products: [gap({}), gap({ region: 'eu', id: 'p2', slug: 'cable-eu' }), gap({ id: 'p3', slug: 'soon', title: 'Soon', fetched_at: null }), gap({ id: 'p4', slug: 'tie', title: 'Tie', not_expected: true })],
+          products: [gap({}), gap({ region: 'eu', id: 'p2', slug: 'cable-eu' }), gap({ id: 'p3', slug: 'soon', title: 'Soon', fetched_at: null }), gap({ id: 'p4', slug: 'tie', title: 'Tie', not_expected: true }), gap({ id: 'p5', slug: 'panels', title: 'Panels', published: true })],
           not_expected: [{ slug: 'tie', reason: '', created_at: '2026-11-15T10:00:00Z' }],
         },
       },
@@ -173,12 +173,13 @@ describe('products with no tech specs', () => {
     })
     renderRoute('/status')
     const card = await screen.findByRole('region', { name: 'Products with no tech specs' })
-    expect(within(card).getAllByRole('listitem')).toHaveLength(2) // the cable (both regions) and the tie; not the one yet to be read
+    expect(within(card).getAllByRole('listitem')).toHaveLength(3) // the cable (both regions), the tie and the panels; not the one yet to be read
     expect(within(card).queryByText('Soon')).not.toBeInTheDocument()
-    expect(card).toHaveTextContent('1 of 2 products are not marked')
+    expect(card).toHaveTextContent('2 of 3 products are not marked')
+    expect(within(card).getByText(/Panels/).closest('li')).toHaveTextContent('specs published, nothing usable')
     expect(card).toHaveTextContent('none expected')
 
-    await userEvent.click(within(card).getByRole('button', { name: 'None expected' }))
+    await userEvent.click(within(within(card).getByText('Cable').closest('li')!).getByRole('button', { name: 'None expected' }))
     expect(calls.some((c) => c.key === 'PUT /v1/specs/not-expected' && c.body === JSON.stringify({ slug: 'cable', reason: '' }))).toBe(true)
   })
 })
