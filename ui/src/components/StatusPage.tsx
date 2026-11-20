@@ -272,7 +272,7 @@ function StatusContent({ s }: { s: StatusResponse }) {
 export default function StatusPage() {
   const { data, isPending, isError, refetch } = useStatus()
   return (
-    <main className="mx-auto max-w-3xl px-4 pt-6 pb-12">
+    <main className="mx-auto max-w-6xl px-4 pt-6 pb-12">
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Status</h1>
         <a href="/" className="underline">
