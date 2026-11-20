@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,11 @@ import (
 )
 
 const maxBackoffFactor = 8
+
+// missingRecheck is how long a region's lack of a category page stands before
+// we ask for it again. Regions sell different ranges, so one that has no page
+// for a category the others have is normal, and not worth a request every cycle.
+const missingRecheck = 24 * time.Hour
 
 // detailBatch is how many products a cycle fetches from the product endpoint
 // just to fill in what category pages lack (see backfillDetails), and
@@ -70,6 +76,15 @@ type Poller struct {
 	techSpecs       TechSpecs
 	techSpecsFailed map[string]bool
 
+	// lastPolled is when a request last covered a category page ("cat:region/id")
+	// or a product ("item:region/slug"); rolling regions read what has waited
+	// longest. missing is when a region was last found to have no page for a
+	// category ("region/id"). Both are only used by the poll loop's goroutine,
+	// and both start empty after a restart, which only means a region's pages
+	// are all treated as equally overdue and read over the next few cycles.
+	lastPolled map[string]time.Time
+	missing    map[string]time.Time
+
 	lastCycle atomic.Int64 // unix seconds of the last completed cycle
 }
 
@@ -79,6 +94,9 @@ func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poll
 		metrics:  metrics.New(time.Now()),
 		failures: make(map[string]int),
 		alerted:  make(map[string]bool),
+
+		lastPolled: make(map[string]time.Time),
+		missing:    make(map[string]time.Time),
 
 		detailFailed: make(map[string]bool),
 
@@ -134,6 +152,109 @@ func jitter(max time.Duration) time.Duration {
 
 func itemKey(it store.Item) string { return it.Region + "/" + it.Slug }
 
+// group is a category in a region and the watched products in it. One request
+// for its page covers all of them. A group with no items is a mirror: a
+// category other regions have, which this one is asked about so that whatever
+// it sells there gets discovered.
+type group struct {
+	region   config.Region
+	category string
+	items    []store.Item
+}
+
+func (g *group) key() string { return "cat:" + g.region.ID + "/" + g.category }
+
+func itemPollKey(it store.Item) string { return "item:" + itemKey(it) }
+
+// withMirrorGroups adds, for every region, a group for each category that some
+// region has products in and this one has no group for. The first read of such
+// a page adopts what the region sells silently, and later reads announce new
+// products, as for any category. Categories a region has no page for are left
+// alone until missingRecheck has passed.
+func (p *Poller) withMirrorGroups(groups []*group, items []store.Item, now time.Time) []*group {
+	have := map[string]bool{}
+	for _, g := range groups {
+		have[g.region.ID+"/"+g.category] = true
+	}
+	var categories []string
+	for _, it := range items {
+		if it.Category != "" && !slices.Contains(categories, it.Category) {
+			categories = append(categories, it.Category)
+		}
+	}
+	slices.Sort(categories)
+	for _, r := range p.cfg.Regions {
+		for _, c := range categories {
+			k := r.ID + "/" + c
+			if have[k] {
+				continue
+			}
+			if at, ok := p.missing[k]; ok && now.Sub(at) < missingRecheck {
+				continue
+			}
+			groups = append(groups, &group{region: r, category: c})
+		}
+	}
+	return groups
+}
+
+// due picks which of a region's keys to read this cycle. A region with no
+// poll_every, or one no longer than the poll interval, reads everything. Else
+// it reads the share that fits (poll_interval/poll_every of them, at least
+// one), taking those that have waited longest, never-read first.
+func (p *Poller) due(r config.Region, keys []string) map[string]bool {
+	out := make(map[string]bool, len(keys))
+	if r.PollEvery <= p.cfg.PollInterval || len(keys) == 0 {
+		for _, k := range keys {
+			out[k] = true
+		}
+		return out
+	}
+	quota := max(1, int((int64(len(keys))*int64(p.cfg.PollInterval)+int64(r.PollEvery)-1)/int64(r.PollEvery)))
+	sorted := slices.Clone(keys)
+	slices.SortFunc(sorted, func(a, b string) int {
+		if c := p.lastPolled[a].Compare(p.lastPolled[b]); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	for _, k := range sorted[:min(quota, len(sorted))] {
+		out[k] = true
+	}
+	slog.Debug("rolling region", "region", r.ID, "reading", min(quota, len(sorted)), "of", len(keys))
+	return out
+}
+
+// dueGroups keeps the groups its region is due to read.
+func (p *Poller) dueGroups(groups []*group) []*group {
+	byRegion := map[string][]string{}
+	for _, g := range groups {
+		byRegion[g.region.ID] = append(byRegion[g.region.ID], g.key())
+	}
+	chosen := map[string]bool{}
+	for _, r := range p.cfg.Regions {
+		for k := range p.due(r, byRegion[r.ID]) {
+			chosen[k] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(groups), func(g *group) bool { return !chosen[g.key()] })
+}
+
+// dueItems keeps the products (those without a category) their region is due to read.
+func (p *Poller) dueItems(items []store.Item) []store.Item {
+	byRegion := map[string][]string{}
+	for _, it := range items {
+		byRegion[it.Region] = append(byRegion[it.Region], itemPollKey(it))
+	}
+	chosen := map[string]bool{}
+	for _, r := range p.cfg.Regions {
+		for k := range p.due(r, byRegion[r.ID]) {
+			chosen[k] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(items), func(it store.Item) bool { return !chosen[itemPollKey(it)] })
+}
+
 // cycle refreshes every watched item and reports whether the store blocked us.
 // Items whose category is known are refreshed together: one category page lists
 // every product in its family, so a single request covers them all. Items
@@ -148,11 +269,6 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		return false
 	}
 
-	type group struct {
-		region   config.Region
-		category string
-		items    []store.Item
-	}
 	var groups []*group
 	byKey := map[string]*group{}
 	var singles []store.Item
@@ -175,6 +291,11 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		}
 		g.items = append(g.items, it)
 	}
+
+	now := time.Now()
+	groups = p.withMirrorGroups(groups, items, now)
+	groups = p.dueGroups(groups)
+	singles = p.dueItems(singles)
 
 	requests := 0
 	// pace sleeps between requests, and reports false if we should stop.
@@ -199,18 +320,20 @@ func (p *Poller) cycle(ctx context.Context) (blocked bool) {
 		return false
 	}
 
-	covered := map[string]bool{} // region/productID refreshed by a category page this cycle
+	covered := map[string]bool{}     // region/productID refreshed by a category page this cycle
+	coveredCats := map[string]bool{} // region/categoryID whose page was read this cycle, as part of a family
 	isCovered := func(it store.Item) bool { return it.ProductID != "" && covered[it.Region+"/"+it.ProductID] }
 	for _, g := range groups {
 		// An earlier page may already have listed this group's products, since
 		// a page covers the whole family of sibling categories.
-		if !slices.ContainsFunc(g.items, func(it store.Item) bool { return !isCovered(it) }) {
+		if coveredCats[g.region.ID+"/"+g.category] ||
+			(len(g.items) > 0 && !slices.ContainsFunc(g.items, func(it store.Item) bool { return !isCovered(it) })) {
 			continue
 		}
 		if !pace() {
 			return false
 		}
-		if err := p.pollCategory(ctx, g.region, g.category, covered); blockedBy(g.region.ID+"/"+g.category, err) {
+		if err := p.pollCategory(ctx, g.region, g.category, covered, coveredCats); blockedBy(g.region.ID+"/"+g.category, err) {
 			return true
 		}
 	}
@@ -342,10 +465,16 @@ func (p *Poller) backfillDetails(ctx context.Context, pace func() bool, blockedB
 // covered. Products we've never seen start being tracked right away, and are
 // announced if the page's category was already known to us (otherwise we'd
 // announce the whole catalog the first time we looked at it).
-func (p *Poller) pollCategory(ctx context.Context, region config.Region, categoryID string, covered map[string]bool) error {
+func (p *Poller) pollCategory(ctx context.Context, region config.Region, categoryID string, covered, coveredCats map[string]bool) error {
 	cat, err := p.fetcher.FetchCategory(ctx, region, categoryID)
 	if ctx.Err() == nil {
 		p.metrics.Fetch(fetchResult(err), time.Now())
+	}
+	if errors.Is(err, unistore.ErrNotFound) {
+		// The region doesn't sell anything in this category (or has no page for it).
+		p.missing[region.ID+"/"+categoryID] = time.Now()
+		slog.Info("region has no page for category", "region", region.ID, "category", categoryID)
+		return err
 	}
 	if err != nil {
 		if ctx.Err() == nil {
@@ -353,6 +482,7 @@ func (p *Poller) pollCategory(ctx context.Context, region config.Region, categor
 		}
 		return err
 	}
+	delete(p.missing, region.ID+"/"+categoryID)
 	if cat.Skipped > 0 {
 		slog.Warn("category page has products with incomplete data; skipping them", "category", categoryID, "skipped", cat.Skipped)
 	}
@@ -393,6 +523,10 @@ func (p *Poller) pollCategory(ctx context.Context, region config.Region, categor
 		}
 		covered[region.ID+"/"+prod.ID] = true
 	}
+	for _, sub := range cat.Subcategories {
+		coveredCats[region.ID+"/"+sub] = true
+		p.lastPolled["cat:"+region.ID+"/"+sub] = now
+	}
 	if err := p.store.MarkCategoriesSeen(ctx, region.ID, cat.Subcategories, now); err != nil {
 		slog.Warn("failed to record ingested categories", "err", err)
 	}
@@ -422,6 +556,7 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 		return err
 	}
 	p.recordSuccess(ctx, it)
+	p.lastPolled[itemPollKey(it)] = time.Now()
 	if prod.SpecsSkipped > 0 {
 		slog.Warn("product has malformed specification entries; skipping them", "item", key, "skipped", prod.SpecsSkipped)
 	}

@@ -106,6 +106,12 @@ type Region struct {
 	BaseURL string `yaml:"base_url"`
 	// Path is the storefront's locale prefix, e.g. "us/en".
 	Path string `yaml:"path"`
+	// PollEveryString is how often the whole region is read ("1h"). Empty means
+	// every poll cycle. When it is longer than the poll interval, each cycle
+	// reads the share of the region that has waited longest, so a region read
+	// hourly with a five-minute interval gets a twelfth of its pages each cycle.
+	PollEveryString string        `yaml:"poll_every"`
+	PollEvery       time.Duration `yaml:"-"`
 }
 
 // KnownRegions are the storefronts that answer with product data, as the store's
@@ -289,6 +295,9 @@ func validate(cfg *Config) error {
 		cfg.Regions[i].Path = strings.Trim(r.Path, "/")
 		if cfg.Regions[i].Path == "" {
 			return fmt.Errorf("regions[%d]: path is required (e.g. us/en)", i)
+		}
+		if cfg.Regions[i].PollEvery, err = parseDuration(fmt.Sprintf("regions[%d].poll_every", i), r.PollEveryString, 0, true); err != nil {
+			return err
 		}
 	}
 

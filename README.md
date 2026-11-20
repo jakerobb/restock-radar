@@ -29,6 +29,10 @@ Products the store sells with another (a gateway's SSDs) are tracked too, from t
 
 Each cycle also fetches up to five products that have never been read from their own product page, to learn the store's grouping for them (category pages don't carry it). A large catalogue fills in over a day or two.
 
+Every configured region is asked about every category any region has, so each region's own catalogue is tracked without listing its products. A category a region has no page for is asked about again after a day. Notifications for a region other than the US start with its label (`[EU]`).
+
+A region's `poll_every` (e.g. `1h`) rolls it: instead of reading the whole region each cycle, each cycle reads the share that has waited longest (with a 5-minute `poll_interval` and `poll_every: 1h`, a twelfth of its category pages). Left out, a region is read every cycle. After a restart a rolling region simply starts over from its least-recently-read pages.
+
 The web UI can filter by any of the store's product tags (`black-friday`, `feature:color-black`, ...). Choosing several shows products that have all of them.
 
 ## Container
@@ -56,7 +60,7 @@ by that user (in Kubernetes, `fsGroup: 65532`). Run a single replica.
 | `backup_dir` | | where to copy the database; empty turns backups off |
 | `backup_interval`, `backup_keep` | `24h`, `14` | how often, and how many copies to keep |
 | `ntfy.url`, `ntfy.topic`, `ntfy.token` | | `${ENV_VAR}` is expanded |
-| `regions[]` | US | `id`, and for one the store doesn't list, `base_url` and `path` (e.g. `us/en`). Built in: `us`, `ca`, `eu`, `uk`, `jp`, `br`, `tw`, `sg`; a bare `{id: eu}` is enough |
+| `regions[]` | US | `id`, optional `poll_every` (see below), and for a region the store doesn't list, `base_url` and `path` (e.g. `us/en`). Built in: `us`, `ca`, `eu`, `uk`, `jp`, `br`, `tw`, `sg`; a bare `{id: eu}` is enough |
 | `items[]` | | `slug`, optional `region`; may be empty if you add products in the UI |
 
 The config is read from `CONFIG_PATH`, else `/etc/restock-radar/config.yaml`.

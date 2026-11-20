@@ -42,15 +42,20 @@ ntfy:
 # bare id is enough: us, ca, eu, uk, jp, br, tw, sg. (An entry may still give
 # `base_url` and `path` to point somewhere else.) Stock and prices don't sync
 # across regions. The first region is the default for items that name none.
+#
+# Every region is asked about every category any region has, so what each one
+# sells is tracked without listing it. `poll_every` rolls a region instead of
+# reading all of it each cycle: with poll_interval 5m, `poll_every: 1h` reads a
+# twelfth of its category pages each cycle, those that have waited longest.
 regions:
   - id: us
-  - id: ca
-  - id: eu
-  - id: uk
-  - id: jp
-  - id: br
-  - id: tw
-  - id: sg
+  - {id: ca, poll_every: 1h}
+  - {id: eu, poll_every: 1h}
+  - {id: uk, poll_every: 1h}
+  - {id: jp, poll_every: 1h}
+  - {id: br, poll_every: 1h}
+  - {id: tw, poll_every: 1h}
+  - {id: sg, poll_every: 1h}
 
 # Items are the product slug from the store URL (store.ui.com/us/en/.../products/<slug>).
 # Every variant of a product is watched. Old slugs that the store redirects also work.

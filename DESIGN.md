@@ -50,6 +50,17 @@ the design assumes failure is normal and loud (see Failure handling).
   a `new` event is queued, so it is announced like any other change; otherwise
   it is adopted silently, so the first look at a category doesn't announce the
   catalogue. Discovered products don't count toward `max_items`.
+- **Regions.** Category ids are the same in every region, but each sells a
+  different range (Japan has a handful of products in a category the US has 37 in).
+  Each cycle, every region gets a group for every category any region's products
+  are in, and a region with no page for one (the store redirects it home, which
+  the client reports as not found) is left alone for a day. Products found this
+  way are discovered like any other: silent the first time a region's category
+  is read, announced after that. A region's `poll_every` rolls it: with
+  `poll_interval` p and `poll_every` e, each cycle reads the `ceil(n*p/e)`
+  groups (and category-less products) whose last read is oldest, never-read
+  first. A page's whole family counts as read, so a family is read once however
+  many of its categories are due. The read times are in memory only.
 - **Variant names.** A variant's title is built from the product's `options`
   and the variant's `optionValueIds` ("White / 0.2 m / 10-Pack"), because the
   store's own variant `title` exists only on the product endpoint and the
