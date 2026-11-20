@@ -504,6 +504,37 @@ function rackCheck(lines: DerivedLine[]): PlanCheck[] {
   return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: flat.join(' '), groups }]
 }
 
+/**
+ * The wall outlets the plan needs: a device that runs on mains power (its own cord or an adapter) and isn't powered over PoE
+ * takes one, each. A switch that can run either way counts by the input chosen for it; until that's chosen it can't be told.
+ */
+function outletCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
+  const counted: { l: DerivedLine; n: number }[] = []
+  const undecided: DerivedLine[] = []
+  for (const l of lines) {
+    const d = l.derived
+    if (!d || !d.power.some((p) => p.kind === 'ac') || isPoePowered(l, powering)) continue
+    const b = budgetOf(l, powering)
+    if (b.choose) undecided.push(l)
+    else if (!b.option || b.option.poeClass === null) counted.push({ l, n: l.view.line.qty })
+  }
+  if (counted.length === 0 && undecided.length === 0) return []
+  const total = counted.reduce((n, x) => n + x.n, 0)
+  const heading = `${total} AC ${total === 1 ? 'outlet' : 'outlets'}`
+  const items = counted.map((x) => `${x.n > 1 ? `${x.n} × ` : ''}${name(x.l)}`)
+  const unsure = undecided.length > 0 ? `Can't tell how ${list(undecided)} will be powered, so ${undecided.length === 1 ? 'it is' : 'they are'} not counted.` : ''
+  const label = undecided.length > 0 ? `${heading} so far` : heading
+  return [
+    {
+      id: 'outlets',
+      label: 'AC outlets',
+      verdict: undecided.length > 0 ? 'unknown' : 'info',
+      text: [`${label}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, unsure].filter(Boolean).join(' '),
+      groups: [...(unsure ? [{ text: unsure }] : []), { text: label, items }],
+    },
+  ]
+}
+
 /** A switch set to run on an adapter the store sells separately needs one for each, in the plan. */
 function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] {
   const have = (slug: string) => lines.filter((l) => l.view.product?.slug === slug).reduce((n, l) => n + l.view.line.qty, 0)
@@ -529,7 +560,7 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
  */
 export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines)]
+  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines), ...outletCheck(lines, powering)]
 }
 
 export interface Answer {

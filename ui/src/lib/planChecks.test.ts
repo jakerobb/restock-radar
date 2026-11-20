@@ -91,6 +91,15 @@ describe('planChecks', () => {
     expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)])).toEqual([])
   })
 
+  it('counts the AC outlets: mains-powered devices that aren’t on PoE', () => {
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')] })
+    expect(byId([mains('gw', 1), mains('nvr', 2), ap(3), sw(1, 100)]).outlets).toMatchObject({ verdict: 'info', text: '3 AC outlets (gw, 2 × nvr).' })
+    expect(byId([mains('gw', 1)]).outlets).toMatchObject({ text: '1 AC outlet (gw).' })
+    // PoE-powered devices need none, and nothing is said when no device is on the mains.
+    expect(byId([ap(3), sw(1, 100)]).outlets).toBeUndefined()
+    expect(byId([item('cam', 1, { power: [src('ac'), src('poe', 'PoE')], ports: [poeIn] })]).outlets).toBeUndefined()
+  })
+
   it('adds up rack space, and says when a height is missing', () => {
     const rack = (slug: string, qty: number, units: number) => item(slug, qty, { rack: { mountable: true, units, full_depth: false } })
     expect(byId([rack('sw', 2, 2), rack('gw', 1, 1), item('ap', 1, { rack: { mountable: false, units: 0, full_depth: false } })]).rack).toMatchObject({ verdict: 'info', text: '5U of rack space (2 × sw 2U, gw 1U).' })
