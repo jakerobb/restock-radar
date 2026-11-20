@@ -279,6 +279,8 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
     }
   }
 
+  // Switches with cages that are uplinked over copper because a cage wasn't free upstream. (No gateway cage to be had is not something a switch can fix.)
+  const misses = links.filter((l) => l.unit.cages > 0 && l.kind !== 'sfp' && l.kind !== 'external' && l.parent !== null && (l.parent.kind === 'switch' || l.parent.cages > 0))
   const lostDevices = devices.filter((_, i) => placed[i] === null)
   if (trace) {
     const ref = (u: Unit) => ({ line: u.line, n: u.n })
@@ -294,6 +296,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
       const link: Link = { speed: at.speed, media: at.module ? 'RJ45 via SFP module' : media(at.group.cage, !at.cage), capable: Math.max(d.rj45 ?? 0, d.sfp ?? 0) }
       return [{ line: d.line, host: ref(at.group.unit), link }]
     })
+    trace.sfpMisses = misses.map((l) => ref(l.unit))
     trace.spare = units.map((u) => ({ unit: ref(u), spare: u.groups.reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0) }))
     trace.portLost = lostDevices.map((d) => d.line)
   }
@@ -302,8 +305,6 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   const spare = units.flatMap((u) => u.groups).reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0)
   const modules = placed.filter((p) => p?.module).length + links.filter((l) => l.kind === 'module').length
 
-  // Switches with cages that are uplinked over copper because a cage wasn't free upstream. (No gateway cage to be had is not something a switch can fix.)
-  const misses = links.filter((l) => l.unit.cages > 0 && l.kind !== 'sfp' && l.kind !== 'external' && l.parent !== null && (l.parent.kind === 'switch' || l.parent.cages > 0))
   const stats: NetStats = { unplaced: lost, spare, sfpMisses: misses.length }
 
   const how = (l: Uplink) => `${speedLabel(l.speed)}${l.kind === 'sfp' ? l.group.cage || l.parentGroup?.cage || 'SFP' : l.kind === 'copper' ? 'copper' : 'copper through an SFP module'}`

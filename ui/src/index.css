@@ -139,3 +139,40 @@
 .topo ul > li:first-child::after {
   border-radius: 0.5rem 0 0 0;
 }
+
+/* The speed of the link into a box, beside the line down to it; dashed in the warning colour when it is slower than it could be, red when there is none. */
+.topo-link {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  height: 1rem;
+  padding-left: 0.25rem;
+  font-size: 10px;
+  line-height: 1rem;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.topo ul > li:only-child > .topo-link {
+  top: -1rem;
+}
+.topo-roots > li > .topo-link {
+  display: none;
+}
+.topo-link.slow {
+  --dash: var(--warn);
+  color: var(--warn);
+}
+.topo-link.bad {
+  --dash: var(--bad);
+}
+.topo-link.slow::before,
+.topo-link.bad::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: repeating-linear-gradient(to bottom, var(--dash) 0 4px, var(--surface) 4px 7px);
+}

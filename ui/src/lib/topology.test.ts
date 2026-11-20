@@ -23,7 +23,6 @@ describe('buildTopology', () => {
   it('hangs the switch from the gateway and the devices from the switch, identical ones in one box', () => {
     const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, poeOut(8)]), cam(4), nvr()])!
     expect(t.roots.map(show)).toEqual(['GW[SW[CAM × 4, NVR]]'])
-    expect(t.unconnected).toEqual([])
   })
 
   it('puts a switch that uplinks to another under it, switches before devices', () => {
@@ -44,18 +43,20 @@ describe('buildTopology', () => {
     expect(t.roots.map(show)).toEqual(['SW[NVR]'])
   })
 
-  it('lists devices with no port apart, as unconnected', () => {
+  it('hangs devices with no port from the first root, as problems', () => {
     const t = buildTopology([gw(1), nvr(), nvr()].slice(0, 2).concat(item('nvr2', 1, 'Storage', { ports: [port({ max_speed_mbps: 1000 })] })))!
-    expect(t.unconnected.map((n) => n.title)).toEqual(['NVR2'])
+    const lost = t.roots[0]!.children.filter((n) => n.problem)
+    expect(lost.map((n) => [n.title, n.problem])).toEqual([['NVR2', 'No port left']])
+    expect(lost[0]!.checks).toContain('net-ports')
   })
 
   it('labels how each box is plugged in, and how many ports a switch has spare', () => {
     const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }]), nvr()])!
     const swNode = t.roots[0]!.children[0]!
     expect(t.roots[0]!.uplink).toBeUndefined()
-    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', slow: false })
+    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', speed: '1GbE', slow: false })
     expect(swNode.spare).toBe(6)
-    expect(swNode.children[0]!.uplink).toEqual({ label: '1GbE RJ45', slow: false })
+    expect(swNode.children[0]!.uplink).toEqual({ label: '1GbE RJ45', speed: '1GbE', slow: false })
     expect(swNode.children[0]!.spare).toBeUndefined()
   })
 
@@ -64,7 +65,22 @@ describe('buildTopology', () => {
     const t = buildTopology([gw(2), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, fast])])!
     const swNode = t.roots[0]!.children[0]!
     // The gateway has no cage, so the switch's 10G cage can't be used: it runs at 1 GbE.
-    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', slow: true })
+    expect(swNode.uplink).toEqual({ label: '1GbE RJ45', speed: '1GbE', slow: true })
+  })
+
+  it('says how much of a switch\'s PoE budget is drawn, and how many PoE ports are left', () => {
+    const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, poeOut(8)]), cam(4)])!
+    const swNode = t.roots[0]!.children[0]!
+    expect(swNode.poe).toEqual({ usedW: 20, budgetW: 200, sparePorts: 4 })
+    const cams = swNode.children[0]!
+    expect(cams.checks).toEqual(expect.arrayContaining(['poe-power', 'poe-ports']))
+    expect(swNode.checks).toEqual(expect.arrayContaining(['net-ports', 'poe-layout']))
+  })
+
+  it('marks what the checks say about a switch uplinked over copper for want of a cage', () => {
+    const fast: P = { count: 2, max_speed_mbps: 10000, media: 'sfp+' }
+    const t = buildTopology([gw(2), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, fast])])!
+    expect(t.roots[0]!.children[0]!.checks).not.toContain('net-sfp') // the gateway has no cage to give, which a switch can't fix
   })
 
   it('is null with nothing to hang from, or with a single box', () => {

@@ -13,25 +13,35 @@ export interface TopoNode {
   /** How many identical devices the box stands for. */
   qty: number
   /** How it is plugged in, as "10GbE SFP+"; absent for a gateway, and for what has no port to be on. */
-  uplink?: { label: string; /** True when the link runs slower than the device could. */ slow: boolean }
+  uplink?: { label: string; /** Just the speed, "10GbE"; empty when unknown. */ speed: string; /** True when the link runs slower than the device could. */ slow: boolean }
   /** Ports left free on a switch. */
   spare?: number
+  /** On a switch that gives PoE: the watts its devices can draw of its budget (null when unknown), and the PoE ports left. */
+  poe?: { usedW: number; budgetW: number | null; sparePorts: number }
+  /** Rack height of all the box's units together; 'desktop' when it goes on a shelf. Absent when the plan doesn't say. */
+  rack?: number | 'desktop'
+  /** Wall outlets all the box's units take. */
+  outlets?: number
+  /** Set when the product can't be had now. */
+  stock?: 'out' | 'soon'
+  /** Set when the box has nothing to plug into: what is missing. It is drawn where it would have gone. */
+  problem?: string
+  /** The checks (by id) that have something to say about the box, so that it and they can be shown together. */
+  checks: string[]
   /** What is plugged into it: other switches first, then devices. */
   children: TopoNode[]
 }
 
 export interface Topology {
-  /** The gateways, or the root switch when there is none, each with what hangs from it. */
+  /** The gateways, or the root switch when there is none, each with what hangs from it. What has nothing to plug into hangs from the first, as a problem. */
   roots: TopoNode[]
-  /** Devices and switches that no port or power could be found for, which hang from nothing. */
-  unconnected: TopoNode[]
 }
 
 const name = (l: DerivedLine) => l.view.product?.title ?? l.view.line.ref
 const unitKey = (u: UnitRef) => `${lineKey(u.line.view.line)}#${u.n}`
 /** A speed as "10GbE", "2.5GbE" or "100Mbps"; empty when the store doesn't say. */
 const speedText = (mbps: number) => (!Number.isFinite(mbps) ? '' : mbps >= 1000 ? `${mbps / 1000}GbE` : `${mbps}Mbps`)
-const uplinkOf = (l: Link): NonNullable<TopoNode['uplink']> => ({ label: [speedText(l.speed), l.media].filter(Boolean).join(' '), slow: Number.isFinite(l.speed) && Number.isFinite(l.capable) && l.speed < l.capable })
+const uplinkOf = (l: Link): NonNullable<TopoNode['uplink']> => ({ label: [speedText(l.speed), l.media].filter(Boolean).join(' '), speed: speedText(l.speed), slow: Number.isFinite(l.speed) && Number.isFinite(l.capable) && l.speed < l.capable })
 const isSwitch = (l: DerivedLine) => l.view.product?.type === 'Switches'
 
 /**
@@ -55,30 +65,67 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
   const parentOf = new Map<string, UnitRef | null>(trace.uplinks?.map((l) => [unitKey(l.unit), l.parent]))
   const linkOf = new Map(trace.uplinks?.map((l) => [unitKey(l.unit), uplinkOf(l.link)]))
   const spareOf = new Map(trace.spare?.map((s) => [unitKey(s.unit), s.spare]))
+  const poeOf = new Map(trace.poe?.map((p) => [unitKey(p.unit), { usedW: p.usedW, budgetW: p.budgetW, sparePorts: p.sparePorts }]))
+  const sfpMissed = new Set(trace.sfpMisses?.map(unitKey))
+  const rackOf = new Map(trace.rack?.map((r) => [lineKey(r.line.view.line), r.units]))
+  const outletLines = new Set(trace.outlets?.map((l) => lineKey(l.view.line)))
   const children = new Map<string, TopoNode[]>()
   const add = (host: UnitRef, node: TopoNode) => children.set(unitKey(host), [...(children.get(unitKey(host)) ?? []), node])
 
-  // Devices on the same switch that are the same product share a box.
-  // (Unless they are plugged in differently, which would otherwise be hidden.)
-  const groups = new Map<string, { host: UnitRef; line: DerivedLine; n: number; uplink: TopoNode['uplink'] }>()
-  for (const h of [...(trace.portHosts ?? []), ...(trace.poeHosts ?? [])]) {
+  const POE_CHECKS = ['poe-power', 'poe-ports', 'poe-layout']
+  /** What a box of `count` units of a line says about stock, rack space and outlets, and which of those checks it belongs to. */
+  const extras = (line: DerivedLine, count: number): Pick<TopoNode, 'rack' | 'outlets' | 'stock'> & { checks: string[] } => {
+    const k = lineKey(line.view.line)
+    const state = line.view.state
+    const u = rackOf.get(k)
+    return {
+      ...(rackOf.has(k) ? { rack: u === null || u === undefined ? ('desktop' as const) : u * count } : {}),
+      ...(outletLines.has(k) ? { outlets: count } : {}),
+      ...(state === 'out' || state === 'soon' ? { stock: state } : {}),
+      checks: [...(rackOf.has(k) ? ['rack'] : []), ...(outletLines.has(k) ? ['outlets'] : [])],
+    }
+  }
+
+  // Devices on the same switch that are the same product share a box, unless they are plugged in differently, which would otherwise be hidden.
+  const groups = new Map<string, { host: UnitRef; line: DerivedLine; n: number; uplink: TopoNode['uplink']; poe: boolean }>()
+  const hosted = [...(trace.portHosts ?? []).map((h) => ({ ...h, poe: false })), ...(trace.poeHosts ?? []).map((h) => ({ ...h, poe: true }))]
+  for (const h of hosted) {
     const uplink = uplinkOf(h.link)
     const key = `${unitKey(h.host)}|${lineKey(h.line.view.line)}|${uplink.label}|${uplink.slow}`
     const g = groups.get(key)
     if (g) g.n++
-    else groups.set(key, { host: h.host, line: h.line, n: 1, uplink })
+    else groups.set(key, { host: h.host, line: h.line, n: 1, uplink, poe: h.poe })
   }
   const devices = [...groups.entries()].sort((a, b) => name(a[1].line).localeCompare(name(b[1].line)))
-  for (const [key, g] of devices) add(g.host, { key, title: name(g.line), kind: 'device', qty: g.n, uplink: g.uplink, children: [] })
+  for (const [key, g] of devices) {
+    const { checks, ...rest } = extras(g.line, g.n)
+    add(g.host, { key, title: name(g.line), kind: 'device', qty: g.n, uplink: g.uplink, ...rest, checks: [...(g.poe ? POE_CHECKS : ['net-ports']), ...checks], children: [] })
+  }
 
-  const node = (u: { ref: UnitRef; kind: 'gateway' | 'switch' }): TopoNode => ({ key: unitKey(u.ref), title: title(u.ref), kind: u.kind, qty: 1, ...(u.kind === 'switch' ? { uplink: linkOf.get(unitKey(u.ref)), spare: spareOf.get(unitKey(u.ref)) } : {}), children: [] })
+  const node = (u: { ref: UnitRef; kind: 'gateway' | 'switch' }): TopoNode => {
+    const k = unitKey(u.ref)
+    const { checks, ...rest } = extras(u.ref.line, 1)
+    const poe = poeOf.get(k)
+    const stock = rest.stock
+    return {
+      key: k,
+      title: title(u.ref),
+      kind: u.kind,
+      qty: 1,
+      ...(u.kind === 'switch' ? { uplink: linkOf.get(k), spare: spareOf.get(k) } : {}),
+      ...(poe ? { poe } : {}),
+      ...rest,
+      checks: ['net-ports', ...(poe ? [...POE_CHECKS, ...(stock ? ['poe-stock'] : [])] : []), ...(sfpMissed.has(k) ? ['net-sfp'] : []), ...checks],
+      children: [],
+    }
+  }
   const nodes = new Map(units.map((u) => [unitKey(u.ref), node(u)] as const))
   const roots: TopoNode[] = gateways.map((g) => nodes.get(unitKey(g.ref))!)
-  const unconnected: TopoNode[] = []
+  const orphans: TopoNode[] = []
   for (const u of units.filter((u) => u.kind === 'switch')) {
     const n = nodes.get(unitKey(u.ref))!
     const key = unitKey(u.ref)
-    if (!parentOf.has(key)) unconnected.push(n) // no uplink was found for it
+    if (!parentOf.has(key)) orphans.push({ ...n, problem: 'No uplink port' }) // no uplink was found for it
     else if (parentOf.get(key) === null) roots.push(n) // it uplinks outside the plan
     else add(parentOf.get(key)!, n)
   }
@@ -87,17 +134,31 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
     const n = nodes.get(k)
     if (n) n.children = [...kids.filter((c) => c.kind === 'switch'), ...kids.filter((c) => c.kind !== 'switch')]
   }
+  // An orphan is a copy of its node, so it has to be given what was hung from it.
+  for (const o of orphans) o.children = nodes.get(o.key)!.children
 
   const lost = new Map<string, TopoNode>()
-  for (const l of [...(trace.portLost ?? []), ...(trace.poeLost ?? [])]) {
-    const k = lineKey(l.view.line)
-    const prev = lost.get(k)
-    if (prev) prev.qty++
-    else lost.set(k, { key: `lost:${k}`, title: name(l), kind: 'device', qty: 1, children: [] })
+  const lose = (list: DerivedLine[] | undefined, problem: string, checks: string[]) => {
+    for (const l of list ?? []) {
+      const k = `${problem}|${lineKey(l.view.line)}`
+      const prev = lost.get(k)
+      if (prev) {
+        prev.qty++
+        const e = extras(l, prev.qty)
+        prev.rack = e.rack
+        prev.outlets = e.outlets
+      } else {
+        const { checks: more, ...rest } = extras(l, 1)
+        lost.set(k, { key: `lost:${k}`, title: name(l), kind: 'device', qty: 1, ...rest, problem, checks: [...checks, ...more], children: [] })
+      }
+    }
   }
-  unconnected.push(...lost.values())
+  lose(trace.portLost, 'No port left', ['net-ports'])
+  lose(trace.poeLost, 'No PoE port or power left', POE_CHECKS)
 
   const count = (n: TopoNode): number => 1 + n.children.reduce((a, c) => a + count(c), 0)
   if (roots.length === 0 || roots.reduce((a, r) => a + count(r), 0) < 2) return null
-  return { roots, unconnected }
+  // What has nothing to plug into hangs from the first root, drawn as a problem.
+  roots[0]!.children = [...roots[0]!.children, ...orphans, ...lost.values()]
+  return { roots }
 }
