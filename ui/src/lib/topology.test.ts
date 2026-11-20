@@ -56,6 +56,14 @@ describe('buildTopology', () => {
     expect(lost[0]!.checks).toContain('net-ports')
   })
 
+  it('still draws the devices when no PoE port is of a high enough class for one of them', () => {
+    const ap = item('ap', 1, 'Access Points', { ports: [port({ poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 20)] })
+    const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }, poeOut(2)]), cam(2), ap])!
+    expect(t.roots.map(show)).toEqual(['GW[SW[CAM × 2], AP]'])
+    const lost = t.roots[0]!.children.filter((n) => n.problem)
+    expect(lost.map((n) => [n.title, n.problem])).toEqual([['AP', 'No PoE port or power left']])
+  })
+
   it('labels how each box is plugged in, and how many ports a switch has spare', () => {
     const t = buildTopology([gw(), sw('sw', [{ count: 8, max_speed_mbps: 1000 }]), nvr()])!
     const swNode = t.roots[0]!.children[0]!

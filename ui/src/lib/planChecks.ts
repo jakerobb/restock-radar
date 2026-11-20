@@ -340,7 +340,6 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
     shortfall: lost > 0,
     text: `${byClass(need)} ${devices === 1 ? 'device' : 'devices'} for ${byClass(have)} ${sockets === 1 ? 'port' : 'ports'}${lost > 0 ? `: ${lost} can't be given a port of a high enough class` : ''}.`,
   })
-  if (lost > 0) return out
 
   // Which device goes on which switch: each switch has a budget of its own, so the total isn't enough.
   const placing: { line: DerivedLine; rank: number; speed: number; draw: number; exclude?: ReadonlySet<number>; best?: boolean }[] = []
@@ -420,6 +419,8 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
       sparePorts: socketList.filter((x) => x.unit === k).length - placed.filter((a) => a?.unit === k).length,
     }))
   }
+  // With a class shortfall the ports check above says it all. The placement still ran for the trace, so the topology can show what fit and what didn't.
+  if (lost > 0) return out
 
   // Each device on a port group, spelled out: one valid arrangement, not the only one.
   const label = (u: { line: DerivedLine; n: number }) => `${name(u.line)}${qty(u.line) > 1 ? ` #${u.n + 1}` : ''}`
