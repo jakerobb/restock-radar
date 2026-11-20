@@ -1,6 +1,7 @@
 package specs
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,12 @@ var (
 	outputRe = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*V(?:\s*DC)?\s*(?:@|at)\s*(\d+(?:\.\d+)?)\s*A\b`)
 	// "UniFi 10G PoE+++ Adapter (90W)": the store's own name for the speed, which its specification doesn't give.
 	titleSpeedRe = regexp.MustCompile(`(?i)\b(\d+(?:\.\d+)?)\s*G\b`)
+	// The class and watts the name gives. A name with a class but no watts ("PoE Integrated AC Adapter") isn't trusted: that
+	// one is a PoE+ adapter that happens to have a USB-C output too.
+	titleClassRe = regexp.MustCompile(`PoE\+{0,3}`)
+	titleWattsRe = regexp.MustCompile(`\((\d+(?:\.\d+)?)\s*W\)`)
+	// "Max. PoE+ Wattage per Port by PSE: 60W", which only some of them have.
+	injectorWattsRe = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*W\b`)
 )
 
 // injectorClass is the PoE class an injector's output gives, by its power:
@@ -42,8 +49,8 @@ func injectorClass(watts float64) string {
 // deriveInjector reads a PoE injector: a mains-powered box that takes data in on
 // one port and gives data and PoE out on the other. The store gives it neither
 // ports nor a PoE class, nor (for the faster ones) a speed: its "Gigabit LAN
-// Port" flag is true even for the 10G models. So the class comes from the power
-// the output is rated for, and the speed from the product's name, falling back
+// Port" flag is true even for the 10G models. The class is read from the
+// product's name (see injectorRating), and the speed from it too, falling back
 // to the flag.
 //
 // It is described the way a one-port PoE switch would be (a PoE port out, a
@@ -59,29 +66,8 @@ func deriveInjector(ix *index, in Input, r *Result) {
 	if !ok {
 		return
 	}
-	// The USB-C model lists its Type-C output too; only the PoE one counts here.
-	var watts float64
-	lines := Lines(out.Value)
-	for _, pass := range []bool{true, false} {
-		for _, line := range lines {
-			if pass && !strings.Contains(strings.ToLower(line), "poe") {
-				continue
-			}
-			m := outputRe.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			v, _ := strconv.ParseFloat(m[1], 64)
-			a, _ := strconv.ParseFloat(m[2], 64)
-			watts = max(watts, v*a)
-		}
-		if watts > 0 {
-			break
-		}
-	}
-	class := injectorClass(watts)
-	if class == "" {
-		ix.issue("poe_injector", out, "no usable PoE output rating")
+	class, poeWatts, ok := injectorRating(ix, in, out)
+	if !ok {
 		return
 	}
 
@@ -99,7 +85,6 @@ func deriveInjector(ix *index, in Input, r *Result) {
 	if speed > 0 {
 		label = formatSpeedLabel(speed) + " RJ45"
 	}
-	poeWatts := injectorWatts[class]
 	r.Ports = append(r.Ports,
 		Port{Label: label + " (data in)", Media: "rj45", Role: "data", Count: 1, MaxSpeedMbps: speed, SpeedsMbps: speedList(speed), Source: "injector"},
 		Port{Label: label + " (PoE out)", Media: "rj45", Role: "data", Count: 1, MaxSpeedMbps: speed, SpeedsMbps: speedList(speed), PoEClass: class, PoEDirection: "out", PoEWatts: &poeWatts, Source: "injector"},
@@ -145,4 +130,68 @@ func (ix *index) flag(label string) (value, ok bool) {
 		}
 	}
 	return false, false
+}
+
+// injectorRating reads an injector's PoE class and the watts it supplies, from the three places the store gives
+// them, in order of how directly they say it: the name ("UniFi 10G PoE++ Adapter (60W)"), the "Max. PoE+ Wattage
+// per Port by PSE" entry that some have, and the output rating (48 V at 0.65 A is PoE+), which every one has.
+// The first that is there is used; when another disagrees about the class, that is raised as an issue, since either
+// the store has a typo or one of these no longer means what it did.
+func injectorRating(ix *index, in Input, out Effective) (class string, watts float64, ok bool) {
+	type reading struct {
+		source, class string
+		watts         float64
+	}
+	var found []reading
+
+	if m := titleWattsRe.FindStringSubmatch(in.Title); m != nil && titleClassRe.MatchString(in.Title) {
+		w, _ := strconv.ParseFloat(m[1], 64)
+		found = append(found, reading{"its name", titleClassRe.FindString(in.Title), w})
+	}
+	if e, has := ix.scalar("Max. PoE+ Wattage per Port by PSE"); has {
+		if m := injectorWattsRe.FindStringSubmatch(oneLine(e.Value)); m != nil {
+			w, _ := strconv.ParseFloat(m[1], 64)
+			found = append(found, reading{`"Max. PoE+ Wattage per Port by PSE"`, injectorClass(w), w})
+		}
+	}
+	// The output rating; the USB-C model lists its Type-C output too, and only the PoE one counts.
+	var rated float64
+	lines := Lines(out.Value)
+	for _, pass := range []bool{true, false} {
+		for _, line := range lines {
+			if pass && !strings.Contains(strings.ToLower(line), "poe") {
+				continue
+			}
+			m := outputRe.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			v, _ := strconv.ParseFloat(m[1], 64)
+			a, _ := strconv.ParseFloat(m[2], 64)
+			rated = max(rated, v*a)
+		}
+		if rated > 0 {
+			break
+		}
+	}
+	if c := injectorClass(rated); c != "" {
+		found = append(found, reading{"its output rating", c, injectorWatts[c]})
+	}
+
+	if len(found) == 0 {
+		ix.issue("poe_injector", out, "no usable PoE class or output rating")
+		return "", 0, false
+	}
+	first := found[0]
+	for _, r := range found[1:] {
+		if r.class != first.class {
+			ix.issue("poe_injector", out, fmt.Sprintf("%s says %s but %s says %s; using %s", first.source, first.class, r.source, r.class, first.class))
+		}
+	}
+	// What it supplies is the figure the store gives, else the class's own.
+	watts = first.watts
+	if watts == 0 {
+		watts = injectorWatts[first.class]
+	}
+	return first.class, watts, true
 }

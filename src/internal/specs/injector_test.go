@@ -1,6 +1,9 @@
 package specs
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The store gives a PoE injector no ports, no PoE class and, for the fast ones, no speed
 // (every one says "Gigabit LAN Port: true"), so these are read from the output rating and the name.
@@ -11,13 +14,13 @@ func TestRealInjectors(t *testing.T) {
 		watts float64
 		speed int
 	}{
-		{"u-poe-af", "PoE", 15.4, 1000},
+		{"u-poe-af", "PoE", 15, 1000},
 		{"u-poe-plus", "PoE+", 30, 1000},
 		{"u-poe-plus-plus", "PoE++", 60, 1000},
 		{"uacc-poe-plus-2-5g", "PoE+", 30, 2500},
 		{"uacc-poe-plus-plus-10g", "PoE++", 60, 10000},
 		{"uacc-poe-10g", "PoE+++", 90, 10000},
-		// Its Type-C output (5 V at 5 A) isn't the PoE one.
+		// Its name says PoE but no watts, so it isn't trusted, and its Type-C output (5 V at 5 A) isn't the PoE one.
 		{"uacc-poe-plus-usbc", "PoE+", 30, 1000},
 	}
 	for _, c := range cases {
@@ -58,5 +61,32 @@ func TestInjectorOnlyInItsCategory(t *testing.T) {
 	}
 	if !r.Known.Ports {
 		t.Fatal("the injector got no ports")
+	}
+}
+
+// The name is read first, then the "Max. PoE+ Wattage per Port by PSE" entry, then the output rating; where they
+// disagree the first is used and the rest is raised as an issue.
+func TestInjectorSourcesAgreeOrAreReported(t *testing.T) {
+	f := fixtures(t)["u-poe-plus"]
+	derive := func(title string) Result {
+		return Derive(Input{Slug: "u-poe-plus", Title: title, Category: f.Category, Specs: Plain(f.Specs)})
+	}
+	// No watts in the name: the output rating says PoE+.
+	if r := derive("UniFi PoE+ Adapter"); r.PoEMaxClass != "PoE+" || len(r.Issues) != 0 {
+		t.Errorf("class %q, issues %+v", r.PoEMaxClass, r.Issues)
+	}
+	// A name that disagrees with the rating wins, and says so.
+	r := derive("UniFi PoE++ Adapter (60W)")
+	if r.PoEMaxClass != "PoE++" || metric(r, "poe_budget_w").Value != 60 {
+		t.Errorf("class %q, budget %+v", r.PoEMaxClass, metric(r, "poe_budget_w"))
+	}
+	if len(r.Issues) != 1 || r.Issues[0].Area != "poe_injector" || !strings.Contains(r.Issues[0].Problem, "its name says PoE++ but its output rating says PoE+") {
+		t.Errorf("issues = %+v", r.Issues)
+	}
+	// The wattage entry of the store is read where there is one, and checked against the rating.
+	g := fixtures(t)["u-poe-plus-plus"]
+	r = Derive(Input{Slug: "u-poe-plus-plus", Title: "UniFi PoE Adapter", Category: g.Category, Specs: Plain(g.Specs)})
+	if r.PoEMaxClass != "PoE++" || metric(r, "poe_budget_w").Value != 60 || len(r.Issues) != 0 {
+		t.Errorf("class %q, budget %+v, issues %+v", r.PoEMaxClass, metric(r, "poe_budget_w"), r.Issues)
 	}
 }
