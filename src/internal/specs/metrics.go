@@ -176,6 +176,9 @@ type Dims struct {
 	MidMM float64 `json:"mid_mm"`
 	MaxMM float64 `json:"max_mm"`
 	Round bool    `json:"round,omitempty"`
+	// Label is what the store called the size ("Device", "Without mount"); empty
+	// when the entry gave only one, unlabelled.
+	Label string `json:"label,omitempty"`
 	// WidthMM, DepthMM and HeightMM are set only where the axes can be told
 	// apart: for a rack-mount device of known height, whose height is that of its
 	// units and whose width is that of a 19-inch rack.
@@ -261,11 +264,13 @@ func abs(f float64) float64 {
 func (d Dims) sorted() []float64 { return []float64{d.MinMM, d.MidMM, d.MaxMM} }
 
 // pickDims finds the device's size in an entry that may hold several: the
-// unlabelled one, or the one labelled as the device. An entry that sizes only
-// accessories or packaging, or several unlabelled alternatives, is left alone.
+// unlabelled one, or the one labelled as the device. Where that doesn't settle
+// on a single line (several configurations, accessories alongside, or
+// alternatives), the smallest by volume is taken: the bare device is the
+// smallest of the sizes a store lists for it. The size's label, if any, is kept.
+// An entry with no three-dimensional size in millimetres is left alone.
 func pickDims(e Effective) (Dims, bool) {
-	var plain, device []string
-	var labelled []labelledLine
+	var plain, device, labelled []labelledLine
 	pending := "" // a label on a line of its own names the size on the next line
 	for _, l := range Lines(e.Value) {
 		if m := labelOnlyRe.FindStringSubmatch(l); m != nil {
@@ -277,13 +282,17 @@ func pickDims(e Effective) (Dims, bool) {
 		if m := labelRe.FindStringSubmatch(l); m != nil {
 			label, text = strings.TrimSpace(m[1]), m[2]
 		}
+		if !dimRe.MatchString(text) && !roundRe.MatchString(text) {
+			continue
+		}
+		ll := labelledLine{label, text}
 		switch {
-		case label != "" && deviceRe.MatchString(label):
-			device = append(device, text)
-		case label != "" && (dimRe.MatchString(text) || roundRe.MatchString(text)):
-			labelled = append(labelled, labelledLine{label, text})
-		case label == "" && (dimRe.MatchString(text) || roundRe.MatchString(text)):
-			plain = append(plain, text)
+		case label == "":
+			plain = append(plain, ll)
+		case deviceRe.MatchString(label):
+			device = append(device, ll)
+		default:
+			labelled = append(labelled, ll)
 		}
 	}
 	cands := plain
@@ -294,25 +303,50 @@ func pickDims(e Effective) (Dims, bool) {
 		cands = bareDevice(labelled)
 	}
 	if len(cands) != 1 {
-		return Dims{}, false
+		// Nothing settles it, so take the smallest volume of every size that
+		// can be read, packaging aside unless it is all there is.
+		all := append(append(append([]labelledLine{}, plain...), device...), labelled...)
+		cands = nil
+		for _, l := range all {
+			if !packagingRe.MatchString(l.label) {
+				cands = append(cands, l)
+			}
+		}
+		if len(cands) == 0 {
+			cands = all
+		}
 	}
-	l := cands[0]
-	if m := roundRe.FindStringSubmatch(l); m != nil {
+	var best Dims
+	bestVol, found := 0.0, false
+	for _, l := range cands {
+		d, vol, ok := parseDims(l)
+		if ok && (!found || vol < bestVol) {
+			best, bestVol, found = d, vol, true
+		}
+	}
+	return best, found
+}
+
+// parseDims reads one line's size and its volume in cubic millimetres. A line
+// that doesn't give all three dimensions is not a size.
+func parseDims(l labelledLine) (Dims, float64, bool) {
+	if m := roundRe.FindStringSubmatch(l.text); m != nil {
 		dia, _ := num(m[1])
 		h, _ := num(m[2])
-		return sortDims(dia, dia, h, true), true
+		d := sortDims(dia, dia, h, true)
+		d.Label = l.label
+		return d, math.Pi / 4 * dia * dia * h, true
 	}
-	m := dimRe.FindStringSubmatch(l)
-	if m == nil {
-		return Dims{}, false
+	m := dimRe.FindStringSubmatch(l.text)
+	if m == nil || m[3] == "" {
+		return Dims{}, 0, false
 	}
 	a, _ := num(m[1])
 	b, _ := num(m[2])
-	if m[3] == "" {
-		return Dims{}, false
-	}
 	c, _ := num(m[3])
-	return sortDims(a, b, c, false), true
+	d := sortDims(a, b, c, false)
+	d.Label = l.label
+	return d, a * b * c, true
 }
 
 var (
@@ -324,7 +358,7 @@ var (
 // the packaging is never the device, and of several configurations ("With
 // mount", "Without mount") the bare one is. It returns nothing when that
 // doesn't leave exactly one.
-func bareDevice(labelled []labelledLine) []string {
+func bareDevice(labelled []labelledLine) []labelledLine {
 	var rest []labelledLine
 	for _, l := range labelled {
 		if !packagingRe.MatchString(l.label) {
@@ -332,12 +366,12 @@ func bareDevice(labelled []labelledLine) []string {
 		}
 	}
 	if len(rest) == 1 {
-		return []string{rest[0].text}
+		return rest
 	}
-	var without []string
+	var without []labelledLine
 	for _, l := range rest {
 		if withoutRe.MatchString(l.label) {
-			without = append(without, l.text)
+			without = append(without, l)
 		}
 	}
 	if len(without) == 1 {

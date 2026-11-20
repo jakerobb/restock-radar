@@ -101,7 +101,7 @@ function DerivedSummary({ d }: { d: Derived }) {
           {flagged(d.overridden.rack)}
         </Fact>
         <Fact label="Dimensions">
-          {d.known.dims && d.dims.max_mm > 0 ? `${d.dims.min_mm} × ${d.dims.mid_mm} × ${d.dims.max_mm} mm` : <Unknown />}
+          {d.known.dims && d.dims.max_mm > 0 ? `${d.dims.min_mm} × ${d.dims.mid_mm} × ${d.dims.max_mm} mm${d.dims.label ? ` (${d.dims.label})` : ''}` : <Unknown />}
           {flagged(d.overridden.dims)}
         </Fact>
         {d.metrics.length > 0 && (
