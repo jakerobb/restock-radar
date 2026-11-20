@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { encodePlan, type PlanLine } from '../lib/plan'
 import { setPlan } from '../lib/planStore'
-import { derived, port, product, productsResponse, variant } from '../test/fixtures'
+import { derived, port, product, productsResponse, stored, variant } from '../test/fixtures'
 import { renderRoute, stubFetch } from '../test/render'
 
 const known = { ports: true, poe: true, radios: true, rack: true, dims: true }
@@ -30,6 +30,7 @@ const catalog = () => {
 }
 
 const line = (over: Partial<PlanLine>): PlanLine => ({ ref: 'us/switch', sku: 'SW-8', qty: 1, addedCents: 20000, ...over })
+const searchOptions = () => within(screen.getByRole('listbox', { name: 'Matching products' })).getAllByRole('option') // not the plan switcher's
 const rowFor = (name: string) => screen.getByRole('link', { name }).closest('tr')!
 
 describe('adding to the plan', () => {
@@ -40,7 +41,7 @@ describe('adding to the plan', () => {
     await user.click(await screen.findByRole('button', { name: 'Add PoE Switch to the plan' }))
     expect(await screen.findByRole('link', { name: 'In plan (1)' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Plan (1)' })).toBeInTheDocument()
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/switch:SW-8:1:20000']) // the cheaper variant
+    expect(stored('lines')).toEqual(['us/switch:SW-8:1:20000']) // the cheaper variant
 
     await user.click(screen.getByRole('button', { name: 'Add PoE Switch to the plan' }))
     expect(await screen.findByRole('link', { name: 'In plan (2)' })).toBeInTheDocument()
@@ -52,7 +53,7 @@ describe('adding to the plan', () => {
     renderRoute('/')
     await user.click(await screen.findByRole('button', { name: 'Add Access Point to the plan' }))
     expect(await screen.findByRole('link', { name: 'Plan (1)' })).toBeInTheDocument()
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
+    expect(stored('lines')).toEqual(['us/ap:AP-1:1:15000'])
   })
 
   it('adds from a product page and a comparison', async () => {
@@ -148,7 +149,7 @@ describe('Running a controller elsewhere', () => {
     expect(finder).toHaveTextContent('5 Gbps gateway')
     await user.click(within(finder).getByRole('button', { name: 'Self-host UniFi Network' }))
     await waitFor(() => expect(screen.getByLabelText('Checks')).toHaveTextContent('Self-hosted: you run UniFi Network yourself'))
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan-hosting')!)).toEqual({ network: 'self' })
+    expect(stored('hosting')).toEqual({ network: 'self' })
     // Only the gateway is still missing, and it can't be run elsewhere.
     expect(within(screen.getByLabelText('Find a gateway or controller')).queryByRole('button', { name: /Self-host/ })).not.toBeInTheDocument()
     // It is an entry in the plan, not just a note in the checks.
@@ -181,7 +182,7 @@ describe('Add product on the plan page', () => {
     await user.click(await screen.findByRole('button', { name: 'Add product' }))
     expect(screen.getByRole('combobox', { name: 'Search products to add' })).toHaveFocus()
     await user.keyboard('ap-1')
-    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(searchOptions()).toHaveLength(1)
   })
 
   it('searches by name or SKU, and adds the result you click', async () => {
@@ -190,11 +191,11 @@ describe('Add product on the plan page', () => {
     renderRoute('/plan')
     await user.click(await screen.findByRole('button', { name: 'Add product' }))
     await user.type(screen.getByRole('combobox', { name: 'Search products to add' }), 'ap-1')
-    const options = screen.getAllByRole('option')
+    const options = searchOptions()
     expect(options).toHaveLength(1)
     expect(options[0]).toHaveTextContent('Access Point')
     await user.click(options[0]!)
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
+    expect(stored('lines')).toEqual(['us/ap:AP-1:1:15000'])
     expect(screen.getByRole('status')).toHaveTextContent('Added Access Point')
   })
 
@@ -205,15 +206,15 @@ describe('Add product on the plan page', () => {
     await user.click(await screen.findByRole('button', { name: 'Add product' }))
     const box = screen.getByRole('combobox', { name: 'Search products to add' })
     await user.type(box, 'o') // PoE Switch, Access Point, Sold Out Thing: in stock first
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('PoE Switch'), expect.stringContaining('Access Point'), expect.stringContaining('Sold Out Thing')])
-    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
+    expect(searchOptions().map((o) => o.textContent)).toEqual([expect.stringContaining('PoE Switch'), expect.stringContaining('Access Point'), expect.stringContaining('Sold Out Thing')])
+    expect(searchOptions()[0]).toHaveAttribute('aria-selected', 'true')
     await user.keyboard('{ArrowDown}')
-    expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true')
-    expect(box).toHaveAttribute('aria-activedescendant', screen.getAllByRole('option')[1]!.id)
+    expect(searchOptions()[1]).toHaveAttribute('aria-selected', 'true')
+    expect(box).toHaveAttribute('aria-activedescendant', searchOptions()[1]!.id)
     await user.keyboard('{Enter}')
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/ap:AP-1:1:15000'])
+    expect(stored('lines')).toEqual(['us/ap:AP-1:1:15000'])
     await user.keyboard('{ArrowUp}{ArrowUp}{Enter}') // wraps to the last
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toHaveLength(2)
+    expect(stored('lines')).toHaveLength(2)
   })
 
   it('says when nothing matches', async () => {
@@ -259,7 +260,7 @@ describe('PlanPage', () => {
 
     await user.selectOptions(screen.getByLabelText('Variant of PoE Switch'), 'SW-16')
     expect(screen.getByLabelText('Totals')).toHaveTextContent('Total $800') // 350 + 450
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toContain('us/switch:SW-16:1:35000')
+    expect(stored('lines')).toContain('us/switch:SW-16:1:35000')
 
     await user.click(screen.getByRole('button', { name: 'Remove Access Point from the plan' }))
     await waitFor(() => expect(screen.queryByRole('link', { name: 'Access Point' })).not.toBeInTheDocument())
@@ -279,11 +280,11 @@ describe('PlanPage', () => {
     const choice = await screen.findByLabelText('Sold with Gateway')
     expect(within(choice).getAllByRole('option').map((o) => o.textContent)).toEqual(['No Storage', '1 TB (+$390)', '2 TB (+$730) — sold out'])
     await user.selectOptions(choice, 'ssd-1')
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900', 'us/ssd-1:SSD-1:2:39000'])
+    expect(stored('lines')).toEqual(['us/gw:GW:2:27900', 'us/ssd-1:SSD-1:2:39000'])
     await user.selectOptions(choice, 'ssd-2') // replaces the other one
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900', 'us/ssd-2:SSD-2:2:73000'])
+    expect(stored('lines')).toEqual(['us/gw:GW:2:27900', 'us/ssd-2:SSD-2:2:73000'])
     await user.selectOptions(choice, '')
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/gw:GW:2:27900'])
+    expect(stored('lines')).toEqual(['us/gw:GW:2:27900'])
   })
 
   it('lets the drives of an NVR with bays be chosen by size and number, one drive line for all the NVRs', async () => {
@@ -301,11 +302,11 @@ describe('PlanPage', () => {
     const size = await screen.findByLabelText('Drives for UNVR')
     expect(within(size).getAllByRole('option').map((o) => o.textContent)).toEqual(['No drives', '4 TB drives (+$165 each)', '16 TB drives (+$729 each)']) // not the 8 TB
     await user.selectOptions(size, 'uacc-hdd-e-16tb') // a full set in each of the two NVRs
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:8:72900'])
+    expect(stored('lines')).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:8:72900'])
     await user.selectOptions(screen.getByLabelText('Number of drives for UNVR'), '3')
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:6:72900'])
+    expect(stored('lines')).toEqual(['us/unvr:UNVR:2:29900', 'us/uacc-hdd-e-16tb:UACC-HDD-E-16TB:6:72900'])
     await user.selectOptions(size, '')
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/unvr:UNVR:2:29900'])
+    expect(stored('lines')).toEqual(['us/unvr:UNVR:2:29900'])
   })
 
   it('lets the way a switch is powered be chosen, and puts the adapter it runs on in the plan', async () => {
@@ -321,8 +322,8 @@ describe('PlanPage', () => {
     const choice = await screen.findByLabelText('Power for Flex PoE')
     expect(choice).toHaveValue('') // not chosen yet
     await user.selectOptions(choice, screen.getByRole('option', { name: /210W AC adapter: 196 W/ }))
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/flex:FLEX:2:19900', 'us/uacc-adapter-ac-210w:ADAPTER:2:7900'])
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan-power')!)).toEqual({ 'us/flex:FLEX': expect.any(Number) })
+    expect(stored('lines')).toEqual(['us/flex:FLEX:2:19900', 'us/uacc-adapter-ac-210w:ADAPTER:2:7900'])
+    expect(stored('powering')).toEqual({ 'us/flex:FLEX': expect.any(Number) })
   })
 
   it('makes a switch with a 60 W or 210 W adapter in the box a matter of which product it is, in place', async () => {
@@ -345,7 +346,7 @@ describe('PlanPage', () => {
     expect(within(choice).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose how it is powered', 'PoE+: 16 W', '60W AC adapter: 52 W (as Switch Ultra 60W)', '210W AC adapter: 202 W (adapter added)']) // no 210 W product here, so that one is an adapter to buy
     await user.selectOptions(choice, screen.getByRole('option', { name: /60W AC adapter/ }))
     // The line becomes the product that comes with it, where it was and as many; no adapter is added.
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/usw-ultra-60w:U60:2:15900', 'us/ap:AP:1:15000'])
+    expect(stored('lines')).toEqual(['us/usw-ultra-60w:U60:2:15900', 'us/ap:AP:1:15000'])
   })
 
   it('shows a price that has changed since the line was added', async () => {
@@ -431,7 +432,7 @@ describe('PlanPage', () => {
     await user.click(screen.getByRole('button', { name: 'Clear the plan' }))
     await user.click(screen.getByRole('button', { name: 'Yes, clear the plan' }))
     expect(await screen.findByText(/Nothing in the plan yet/)).toBeInTheDocument()
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual([])
+    expect(stored('lines')).toEqual([])
   })
 
   it('offers a link that carries the plan', async () => {
@@ -442,7 +443,7 @@ describe('PlanPage', () => {
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Share this plan' }))
     const box = await screen.findByLabelText('Link to this plan')
     expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
-    expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })], products)}`)
+    expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })], products, {}, {}, 'My Plan')}`)
   })
 })
 
@@ -480,8 +481,45 @@ describe('the topology', () => {
   })
 })
 
+describe('several plans', () => {
+  it('starts with “My Plan”, which can be renamed', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    expect(await screen.findByRole('combobox', { name: 'Which plan' })).toHaveDisplayValue('My Plan')
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.keyboard('Office{Enter}')
+    expect(screen.getByRole('combobox', { name: 'Which plan' })).toHaveDisplayValue('Office')
+    expect(stored('name')).toBe('Office')
+  })
+
+  it('keeps each plan’s lines apart, and can start and delete them', async () => {
+    catalog()
+    setPlan([line({})])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'New plan' }))
+    await user.keyboard('Second{Enter}')
+    expect(await screen.findByText(/Nothing in the plan yet/)).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Which plan' }), 'My Plan')
+    expect(await screen.findByLabelText('Quantity of PoE Switch')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Delete this plan?' })).getByRole('button', { name: 'Delete' }))
+    expect(screen.getByRole('combobox', { name: 'Which plan' })).toHaveDisplayValue('Second')
+    expect(screen.getByRole('combobox', { name: 'Which plan' }).querySelectorAll('option')).toHaveLength(1)
+  })
+
+  it('keeps a name to 50 characters', async () => {
+    catalog()
+    renderRoute('/plan')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Rename' }))
+    expect(screen.getByRole('textbox')).toHaveAttribute('maxlength', '50')
+  })
+})
+
 describe('a shared plan', () => {
-  const link = (lines: PlanLine[]) => `/plan/${encodePlan(lines, products)}`
+  const link = (lines: PlanLine[], name = '') => `/plan/${encodePlan(lines, products, {}, {}, name)}`
 
   it('is shown read-only, apart from the visitor’s own plan', async () => {
     catalog()
@@ -495,25 +533,47 @@ describe('a shared plan', () => {
     expect(screen.queryByRole('button', { name: 'Clear the plan' })).not.toBeInTheDocument()
   })
 
-  it('can replace the visitor’s plan, or be left behind', async () => {
+  it('names the plan it carries, which the visitor sees', async () => {
+    catalog()
+    renderRoute(`/plan/${encodePlan([line({})], products, {}, {}, 'Garage rack')}`)
+    expect(await screen.findByText('Garage rack')).toBeInTheDocument()
+  })
+
+  it('is saved as a new plan, under the name it came with, by one click and Enter, leaving the visitor’s own plan as it was', async () => {
     catalog()
     const user = userEvent.setup()
     setPlan([line({ ref: 'us/ap', sku: 'AP-1', addedCents: 15000 })])
-    const { router } = renderRoute(link([line({ qty: 3 })]))
-    await user.click(await screen.findByRole('button', { name: 'Replace my plan with it' }))
+    const { router } = renderRoute(link([line({ qty: 3 })], 'Garage rack'))
+    await user.click(await screen.findByRole('button', { name: 'Save as a new plan' }))
+    const dialog = screen.getByRole('dialog', { name: 'Save as a new plan' })
+    expect(within(dialog).getByRole('textbox')).toHaveValue('Garage rack')
+    expect(within(dialog).getByRole('textbox')).toHaveFocus()
+    await user.keyboard('{Enter}')
     await waitFor(() => expect(router.state.location.pathname).toBe('/plan'))
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toEqual(['us/switch:SW-8:3:20000'])
+    expect(stored('lines')).toEqual(['us/switch:SW-8:3:20000'])
+    expect(stored('name')).toBe('Garage rack')
     expect(await screen.findByLabelText('Quantity of PoE Switch')).toHaveValue(3)
+    // The one she had is still there, under the switcher.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Which plan' }), 'My Plan')
+    expect(await screen.findByRole('link', { name: 'Access Point' })).toBeInTheDocument()
   })
 
-  it('offers to keep it when the visitor has no plan, and “back” leaves theirs untouched', async () => {
+  it('can be saved under another name', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute(link([line({})], 'Garage rack'))
+    await user.click(await screen.findByRole('button', { name: 'Save as a new plan' }))
+    await user.keyboard('Shop{Enter}')
+    await waitFor(() => expect(stored('name')).toBe('Shop'))
+  })
+
+  it('“back” leaves the visitor’s plan untouched', async () => {
     catalog()
     const user = userEvent.setup()
     renderRoute(link([line({})]))
-    expect(await screen.findByRole('button', { name: 'Keep it as my plan' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Back to my plan' }))
+    await user.click(await screen.findByRole('button', { name: 'Back to my plan' }))
     expect(await screen.findByText(/Nothing in the plan yet/)).toBeInTheDocument()
-    expect(localStorage.getItem('restock-radar.plan')).toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Which plan' }).querySelectorAll('option')).toHaveLength(1)
   })
 
   it('says so when the link holds no plan', async () => {
@@ -555,8 +615,8 @@ describe('Converting to another region', () => {
     const link = within(dialog).getByRole('link', { name: /Open the converted plan in a new tab/ })
     expect(link).toHaveAttribute('target', '_blank')
     const slug = link.getAttribute('href')!.replace('/plan/', '')
-    expect(slug).toBe(encodePlan([{ ref: 'eu/switch', sku: 'SW-8-EU', qty: 2, addedCents: null }], all))
+    expect(slug).toBe(encodePlan([{ ref: 'eu/switch', sku: 'SW-8-EU', qty: 2, addedCents: null }], all, {}, {}, 'My Plan'))
     // Hers is untouched.
-    expect(JSON.parse(localStorage.getItem('restock-radar.plan')!)).toHaveLength(2)
+    expect(stored('lines')).toHaveLength(2)
   })
 })

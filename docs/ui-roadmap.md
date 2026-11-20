@@ -110,11 +110,11 @@ system, and the name says so.
   hand-picked watch list to needs.
 - Distinct from the existing watch list (config-driven items the poller
   tracks).
-- **Built so far:** one plan, kept in the browser, with product lines (variant and
+- **Built so far:** named plans (several, kept in the browser), with product lines (variant and
   quantity), live prices, totals, a link that carries the plan, and checks
   (PoE power and ports placed per switch, port speed, rack space) worked out from
   derived specs, and "Find a switch", which suggests switches (one model, or a pair of different ones) that cover a PoE shortfall, and "Find an NVR" for cameras with no NVR or more than it manages (linear, by resolution class; no storage yet). Still to do:
-  named plans, saved searches as lines, server-side storage and alerts.
+  saved searches as lines, server-side storage and alerts.
 - Anonymous visitors keep a build plan in the browser (localStorage), shareable
   as a link. Signed-in users get one stored on the server, which saved-search
   alerts require, since an alert needs to know where to send itself. Per-user

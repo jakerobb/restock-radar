@@ -1,6 +1,7 @@
-import { getPlan, resetPlanStore, setPlan, subscribePlan } from './planStore'
+import { createPlan, deletePlan, getActiveId, getPlan, getPlanName, getPlans, renamePlan, resetPlanStore, selectPlan, setPlan, subscribePlan } from './planStore'
 import { serializeLine } from './plan'
 
+const KEY = 'restock-radar.plans'
 const l = { ref: 'us/a', sku: 'S', qty: 2, addedCents: 100 }
 
 describe('planStore', () => {
@@ -18,10 +19,10 @@ describe('planStore', () => {
   })
 
   it('starts empty when what is stored is damaged', () => {
-    localStorage.setItem('restock-radar.plan', '{not json')
+    localStorage.setItem(KEY, '{not json')
     expect(getPlan()).toEqual([])
     resetPlanStore()
-    localStorage.setItem('restock-radar.plan', JSON.stringify(['junk', serializeLine(l)]))
+    localStorage.setItem(KEY, JSON.stringify({ active: 'a', plans: [{ id: 'a', name: 'X', lines: ['junk', serializeLine(l)] }] }))
     expect(getPlan()).toEqual([l])
   })
 
@@ -44,8 +45,8 @@ describe('planStore', () => {
     const off = subscribePlan(seen)
     setPlan([l])
     expect(seen).toHaveBeenCalledTimes(1)
-    localStorage.setItem('restock-radar.plan', JSON.stringify([serializeLine({ ...l, qty: 5 })]))
-    window.dispatchEvent(new StorageEvent('storage', { key: 'restock-radar.plan' }))
+    localStorage.setItem(KEY, JSON.stringify({ active: 'a', plans: [{ id: 'a', name: 'X', lines: [serializeLine({ ...l, qty: 5 })] }] }))
+    window.dispatchEvent(new StorageEvent('storage', { key: KEY }))
     expect(seen).toHaveBeenCalledTimes(2)
     expect(getPlan()[0]!.qty).toBe(5)
     window.dispatchEvent(new StorageEvent('storage', { key: 'something-else' }))
@@ -53,5 +54,46 @@ describe('planStore', () => {
     off()
     setPlan([])
     expect(seen).toHaveBeenCalledTimes(2)
+  })
+
+  it('starts with one plan, called My Plan', () => {
+    expect(getPlans()).toHaveLength(1)
+    expect(getPlanName()).toBe('My Plan')
+  })
+
+  it('renames the plan, tidying the name and keeping it to 50 characters', () => {
+    renamePlan('  Garage   rack ')
+    expect(getPlanName()).toBe('Garage rack')
+    renamePlan('x'.repeat(80))
+    expect(getPlanName()).toBe('x'.repeat(50))
+    renamePlan('   ')
+    expect(getPlanName()).toBe('x'.repeat(50))
+  })
+
+  it('keeps plans apart, switching to a new one and back', () => {
+    setPlan([l])
+    const first = getActiveId()
+    createPlan('Second')
+    expect(getPlan()).toEqual([])
+    expect(getPlanName()).toBe('Second')
+    selectPlan(first)
+    expect(getPlan()).toEqual([l])
+    resetPlanStore()
+    expect(getPlans().map((p) => p.name)).toEqual(['My Plan', 'Second'])
+    expect(getActiveId()).toBe(first)
+  })
+
+  it('deletes the plan being edited, and empties the last one instead', () => {
+    const first = getActiveId()
+    createPlan('Second', [l])
+    deletePlan()
+    expect(getActiveId()).toBe(first)
+    expect(getPlans()).toHaveLength(1)
+    setPlan([l])
+    renamePlan('Mine')
+    deletePlan()
+    expect(getPlans()).toHaveLength(1)
+    expect(getPlan()).toEqual([])
+    expect(getPlanName()).toBe('My Plan')
   })
 })

@@ -17,6 +17,8 @@ const WHY = {
 } as const
 
 interface ConvertPlanProps {
+  /** The plan's name, which the converted plan keeps. */
+  name: string
   lines: PlanLine[]
   hosting: Hosting
   powering: Powering
@@ -28,12 +30,12 @@ interface ConvertPlanProps {
 }
 
 /** Offers to make the plan again from another store's products, opened as a new plan (in a new tab) so the two can be compared. */
-export function ConvertPlan({ lines, hosting, powering, products, regions, suggested }: ConvertPlanProps) {
+export function ConvertPlan({ name, lines, hosting, powering, products, regions, suggested }: ConvertPlanProps) {
   const [open, setOpen] = useState(false)
   const [target, setTarget] = useState(suggested)
   const conversion = useMemo(() => (open ? convertPlan(lines, powering, products, target) : null), [open, lines, powering, products, target])
   if (regions.length < 2 || lines.length === 0) return null
-  const slug = conversion && conversion.lines.length > 0 ? encodePlan(conversion.lines, products, hosting, conversion.powering) : ''
+  const slug = conversion && conversion.lines.length > 0 ? encodePlan(conversion.lines, products, hosting, conversion.powering, name) : ''
   const counterparts = conversion?.outcomes.filter((o) => o.result === 'counterpart') ?? []
   const left = conversion?.outcomes.filter((o) => o.result === 'left') ?? []
   return (

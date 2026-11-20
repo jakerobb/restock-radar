@@ -16,6 +16,17 @@ export interface PlanLine {
 }
 
 export const MAX_QTY = 99
+/** What a plan is called until it is named. */
+export const DEFAULT_PLAN_NAME = 'My Plan'
+/** The longest a plan's name can be, in characters; it travels in the share link. */
+export const MAX_NAME = 50
+
+/** A name as it is kept: spaces trimmed and collapsed, cut to MAX_NAME characters; empty for anything that isn't a name. */
+export function cleanName(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  // Control characters (a newline pasted in) are spaces; the rest of Unicode is welcome.
+  return Array.from(raw.replace(/\p{Cc}+/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, MAX_NAME).join('').trim()
+}
 /** More lines than anyone plans; a bound so a crafted link can't build a huge page. */
 export const MAX_LINES = 100
 
@@ -61,12 +72,12 @@ export function parsePlan(list: unknown): PlanLine[] {
 
 // ---- Share links ----
 //
-// A shared plan is a slug: for each line, the variant's permanent number (which says which product, in
+// A shared plan is a slug: its name (UTF-8, after a number that says how long it is), then, for each line, the variant's permanent number (which says which product, in
 // which region, and which variant) and the quantity, each as a variable-length integer, in base64url.
 // Prices don't travel; whoever opens the link sees today's.
 
-/** Longest slug we'll read; MAX_LINES lines need well under this. */
-export const MAX_SLUG = 600
+/** Longest slug we'll read; MAX_LINES lines and a name of MAX_NAME characters need well under this. */
+export const MAX_SLUG = 900
 
 const toBase64Url = (b: number[]): string => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
@@ -102,6 +113,12 @@ const HOSTING_BASE = 2 ** 30
  * place of a quantity. Variant numbers are far below 2^29, and hosting begins at 2^30.
  */
 const POWER_BASE = 2 ** 29
+/**
+ * The plan's name, in a slug, first: the number 2^31 plus its length in bytes, then the bytes of its UTF-8. The
+ * longest name is MAX_NAME characters of four bytes each.
+ */
+const NAME_BASE = 2 ** 31
+const MAX_NAME_BYTES = MAX_NAME * 4
 const hostingNumber = (role: (typeof HOSTED_ROLES)[number]) => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2
 /** The role a number stands for; null for one that isn't self-hosting (an odd number was cloud hosting, once, before it became a product). */
 const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'self'] | 'ignore' | null => {
@@ -126,10 +143,16 @@ export function variantsByNum(products: Iterable<Product>): Map<number, { ref: s
  * A plan as a short URL-safe slug. Lines whose variant isn't in the catalogue have no number and
  * are left out, so there may be nothing to share (an empty slug).
  */
-export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosting: Hosting = {}, powering: Powering = {}): string {
+export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosting: Hosting = {}, powering: Powering = {}, name = ''): string {
   const numByKey = new Map<string, number>()
   for (const [num, { ref, sku }] of variantsByNum(products)) numByKey.set(lineKey({ ref, sku }), num)
   const bytes: number[] = []
+  const nameBytes = [...new TextEncoder().encode(cleanName(name))]
+  if (nameBytes.length > 0) {
+    writeVarint(bytes, NAME_BASE + nameBytes.length)
+    bytes.push(...nameBytes)
+  }
+  const namePart = bytes.length
   for (const l of lines) {
     const num = numByKey.get(lineKey(l))
     if (num === undefined) continue
@@ -149,11 +172,15 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosti
     writeVarint(bytes, hostingNumber(role))
     writeVarint(bytes, 1)
   }
+  // A name with nothing to go with it isn't worth a link.
+  if (bytes.length === namePart) return ''
   return toBase64Url(bytes)
 }
 
 /** What a slug holds: its lines, and how many of them name a variant the catalogue doesn't have. */
 export interface DecodedPlan {
+  /** What it is called; the default when the link doesn't say. */
+  name: string
   lines: PlanLine[]
   unknown: number
   /** The controllers it runs elsewhere. */
@@ -177,8 +204,20 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
   const hosting: Hosting = {}
   const powerEntries: [number, number][] = []
   let unknown = 0
+  let name = ''
   for (let at = 0; at < bytes.length; ) {
     const num = readVarint(bytes, at)
+    if (num && num.value >= NAME_BASE) {
+      const len = num.value - NAME_BASE
+      if (at !== 0 || len < 1 || len > MAX_NAME_BYTES || num.next + len > bytes.length) return null
+      try {
+        name = cleanName(new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes.slice(num.next, num.next + len))))
+      } catch {
+        return null
+      }
+      at = num.next + len
+      continue
+    }
     const qty = num && readVarint(bytes, num.next)
     if (num && qty && num.value >= POWER_BASE && num.value < HOSTING_BASE) {
       // How a switch is powered: the code stands where the quantity does. The variant may come later in the slug, so it is resolved after.
@@ -210,7 +249,7 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     const target = byNum.get(vnum)
     if (target && seen.has(lineKey(target))) powering[lineKey(target)] = code
   }
-  return { lines, unknown, hosting, powering }
+  return { name: name || DEFAULT_PLAN_NAME, lines, unknown, hosting, powering }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */
