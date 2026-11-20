@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -145,5 +146,20 @@ func TestMoneyUsesTheCurrencysOwnUnits(t *testing.T) {
 		if got := money(&c.amount, c.currency); got != c.want {
 			t.Errorf("money(%d, %s) = %q, want %q", c.amount, c.currency, got, c.want)
 		}
+	}
+}
+
+func TestNotificationsNameTheirRegionUnlessItIsTheUS(t *testing.T) {
+	e := store.Event{Kind: store.KindNew, ProductTitle: "Gizmo", NewStatus: "Available", VariantCount: 1}
+	if got := FromEvent(e, "").Title; got != "New product! Gizmo" {
+		t.Errorf("US title = %q", got)
+	}
+	e.Region = "uk"
+	if got := FromEvent(e, "").Title; got != "New product! [UK] Gizmo" {
+		t.Errorf("UK title = %q", got)
+	}
+	e.Kind = store.KindStatus
+	if got := FromEvent(e, "").Title; !strings.HasPrefix(got, "[UK] Gizmo") {
+		t.Errorf("UK status title = %q", got)
 	}
 }

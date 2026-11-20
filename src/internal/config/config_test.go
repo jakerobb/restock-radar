@@ -230,3 +230,23 @@ func TestEveryKnownRegionIsValid(t *testing.T) {
 		t.Errorf("got %d known regions, want 8", len(KnownRegions))
 	}
 }
+
+func TestRegionPollEvery(t *testing.T) {
+	cfg, err := load(t, `
+ntfy: {url: "https://n", topic: t}
+regions:
+  - {id: us}
+  - {id: eu, poll_every: 1h}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Regions[0].PollEvery != 0 || cfg.Regions[1].PollEvery != time.Hour {
+		t.Errorf("poll_every not read: %+v", cfg.Regions)
+	}
+	for _, bad := range []string{"soon", "-1h"} {
+		if _, err := load(t, "ntfy: {url: \"https://n\", topic: t}\nregions:\n  - {id: us, poll_every: "+bad+"}\n"); err == nil {
+			t.Errorf("poll_every %q should be refused", bad)
+		}
+	}
+}

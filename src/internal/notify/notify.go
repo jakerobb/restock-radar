@@ -61,8 +61,17 @@ func money(cents *int64, currency string) string {
 	return fmt.Sprintf("%s%.*f", sym, digits, amount)
 }
 
+// regionTag labels a notification with its store, "[EU] ". The US store is the
+// default and goes unlabelled.
+func regionTag(e store.Event) string {
+	if e.Region == "" || e.Region == "us" {
+		return ""
+	}
+	return "[" + strings.ToUpper(e.Region) + "] "
+}
+
 func name(e store.Event) string {
-	n := e.ProductTitle
+	n := regionTag(e) + e.ProductTitle
 	if e.VariantTitle != "" && !strings.EqualFold(e.VariantTitle, "default") {
 		n += " (" + e.VariantTitle + ")"
 	}
@@ -183,7 +192,7 @@ func FromEvent(e store.Event, storeURL string) Message {
 			m.Tags = []string{"eyes"}
 		}
 	case store.KindNew:
-		m.Title = "New product! " + e.ProductTitle
+		m.Title = "New product! " + regionTag(e) + e.ProductTitle
 		m.Body = newProductBody(e)
 		m.Tags = []string{"new"}
 	case store.KindPrice:
