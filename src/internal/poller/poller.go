@@ -86,6 +86,10 @@ type Poller struct {
 	missing    map[string]time.Time
 
 	lastCycle atomic.Int64 // unix seconds of the last completed cycle
+
+	// diag is what /v1/debug/poller reports. failures and alerted are written
+	// under its lock too, so a snapshot sees them whole.
+	diag diagState
 }
 
 func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poller {
@@ -94,6 +98,7 @@ func New(cfg *config.Config, f Fetcher, s *store.Store, n notify.Notifier) *Poll
 		metrics:  metrics.New(time.Now()),
 		failures: make(map[string]int),
 		alerted:  make(map[string]bool),
+		diag:     newDiagState(time.Now()),
 
 		lastPolled: make(map[string]time.Time),
 		missing:    make(map[string]time.Time),
@@ -125,7 +130,10 @@ func (p *Poller) LastCycle() time.Time {
 func (p *Poller) Run(ctx context.Context) {
 	backoff := 1
 	for {
-		if p.cycle(ctx) {
+		started := time.Now()
+		p.diag.cycleStarted(started)
+		blocked := p.cycle(ctx)
+		if blocked {
 			backoff = min(backoff*2, maxBackoffFactor)
 			slog.Warn("store is blocking or rate limiting; backing off", "factor", backoff)
 		} else {
@@ -135,6 +143,7 @@ func (p *Poller) Run(ctx context.Context) {
 		p.metrics.CycleDone(time.Now())
 
 		wait := p.cfg.PollInterval*time.Duration(backoff) + jitter(p.cfg.PollJitter)
+		p.diag.cycleDone(time.Now(), time.Since(started), blocked, backoff, wait)
 		select {
 		case <-ctx.Done():
 			return
@@ -578,15 +587,22 @@ func (p *Poller) pollItem(ctx context.Context, region config.Region, it store.It
 // which usually means the store's JSON changed shape or the slug went away.
 func (p *Poller) recordFailure(ctx context.Context, region config.Region, it store.Item, err error) {
 	key := itemKey(it)
+	p.diag.mu.Lock()
 	p.failures[key]++
+	failures := p.failures[key]
+	p.diag.lastErr[key] = failureDetail{Error: truncateError(err), At: time.Now().UTC(), Result: fetchResult(err)}
 	p.metrics.SetItemsFailing(len(p.failures))
-	if p.failures[key] < p.cfg.FailureAlertAfter || p.alerted[key] {
+	raise := failures >= p.cfg.FailureAlertAfter && !p.alerted[key]
+	if raise {
+		p.alerted[key] = true
+	}
+	p.diag.mu.Unlock()
+	if !raise {
 		return
 	}
-	p.alerted[key] = true
 	p.sendAlert(ctx, notify.Message{
 		Title:    "Restock Radar: can't check " + it.Slug,
-		Body:     fmt.Sprintf("%d consecutive failures. Last error: %v", p.failures[key], err),
+		Body:     fmt.Sprintf("%d consecutive failures. Last error: %v", failures, err),
 		Priority: 3,
 		Tags:     []string{"warning"},
 	})
@@ -594,15 +610,19 @@ func (p *Poller) recordFailure(ctx context.Context, region config.Region, it sto
 
 func (p *Poller) recordSuccess(ctx context.Context, it store.Item) {
 	key := itemKey(it)
-	if p.alerted[key] {
+	p.diag.mu.Lock()
+	wasAlerted := p.alerted[key]
+	delete(p.failures, key)
+	delete(p.alerted, key)
+	delete(p.diag.lastErr, key)
+	p.metrics.SetItemsFailing(len(p.failures))
+	p.diag.mu.Unlock()
+	if wasAlerted {
 		p.sendAlert(ctx, notify.Message{
 			Title: "Restock Radar: " + it.Slug + " is being checked again",
 			Tags:  []string{"white_check_mark"},
 		})
 	}
-	delete(p.failures, key)
-	delete(p.alerted, key)
-	p.metrics.SetItemsFailing(len(p.failures))
 }
 
 // fetchResult classifies a fetch outcome for the fetches_total metric.

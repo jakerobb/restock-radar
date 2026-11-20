@@ -278,6 +278,7 @@ cross-site form can't send, and refuses a foreign `Origin` or
 | `GET /` | web UI (static files embedded in the binary) |
 | `GET /v1/products` | products with variants grouped, last sync time, pending items |
 | `POST /v1/items` | add a product: `{"item": slug-or-URL, "region": optional}` |
+| `GET /v1/debug/poller` | the poller's in-memory state, which neither SQLite nor the metrics hold and which a restart empties: when the process started, cycles finished, whether one is running and since when, the last one's duration and whether the store blocked it, the backoff factor, when the next is due, and `failing`: every item with a failed fetch since its last success (most failures first) with the consecutive count, whether the alert has gone out, the last error (cut to 500 bytes) and its `fetches_total` result. Needs no permission, like the other reads: it names products and store error text, not people |
 | `GET /v1/status` | counts for the `/status` page: products, categories, specs and techspecs URL coverage, stock, activity, and `by_region`: each configured region's products, variants, in-stock count, ingested categories, newest and stalest check, how often it is read, and how many variants are overdue (unchecked for three read intervals) |
 | `GET /health` | liveness; includes time of last completed poll |
 | `GET /v1/history?days=` | each variant's status and price timeline over the last `days` (default 30, max 365), rebuilt from `events` |
@@ -304,6 +305,16 @@ is refused with a message rather than stored.
 `since` lets a client page forward by remembering the last event ID it saw.
 Reading needs no permission. The routes that change something are wrapped by
 `require(permission, handler)`; see Access control.
+
+### Query subcommand
+
+`restock-radar query "SQL"` (`cmd/query.go`, `internal/dbquery`) runs before any of the service's start-up (no
+logging setup, no migration, no config sync, no poller), so running it in the pod never touches state. It opens the
+database with `mode=ro` and `query_only`, so every write is refused, and takes no write lock; under WAL it reads
+alongside the running service. It exists because the image is `FROM scratch`: `kubectl exec` can run the binary
+where there is no shell, `sqlite3` or `tar`. A database that doesn't exist is an error, not created. Output is TSV
+(`NULL` written out, tabs and newlines escaped so a row is one line) or, with `--json`, an array of objects, capped
+at `--limit` rows (default 1000).
 
 ### Access control
 

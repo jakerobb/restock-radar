@@ -27,6 +27,7 @@ const (
 type Poller interface {
 	Metrics() *metrics.Metrics
 	LastCycle() time.Time
+	Diagnostics() poller.Diagnostics
 	Add(ctx context.Context, input, regionID string) (*poller.AddResult, error)
 	Refresh(ctx context.Context, regionID, slug string) (*poller.RefreshResult, error)
 }
@@ -78,6 +79,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/variants", srv.handleVariants)
 	mux.HandleFunc("GET /v1/events", srv.handleEvents)
 	mux.HandleFunc("GET /v1/status", srv.handleStatus)
+	mux.HandleFunc("GET /v1/debug/poller", srv.handleDebugPoller)
 	// Everything else is the web UI; the patterns above are more specific.
 	mux.Handle("GET /", webui.Handler())
 	return securityHeaders(mux)
@@ -135,6 +137,14 @@ func (srv *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		body["last_poll"] = t.UTC()
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// handleDebugPoller reports the poller's in-memory state (cycle timing, backoff,
+// and which items are failing and why), which neither the database nor the
+// metrics hold. Like the rest of the read API it needs no permission: it names
+// products and store error text, nothing about people.
+func (srv *Server) handleDebugPoller(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, srv.poller.Diagnostics())
 }
 
 func (srv *Server) handleVariants(w http.ResponseWriter, r *http.Request) {

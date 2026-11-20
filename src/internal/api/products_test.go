@@ -34,6 +34,10 @@ func (f *fakePoller) Refresh(_ context.Context, region, slug string) (*poller.Re
 }
 
 func (f *fakePoller) LastCycle() time.Time { return time.Time{} }
+func (f *fakePoller) Diagnostics() poller.Diagnostics {
+	return poller.Diagnostics{Cycles: 3, BackoffFactor: 2, Failing: []poller.ItemFailure{
+		{Item: "us/widget", Consecutive: 4, Alerted: true, LastError: "boom", Result: "error"}}}
+}
 func (f *fakePoller) Metrics() *metrics.Metrics {
 	return metrics.New(time.Unix(1_000, 0))
 }
@@ -446,5 +450,21 @@ func TestStatusBreaksDownByRegion(t *testing.T) {
 	}
 	if uk.ReadEverySeconds != 300 || uk.Variants != 0 || uk.LastCheck != nil || uk.OverdueVariants != 0 {
 		t.Errorf("UK, which holds nothing, is still listed: %+v", uk)
+	}
+}
+
+func TestDebugPoller(t *testing.T) {
+	srv, _ := newTestServer(t)
+	rec := request(srv, "GET", "/v1/debug/poller", "", nil)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
+	for _, want := range []string{`"cycles":3`, `"backoff_factor":2`, `"item":"us/widget"`, `"last_error":"boom"`, `"alerted":true`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("response missing %s: %s", want, rec.Body)
+		}
 	}
 }
