@@ -122,6 +122,23 @@ export interface StatusCategory {
   products: number
 }
 
+/** One region's share of the status numbers, and how often it is read. */
+export interface StatusRegion {
+  region: string
+  products: number
+  variants: number
+  in_stock: number
+  /** Categories whose product lists have been read. */
+  categories: number
+  last_check: string | null
+  oldest_check: string | null
+  /** How often the whole region is read. */
+  read_every_seconds: number
+  /** How long a variant may go unchecked before it counts as overdue. */
+  overdue_after_seconds: number
+  overdue_variants: number
+}
+
 export interface StatusResponse {
   now: string
   products: number
@@ -133,6 +150,8 @@ export interface StatusResponse {
   /** When the poller last finished a pass; null until one has since the server started. */
   last_poll: string | null
   regions: Record<string, number>
+  /** Every configured region, in config order. */
+  by_region: StatusRegion[]
   categories: StatusCategory[]
   /** Products not in any of the categories above (category not learned yet). */
   uncategorized: number

@@ -278,7 +278,7 @@ cross-site form can't send, and refuses a foreign `Origin` or
 | `GET /` | web UI (static files embedded in the binary) |
 | `GET /v1/products` | products with variants grouped, last sync time, pending items |
 | `POST /v1/items` | add a product: `{"item": slug-or-URL, "region": optional}` |
-| `GET /v1/status` | counts for the `/status` page: products, categories, specs and techspecs URL coverage, stock, activity |
+| `GET /v1/status` | counts for the `/status` page: products, categories, specs and techspecs URL coverage, stock, activity, and `by_region`: each configured region's products, variants, in-stock count, ingested categories, newest and stalest check, how often it is read, and how many variants are overdue (unchecked for three read intervals) |
 | `GET /health` | liveness; includes time of last completed poll |
 | `GET /v1/history?days=` | each variant's status and price timeline over the last `days` (default 30, max 365), rebuilt from `events` |
 | `GET /v1/variants?region=` | latest state of every variant |

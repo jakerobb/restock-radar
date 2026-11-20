@@ -406,3 +406,45 @@ func TestRefreshProductIsPostOnlyAndRateLimited(t *testing.T) {
 		t.Errorf("%d refreshes reached the poller, limit %d", len(fp.refreshed), refreshesPerWindow)
 	}
 }
+
+func TestStatusBreaksDownByRegion(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.cfg.PollInterval = 5 * time.Minute
+	srv.cfg.Regions = append(srv.cfg.Regions,
+		config.Region{ID: "eu", BaseURL: "https://eu.store.example", Path: "eu/en", PollEvery: time.Hour},
+		config.Region{ID: "uk", BaseURL: "https://uk.store.example", Path: "uk/en", PollEvery: time.Minute}, // shorter than a cycle: read every cycle
+	)
+	// A variant in a region that is read hourly, last checked two hours ago, and one in the US checked half an hour ago.
+	ctx := context.Background()
+	if _, err := srv.store.Apply(ctx, "eu", &unistore.Product{ID: "e1", Slug: "zeta", Title: "Zeta Cam", Variants: []unistore.Variant{
+		{ID: "ev1", SKU: "ZETA-B-EU", Title: "Black", Status: "Available", Price: &unistore.Money{Amount: 17900, Currency: "EUR"}}}}, time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.Apply(ctx, "us", &unistore.Product{ID: "p1", Slug: "alpha", Title: "Alpha Switch", Variants: []unistore.Variant{
+		{ID: "v1", SKU: "ALPHA", Title: "Default", Status: "SoldOut", Price: &unistore.Money{Amount: 10900, Currency: "USD"}}}}, time.Now().Add(-30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := request(srv, "GET", "/v1/status", "", nil)
+	var got statusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ByRegion) != 3 || got.ByRegion[0].Region != "us" || got.ByRegion[1].Region != "eu" || got.ByRegion[2].Region != "uk" {
+		t.Fatalf("every configured region, in config order: %+v", got.ByRegion)
+	}
+	us, eu, uk := got.ByRegion[0], got.ByRegion[1], got.ByRegion[2]
+	if us.ReadEverySeconds != 300 || us.OverdueAfterSeconds != 900 || us.Variants != 3 || us.Products != 2 {
+		t.Errorf("US: %+v", us)
+	}
+	// Half an hour is long past three 5-minute cycles for the US's variants; for the hourly EU region two hours is not yet three.
+	if us.OverdueVariants == 0 {
+		t.Errorf("US variants checked at test setup and half an hour ago are overdue at 15 minutes: %+v", us)
+	}
+	if eu.ReadEverySeconds != 3600 || eu.OverdueAfterSeconds != 10800 || eu.Variants != 1 || eu.InStock != 1 || eu.OverdueVariants != 0 || eu.OldestCheck == nil {
+		t.Errorf("EU: %+v", eu)
+	}
+	if uk.ReadEverySeconds != 300 || uk.Variants != 0 || uk.LastCheck != nil || uk.OverdueVariants != 0 {
+		t.Errorf("UK, which holds nothing, is still listed: %+v", uk)
+	}
+}

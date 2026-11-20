@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -53,6 +55,76 @@ type Status struct {
 	PendingEvents int
 	FailedEvents  int
 	LatestEvent   *time.Time
+}
+
+// RegionStat is what one region holds and how fresh it is.
+type RegionStat struct {
+	Region     string
+	Products   int
+	Variants   int // not delisted
+	InStock    int
+	Categories int        // ingested
+	LastCheck  *time.Time // the newest variant check
+	Oldest     *time.Time // the stalest
+	// Overdue are the variants not checked since the region's cutoff.
+	Overdue int
+}
+
+// RegionStats counts what each region holds, and how many of its variants were
+// last checked before that region's cutoff (regions are read at different rates,
+// so each has its own). Regions with nothing stored aren't listed.
+func (s *Store) RegionStats(ctx context.Context, cutoff func(region string) time.Time) ([]RegionStat, error) {
+	by := map[string]*RegionStat{}
+	get := func(region string) *RegionStat {
+		if by[region] == nil {
+			by[region] = &RegionStat{Region: region}
+		}
+		return by[region]
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT region, COUNT(*), COALESCE(SUM(status = 'Available'), 0), MAX(last_checked), MIN(last_checked)
+		FROM variants WHERE delisted_at = '' GROUP BY region`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var region string
+		var variants, inStock int
+		var last, oldest sql.NullString
+		if err := rows.Scan(&region, &variants, &inStock, &last, &oldest); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		st := get(region)
+		st.Variants, st.InStock, st.LastCheck, st.Oldest = variants, inStock, parseTS(last), parseTS(oldest)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	products, categories := map[string]int{}, map[string]int{}
+	if err := s.groupCounts(ctx, `SELECT region, COUNT(*) FROM products GROUP BY region`, products); err != nil {
+		return nil, err
+	}
+	if err := s.groupCounts(ctx, `SELECT region, COUNT(*) FROM categories GROUP BY region`, categories); err != nil {
+		return nil, err
+	}
+	for region, n := range products {
+		get(region).Products = n
+	}
+	for region, n := range categories {
+		get(region).Categories = n
+	}
+	out := make([]RegionStat, 0, len(by))
+	for region, st := range by {
+		if c := cutoff(region); !c.IsZero() {
+			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM variants WHERE region = ? AND delisted_at = '' AND last_checked < ?`, region, ts(c)).Scan(&st.Overdue); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, *st)
+	}
+	slices.SortFunc(out, func(a, b RegionStat) int { return strings.Compare(a.Region, b.Region) })
+	return out, nil
 }
 
 // Status gathers the counts behind the status page. Each is a small aggregate
