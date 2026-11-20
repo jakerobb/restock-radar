@@ -627,12 +627,21 @@ export default function PlanPage() {
                 </div>
               ))}
               {totals.unpriced > 0 && <div className="text-sm text-muted">{totals.unpriced === 1 ? '1 line has' : `${totals.unpriced} lines have`} no price and isn't counted.</div>}
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-sm">
                 {shared ? <span /> : clearControl}
                 {totals.notInStock.length === 0 ? (
                   <span className="text-ok">Everything is in stock.</span>
+                ) : totals.notInStock.length === 1 ? (
+                  <span className="text-bad">Not in stock: {totals.notInStock[0]!.product?.title ?? totals.notInStock[0]!.line.ref}.</span>
                 ) : (
-                  <span className="text-bad">Not in stock: {totals.notInStock.map((v) => v.product?.title ?? v.line.ref).join(', ')}.</span>
+                  <div className="text-bad">
+                    Not in stock:
+                    <ul className="list-disc pl-5">
+                      {totals.notInStock.map((v) => (
+                        <li key={v.line.ref + v.line.sku}>{v.product?.title ?? v.line.ref}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             </div>
