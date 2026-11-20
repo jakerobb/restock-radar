@@ -1,5 +1,12 @@
 import { formatMoney, formatPrice, formatRelative, priceLines, priceTitle, totalCents } from './format'
 
+describe('yen', () => {
+  it('are whole yen, not hundredths', () => {
+    expect(formatMoney(33727, 'JPY')).toMatch(/33,727/)
+    expect(formatPrice(33727, 'JPY')).toMatch(/33,727$/)
+  })
+})
+
 describe('formatMoney', () => {
   it('formats minor units as currency', () => {
     expect(formatMoney(10900, 'USD')).toMatch(/\$109\.00/)

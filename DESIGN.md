@@ -111,10 +111,16 @@ the design assumes failure is normal and loud (see Failure handling).
   rename doesn't create a new product.
 - A product can have several variants (colors, regional SKUs). State and
   events are per variant.
-- **Region is part of every key and every API call.** Only the US store
-  (`store.ui.com/us/en`) is configured today, but regions are config
-  (`id`, `base_url`, `path`), stock does not sync across them, and an
-  empty `?region=` means all.
+- **Region is part of every key and every API call.** Eight storefronts
+  answer with product data and are built in (`us`, `ca`, `eu`, `uk`, `jp`, `br`,
+  `tw`, `sg`; each on its own host, with the store's default language in the
+  path, as in `jp/ja`). The store lists six more (`in`, `me`, `za`, `cn`, `mx`,
+  `ph`) that only redirect, so they aren't built in. Regions are config
+  (`id`, `base_url`, `path`), stock does not sync across them (the same product
+  can be in stock in one and coming soon in another), and an empty `?region=`
+  means all.
+- **Money.** Amounts are minor units, except that the store sends yen in whole
+  yen; `minorUnits` (Go) and `minorPerUnit` (UI) know that.
 
 ## Components
 
@@ -374,7 +380,7 @@ a cart link.
 
 Removing products from the UI, per-user subscriptions, device tokens, APNs/FCM, anti-scalper measures
 (jitter, rate limits, device attestation), Live Activities, trend analysis,
-and regions beyond the US. The event history already stores what trend
+and the six regions that only redirect. The event history already stores what trend
 analysis would need. The March design covers those ideas and can be mined
 when the apps start. Per-user build plans and saved-search alerts are planned
 separately in [docs/ui-roadmap.md](docs/ui-roadmap.md), along with the UI,

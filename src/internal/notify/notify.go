@@ -5,6 +5,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -38,15 +39,26 @@ type Notifier interface {
 	Send(ctx context.Context, m Message) error
 }
 
+// minorUnits is how many decimal places a currency's amounts have, for the
+// currencies the store sells in. The store sends yen in whole yen, not in hundredths.
+func minorUnits(currency string) int {
+	if currency == "JPY" {
+		return 0
+	}
+	return 2
+}
+
 func money(cents *int64, currency string) string {
 	if cents == nil {
 		return "n/a"
 	}
-	sym := map[string]string{"USD": "$", "CAD": "CA$", "GBP": "£", "EUR": "€", "AUD": "A$"}[currency]
+	digits := minorUnits(currency)
+	amount := float64(*cents) / math.Pow10(digits)
+	sym := map[string]string{"USD": "$", "CAD": "CA$", "GBP": "£", "EUR": "€", "AUD": "A$", "JPY": "¥", "BRL": "R$", "SGD": "S$", "TWD": "NT$"}[currency]
 	if sym == "" {
-		return fmt.Sprintf("%.2f %s", float64(*cents)/100, currency)
+		return fmt.Sprintf("%.*f %s", digits, amount, currency)
 	}
-	return fmt.Sprintf("%s%.2f", sym, float64(*cents)/100)
+	return fmt.Sprintf("%s%.*f", sym, digits, amount)
 }
 
 func name(e store.Event) string {

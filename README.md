@@ -56,7 +56,7 @@ by that user (in Kubernetes, `fsGroup: 65532`). Run a single replica.
 | `backup_dir` | | where to copy the database; empty turns backups off |
 | `backup_interval`, `backup_keep` | `24h`, `14` | how often, and how many copies to keep |
 | `ntfy.url`, `ntfy.topic`, `ntfy.token` | | `${ENV_VAR}` is expanded |
-| `regions[]` | US | `id`, `base_url`, `path` (e.g. `us/en`) |
+| `regions[]` | US | `id`, and for one the store doesn't list, `base_url` and `path` (e.g. `us/en`). Built in: `us`, `ca`, `eu`, `uk`, `jp`, `br`, `tw`, `sg`; a bare `{id: eu}` is enough |
 | `items[]` | | `slug`, optional `region`; may be empty if you add products in the UI |
 
 The config is read from `CONFIG_PATH`, else `/etc/restock-radar/config.yaml`.

@@ -186,3 +186,47 @@ func TestAuthValidationErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownRegionsFillInTheirOwnStore(t *testing.T) {
+	cfg, err := load(t, `
+ntfy: {url: "https://n", topic: t}
+regions:
+  - {id: us}
+  - {id: jp}
+  - {id: eu, path: eu/de}
+  - {id: x, base_url: "https://x.example", path: x/en}
+items:
+  - {slug: a, region: jp}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"us": {"https://store.ui.com", "us/en"},
+		"jp": {"https://jp.store.ui.com", "jp/ja"},
+		"eu": {"https://eu.store.ui.com", "eu/de"},
+		"x":  {"https://x.example", "x/en"},
+	}
+	for _, r := range cfg.Regions {
+		if got := [2]string{r.BaseURL, r.Path}; got != want[r.ID] {
+			t.Errorf("%s = %v, want %v", r.ID, got, want[r.ID])
+		}
+	}
+	r, _, err := cfg.ParseItem("https://jp.store.ui.com/jp/ja/products/unas-2", "")
+	if err != nil || r.ID != "jp" {
+		t.Errorf("a JP store URL should pick jp: %v %v", r, err)
+	}
+}
+
+func TestEveryKnownRegionIsValid(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range KnownRegions {
+		if seen[r.ID] || !strings.HasPrefix(r.Path, r.ID+"/") || !strings.HasPrefix(r.BaseURL, "https://") {
+			t.Errorf("bad known region %+v", r)
+		}
+		seen[r.ID] = true
+	}
+	if len(KnownRegions) != 8 {
+		t.Errorf("got %d known regions, want 8", len(KnownRegions))
+	}
+}
