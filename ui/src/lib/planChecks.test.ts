@@ -71,8 +71,8 @@ describe('planChecks', () => {
     expect(byId([ap(10, 13), ap(1, null), sw(1, 100)])['poe-power']?.verdict).toBe('bad') // 130 W drawn vs 100 W, plus one unknown
   })
 
-  it('reports a lone side as information, not a failure (the other half may already be owned)', () => {
-    expect(byId([ap(3)])['poe-power']).toMatchObject({ verdict: 'info', text: expect.stringContaining('nothing in the plan supplies PoE') })
+  it('calls PoE-powered devices with nothing to supply PoE bad, and a lone supplier information', () => {
+    expect(byId([ap(3)])['poe-power']).toMatchObject({ verdict: 'bad', shortfall: true, text: expect.stringContaining('nothing in the plan supplies PoE') })
     expect(byId([sw(1, 100)])['poe-power']).toMatchObject({ verdict: 'info', text: expect.stringContaining('no PoE-powered device') })
     expect(byId([ap(3)])['poe-ports']).toBeUndefined()
   })
