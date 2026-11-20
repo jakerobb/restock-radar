@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { useStatus } from '../api/queries'
-import type { Presence, StatusResponse } from '../api/types'
+import type { Presence, StatusRegion, StatusResponse } from '../api/types'
 import { formatExact } from '../lib/format'
+import { regionName } from '../lib/region'
 import { statusInfo } from '../lib/status'
 import { RelativeTime } from './RelativeTime'
 import { Card } from './ui/Card'
@@ -43,6 +44,60 @@ function Time({ iso }: { iso: string | null }) {
         <RelativeTime iso={iso} />
       </span>
     </>
+  )
+}
+
+/** "5 minutes", "1 hour": how often something is read. */
+export function every(seconds: number): string {
+  if (seconds % 3600 === 0) return seconds === 3600 ? '1 hour' : `${seconds / 3600} hours`
+  if (seconds % 60 === 0) return seconds === 60 ? '1 minute' : `${seconds / 60} minutes`
+  return `${seconds} seconds`
+}
+
+/** What each region holds and how fresh it is, judged against how often that region is read. */
+function RegionsCard({ regions }: { regions: StatusRegion[] }) {
+  return (
+    <Card aria-label="Regions" className="overflow-x-auto sm:col-span-2">
+      <h2 className="font-semibold">Regions</h2>
+      <table className="mt-2 w-full min-w-max border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-muted">
+            <th className="py-1.5 pr-3 font-normal">Region</th>
+            <th className="px-3 py-1.5 text-right font-normal">Products</th>
+            <th className="px-3 py-1.5 text-right font-normal">Variants</th>
+            <th className="px-3 py-1.5 text-right font-normal">In stock</th>
+            <th className="px-3 py-1.5 text-right font-normal">Categories</th>
+            <th className="px-3 py-1.5 font-normal">Read every</th>
+            <th className="px-3 py-1.5 font-normal">Newest check</th>
+            <th className="py-1.5 pl-3 font-normal">Stalest check</th>
+          </tr>
+        </thead>
+        <tbody>
+          {regions.map((r) => (
+            <tr key={r.region} className="border-b border-line align-top">
+              <th scope="row" className="py-1.5 pr-3 text-left font-medium">
+                {regionName(r.region)}
+              </th>
+              <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(r.products)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(r.variants)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(r.in_stock)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(r.categories)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap">{every(r.read_every_seconds)}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap">{r.last_check ? <RelativeTime iso={r.last_check} /> : <span className="text-muted">never</span>}</td>
+              <td className="py-1.5 pl-3 whitespace-nowrap">
+                {r.oldest_check ? <RelativeTime iso={r.oldest_check} /> : <span className="text-muted">never</span>}
+                {r.overdue_variants > 0 && (
+                  <span className="block text-bad">
+                    {nf.format(r.overdue_variants)} overdue (over {every(r.overdue_after_seconds)})
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-xs text-muted">A variant is overdue when it has gone unchecked for three of its region's read intervals. A product the store has dropped from a region can stay overdue for good.</p>
+    </Card>
   )
 }
 
@@ -99,6 +154,8 @@ function StatusContent({ s }: { s: StatusResponse }) {
           </Stat>
         </dl>
       </Card>
+
+      {s.by_region.length > 1 && <RegionsCard regions={s.by_region} />}
 
       <Card aria-label="Categories" className="sm:col-span-2">
         <h2 className="font-semibold">

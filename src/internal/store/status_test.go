@@ -84,3 +84,47 @@ func TestStatusCountsEverything(t *testing.T) {
 		t.Errorf("variants by status: %v", st.VariantsByStatus)
 	}
 }
+
+func TestRegionStats(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, c := range []struct {
+		region, id string
+		status     string
+		at         time.Time
+	}{
+		{"us", "a", "Available", now},
+		{"us", "b", "SoldOut", now.Add(-10 * time.Minute)},
+		{"eu", "c", "Available", now.Add(-2 * time.Hour)},
+	} {
+		p := product(c.status, 10900)
+		p.ID, p.Slug = c.id, "slug-"+c.id
+		p.Variants[0].ID = "v-" + c.id
+		if _, err := s.Apply(ctx, c.region, p, c.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.MarkCategoriesSeen(ctx, "us", []string{"x", "y"}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	cutoffs := map[string]time.Time{"us": now.Add(-5 * time.Minute), "eu": now.Add(-3 * time.Hour)}
+	stats, err := s.RegionStats(ctx, func(r string) time.Time { return cutoffs[r] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 2 || stats[0].Region != "eu" || stats[1].Region != "us" {
+		t.Fatalf("regions, sorted: %+v", stats)
+	}
+	eu, us := stats[0], stats[1]
+	if eu.Products != 1 || eu.Variants != 1 || eu.InStock != 1 || eu.Categories != 0 || eu.Overdue != 0 {
+		t.Errorf("eu: %+v", eu)
+	}
+	if us.Products != 2 || us.Variants != 2 || us.InStock != 1 || us.Categories != 2 || us.Overdue != 1 {
+		t.Errorf("us: %+v", us)
+	}
+	if us.LastCheck == nil || !us.LastCheck.Equal(now) || us.Oldest == nil || !us.Oldest.Equal(now.Add(-10*time.Minute)) {
+		t.Errorf("us checks: %v %v", us.LastCheck, us.Oldest)
+	}
+}
