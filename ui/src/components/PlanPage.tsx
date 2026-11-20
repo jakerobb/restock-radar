@@ -15,7 +15,7 @@ import { buildTopology } from '../lib/topology'
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
-import { MAX_PLANS } from '../lib/planStore'
+import { MAX_PLANS, nameTaken, uniqueName } from '../lib/planStore'
 import { Dialog } from './Dialog'
 import { PageNav } from './PageNav'
 import { TopologyGraph } from './TopologyGraph'
@@ -398,6 +398,7 @@ function PlanSwitcher() {
           label="Name"
           initial={name}
           submit="Rename"
+          taken={(n) => nameTaken(plans, n, activeId)}
           onSubmit={(n) => {
             rename(n)
             close()
@@ -409,8 +410,9 @@ function PlanSwitcher() {
         <NamePlanDialog
           title="New plan"
           label="Name"
-          initial={`Plan ${plans.length + 1}`}
+          initial={uniqueName(plans, `Plan ${plans.length + 1}`)}
           submit="Create"
+          taken={(n) => nameTaken(plans, n)}
           onSubmit={(n) => {
             create(n)
             close()
@@ -564,8 +566,9 @@ export default function PlanPage() {
         <NamePlanDialog
           title="Save as a new plan"
           label="Name for your copy"
-          initial={decoded.name}
+          initial={uniqueName(mine.plans, decoded.name)}
           submit="Save"
+          taken={(n) => nameTaken(mine.plans, n)}
           onSubmit={(n) => {
             mine.create(n, views.map((v) => ({ ...v.line, addedCents: v.unitCents })), decoded.hosting, decoded.powering)
             setSaving(false)

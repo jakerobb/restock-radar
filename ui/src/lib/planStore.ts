@@ -1,4 +1,4 @@
-import { cleanName, DEFAULT_PLAN_NAME, parsePlan, serializeLine, type PlanLine } from './plan'
+import { cleanName, DEFAULT_PLAN_NAME, MAX_NAME, parsePlan, serializeLine, type PlanLine } from './plan'
 import type { Powering } from './powering'
 import { HOSTED_ROLES, type Hosting } from './roles'
 
@@ -29,6 +29,21 @@ const newId = (): string => Math.random().toString(36).slice(2, 10) + Date.now()
 
 const blank = (name = DEFAULT_PLAN_NAME): NamedPlan => ({ id: newId(), name, lines: [], hosting: {}, powering: {} })
 
+const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
+
+/** Whether a plan other than `exceptId` already has this name (capitals don't tell names apart). */
+export const nameTaken = (plans: NamedPlan[], name: string, exceptId?: string): boolean => plans.some((p) => p.id !== exceptId && same(p.name, cleanName(name)))
+
+/** The name, or, when a plan has it, the name with " (2)", " (3)"... after it, cut to fit MAX_NAME. */
+export function uniqueName(plans: NamedPlan[], name: string, exceptId?: string): string {
+  const base = cleanName(name) || DEFAULT_PLAN_NAME
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? '' : ` (${n})`
+    const candidate = (Array.from(base).slice(0, MAX_NAME - suffix.length).join('').trim() + suffix).trim()
+    if (!nameTaken(plans, candidate, exceptId)) return candidate
+  }
+}
+
 function parseHosting(raw: unknown): Hosting {
   const out: Hosting = {}
   if (raw && typeof raw === 'object') for (const role of HOSTED_ROLES) if ((raw as Record<string, unknown>)[role] === 'self') out[role] = 'self'
@@ -50,7 +65,7 @@ function parsePlans(raw: unknown): State | null {
   for (const p of plans as Record<string, unknown>[]) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || p.id === '' || ids.has(p.id)) continue
     ids.add(p.id)
-    out.push({ id: p.id, name: cleanName(p.name) || DEFAULT_PLAN_NAME, lines: parsePlan(p.lines), hosting: parseHosting(p.hosting), powering: parsePowering(p.powering) })
+    out.push({ id: p.id, name: uniqueName(out, cleanName(p.name) || DEFAULT_PLAN_NAME), lines: parsePlan(p.lines), hosting: parseHosting(p.hosting), powering: parsePowering(p.powering) })
     if (out.length >= MAX_PLANS) break
   }
   const first = out[0]
@@ -111,10 +126,12 @@ export const setPowering = (next: Powering): void => updateActive({ powering: ne
 /** The name of the plan being edited. */
 export const getPlanName = (): string => activePlan(read()).name
 
-/** Renames the plan being edited; a blank name leaves it as it was. */
-export function renamePlan(name: string): void {
+/** Renames the plan being edited. A blank name, or one another plan has, leaves it as it was and says so (false). */
+export function renamePlan(name: string): boolean {
   const clean = cleanName(name)
-  if (clean) updateActive({ name: clean })
+  if (!clean || nameTaken(read().plans, clean, read().active)) return false
+  updateActive({ name: clean })
+  return true
 }
 
 /** All the plans. The same array is returned until one changes. */
@@ -128,11 +145,12 @@ export function selectPlan(id: string): void {
   if (id !== s.active && s.plans.some((p) => p.id === id)) commit({ ...s, active: id })
 }
 
-/** Adds a plan and switches to it; null when there are already as many as there can be. */
+/** Adds a plan and switches to it; null when there are already as many as there can be, or another has the name. */
 export function createPlan(name: string, lines: PlanLine[] = [], hosting: Hosting = {}, powering: Powering = {}): string | null {
   const s = read()
-  if (s.plans.length >= MAX_PLANS) return null
-  const plan: NamedPlan = { ...blank(cleanName(name) || DEFAULT_PLAN_NAME), lines, hosting, powering }
+  const clean = cleanName(name) || DEFAULT_PLAN_NAME
+  if (s.plans.length >= MAX_PLANS || nameTaken(s.plans, clean)) return null
+  const plan: NamedPlan = { ...blank(clean), lines, hosting, powering }
   commit({ plans: [...s.plans, plan], active: plan.id })
   return plan.id
 }
