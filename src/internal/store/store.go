@@ -330,6 +330,9 @@ var migrations = []string{
 		created_at TEXT NOT NULL,
 		created_by TEXT NOT NULL DEFAULT ''
 	);`,
+	// What the store called the size the dimensions were read from ("Device",
+	// "Without mount"); empty when it gave one, unlabelled.
+	`ALTER TABLE product_derived ADD COLUMN dim_label TEXT NOT NULL DEFAULT '';`,
 }
 
 type Store struct {

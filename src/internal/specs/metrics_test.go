@@ -264,13 +264,44 @@ func TestDimsLabelsOnTheirOwnLine(t *testing.T) {
 	}
 }
 
+func TestDimsTakesTheSmallestVolumeWhenNothingElseSettlesIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, label string
+		max             float64
+	}{
+		{"packaging is set aside", "Packaging: 500 x 400 x 100 mm\nCase: 442 x 325 x 44 mm\nBase: 400 x 300 x 20 mm", "Base", 400},
+		{"with mount and cover", "With mount: 170 x 208 x 121.8 mm\nWith cover: 170 x 208 x 130 mm", "With mount", 208},
+		{"without mount and cover", "Without mount: 170 x 208 x 66.5 mm\nWithout cover: 170 x 208 x 60 mm", "Without cover", 208},
+		{"three mounts", "With antenna: 159 x 82 x 26 mm\nWith wall mount: 159 x 82 x 30 mm\nWith DIN rail mount: 159 x 82 x 38 mm", "With antenna", 159},
+		{"unlabelled alternatives", "120 x 80 x 30 mm\n200 x 150 x 40 mm", "", 120},
+		{"packaging only", "Packaging: 500 x 400 x 100 mm", "Packaging", 500},
+		{"a round one among boxes", "With stand: 300 x 300 x 300 mm\nWith wall mount: ⌀100 x 40 mm", "With wall mount", 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := dimsOf("", tc.in)
+			if !r.Known.Dims || r.Dims.MaxMM != tc.max || r.Dims.Label != tc.label || len(r.Issues) != 0 {
+				t.Errorf("dims = %+v known %v issues %+v", r.Dims, r.Known.Dims, r.Issues)
+			}
+		})
+	}
+}
+
+func TestDimsKeepsTheLabelOfTheSizeChosen(t *testing.T) {
+	r := dimsOf("", "Device: 120 x 80 x 30 mm\nTable stand: 200 x 150 x 40 mm")
+	if r.Dims.Label != "Device" {
+		t.Errorf("label = %q", r.Dims.Label)
+	}
+	r = dimsOf("", "Without mount: 170 x 208 x 66.5 mm\nWith mount: 170 x 208 x 121.8 mm")
+	if r.Dims.Label != "Without mount" {
+		t.Errorf("label = %q", r.Dims.Label)
+	}
+	if r = dimsOf("", "442 x 325 x 44 mm"); r.Dims.Label != "" {
+		t.Errorf("an unlabelled size has no label, got %q", r.Dims.Label)
+	}
+}
+
 func TestDimsRefusesToGuess(t *testing.T) {
 	for _, in := range []string{
-		"Packaging: 500 x 400 x 100 mm\nCase: 442 x 325 x 44 mm\nBase: 400 x 300 x 20 mm",
-		"With mount: 170 x 208 x 121.8 mm\nWith cover: 170 x 208 x 130 mm",
-		"Without mount: 170 x 208 x 66.5 mm\nWithout cover: 170 x 208 x 60 mm",
-		"With antenna: 159 x 82 x 26 mm\nWith wall mount: 159 x 82 x 30 mm\nWith DIN rail mount: 159 x 82 x 38 mm",
-		"120 x 80 x 30 mm\n200 x 150 x 40 mm",
 		"120 x 80 mm",
 		"approximately a shoebox",
 	} {

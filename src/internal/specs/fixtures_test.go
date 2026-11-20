@@ -208,27 +208,22 @@ func TestRealDeviceWithNoPorts(t *testing.T) {
 	}
 }
 
-func TestRealDimensionsAreFlaggedNotGuessed(t *testing.T) {
+func TestRealDimensionsTakeTheSmallestVolume(t *testing.T) {
 	// The Toolless Mini Rack gives the rack with and without its handle and
 	// caster: the bare one is taken.
 	if d := derived(t, "toolless-mini-rack").Dims; d.MinMM != 351 || d.MaxMM != 519 {
 		t.Errorf("toolless-mini-rack: dims = %+v", d)
 	}
 	// The USL gateway gives its size three ways (with antenna, DIN rail or wall
-	// mount), none of them the bare device.
-	for _, slug := range []string{"usl-gateway"} {
-		r := derived(t, slug)
-		if r.Known.Dims {
-			t.Errorf("%s: dims %+v", slug, r.Dims)
-		}
-		found := false
-		for _, is := range r.Issues {
-			if is.Area == "dims" {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("%s: no dims issue", slug)
+	// mount), none of them labelled as the bare device: the smallest is taken,
+	// and says which it is.
+	r := derived(t, "usl-gateway")
+	if !r.Known.Dims || r.Dims.Label != "With antenna" || r.Dims.MaxMM != 159.3 {
+		t.Errorf("usl-gateway: dims %+v known %v", r.Dims, r.Known.Dims)
+	}
+	for _, is := range r.Issues {
+		if is.Area == "dims" {
+			t.Errorf("usl-gateway: unexpected dims issue %+v", is)
 		}
 	}
 }

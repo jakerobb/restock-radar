@@ -175,10 +175,10 @@ func storeDerived(ctx context.Context, tx *sql.Tx, region, productID string, r s
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO product_derived (region, product_id, version, derived_at, known_ports, known_poe, known_radios, known_rack, known_dims,
-			poe_max_class, rackmount, rack_units, full_depth, dim_min_mm, dim_mid_mm, dim_max_mm, dim_round, width_mm, depth_mm, height_mm, overridden, issues)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			poe_max_class, rackmount, rack_units, full_depth, dim_min_mm, dim_mid_mm, dim_max_mm, dim_round, dim_label, width_mm, depth_mm, height_mm, overridden, issues)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		region, productID, specs.Version, ts(now), b2i(r.Known.Ports), b2i(r.Known.PoE), b2i(r.Known.Radios), b2i(r.Known.Rack), b2i(r.Known.Dims),
-		r.PoEMaxClass, b2i(r.Rack.Mountable), r.Rack.Units, b2i(r.Rack.FullDepth), minMM, midMM, maxMM, b2i(d.Round),
+		r.PoEMaxClass, b2i(r.Rack.Mountable), r.Rack.Units, b2i(r.Rack.FullDepth), minMM, midMM, maxMM, b2i(d.Round), d.Label,
 		nullF(d.WidthMM), nullF(d.DepthMM), nullF(d.HeightMM), string(overridden), string(issues)); err != nil {
 		return fmt.Errorf("storing derived product: %w", err)
 	}
@@ -314,7 +314,7 @@ func (s *Store) derived(ctx context.Context, where string, args ...any) ([]Deriv
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT d.region, d.product_id, p.slug, p.title, p.category, d.version, d.derived_at,
 			d.known_ports, d.known_poe, d.known_radios, d.known_rack, d.known_dims, d.poe_max_class,
-			d.rackmount, d.rack_units, d.full_depth, d.dim_min_mm, d.dim_mid_mm, d.dim_max_mm, d.dim_round,
+			d.rackmount, d.rack_units, d.full_depth, d.dim_min_mm, d.dim_mid_mm, d.dim_max_mm, d.dim_round, d.dim_label,
 			d.width_mm, d.depth_mm, d.height_mm, d.overridden, d.issues
 		FROM product_derived d JOIN products p ON p.region = d.region AND p.id = d.product_id
 		`+where+` ORDER BY p.slug, d.region`, args...)
@@ -327,16 +327,17 @@ func (s *Store) derived(ctx context.Context, where string, args ...any) ([]Deriv
 		var d DerivedProduct
 		var at, overridden, issues string
 		var kp, kpoe, kr, krack, kd, mount, full, round int
+		var dimLabel string
 		var mn, md, mx, w, dep, h sql.NullFloat64
 		if err := rows.Scan(&d.Region, &d.ProductID, &d.Slug, &d.Title, &d.Category, &d.Version, &at,
-			&kp, &kpoe, &kr, &krack, &kd, &d.PoEMaxClass, &mount, &d.Rack.Units, &full, &mn, &md, &mx, &round, &w, &dep, &h, &overridden, &issues); err != nil {
+			&kp, &kpoe, &kr, &krack, &kd, &d.PoEMaxClass, &mount, &d.Rack.Units, &full, &mn, &md, &mx, &round, &dimLabel, &w, &dep, &h, &overridden, &issues); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		d.DerivedAt, _ = time.Parse(time.RFC3339, at)
 		d.Known = specs.Known{Ports: kp == 1, PoE: kpoe == 1, Radios: kr == 1, Rack: krack == 1, Dims: kd == 1}
 		d.Rack.Mountable, d.Rack.FullDepth = mount == 1, full == 1
-		d.Dims.Round = round == 1
+		d.Dims.Round, d.Dims.Label = round == 1, dimLabel
 		d.Dims.MinMM, d.Dims.MidMM, d.Dims.MaxMM = mn.Float64, md.Float64, mx.Float64
 		d.Dims.WidthMM, d.Dims.DepthMM, d.Dims.HeightMM = optF(w), optF(dep), optF(h)
 		d.Ports, d.PoEBudget, d.Radios, d.Metrics, d.Power = []specs.Port{}, []specs.PoEScenario{}, []specs.Radio{}, []specs.Metric{}, []specs.PowerSource{}

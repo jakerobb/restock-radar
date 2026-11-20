@@ -240,6 +240,8 @@ export interface Dims {
   mid_mm: number
   max_mm: number
   round?: boolean
+  /** What the store called the size ("Device", "Without mount"), when it labelled it. */
+  label?: string
   width_mm?: number | null
   depth_mm?: number | null
   height_mm?: number | null
