@@ -240,6 +240,16 @@ describe('PlanPage', () => {
     expect(totals).toHaveTextContent('Not in stock: Sold Out Thing.')
   })
 
+  it('lists several lines that are not in stock one per line under a heading', async () => {
+    catalog()
+    setPlan([line({}), line({ ref: 'us/gone-stock', sku: 'SO-1', addedCents: 5000 }), line({ ref: 'us/vanished', sku: 'X' })])
+    renderRoute('/plan')
+    const totals = await screen.findByLabelText('Totals')
+    await waitFor(() => expect(within(totals).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Sold Out Thing', 'us/vanished']))
+    expect(totals).toHaveTextContent('Not in stock:')
+    expect(totals).not.toHaveTextContent('Sold Out Thing, us/vanished')
+  })
+
   it('changes a quantity and a variant, and removes a line', async () => {
     catalog()
     const user = userEvent.setup()
