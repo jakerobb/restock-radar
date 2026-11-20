@@ -1,5 +1,5 @@
 import type { Port } from '../api/types'
-import type { DerivedLine, PlanCheck, Trace } from './planChecks'
+import type { DerivedLine, Link, PlanCheck, Trace } from './planChecks'
 import { formatSpeed } from './requirements'
 import { isGatewayProduct } from './roles'
 
@@ -163,6 +163,7 @@ interface Placed {
   group: Group
   speed: number
   module: boolean
+  cage: boolean
 }
 
 /**
@@ -274,14 +275,26 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
     }
     if (best) {
       best.g.free--
-      placed[i] = { group: best.g, speed: best.f.speed, module: best.f.module }
+      placed[i] = { group: best.g, speed: best.f.speed, module: best.f.module, cage: best.f.cage }
     }
   }
 
   const lostDevices = devices.filter((_, i) => placed[i] === null)
   if (trace) {
-    trace.uplinks = links.map((l) => ({ unit: l.unit, parent: l.parent }))
-    trace.portHosts = devices.flatMap((d, i) => (placed[i] ? [{ line: d.line, host: placed[i]!.group.unit }] : []))
+    const ref = (u: Unit) => ({ line: u.line, n: u.n })
+    const media = (cage: string, copper: boolean) => (copper ? 'RJ45' : cage || 'SFP')
+    trace.uplinks = links.map((l) => ({
+      unit: ref(l.unit),
+      parent: l.parent && ref(l.parent),
+      link: { speed: l.speed, media: l.kind === 'module' ? 'RJ45 via SFP module' : media(l.group.cage || l.parentGroup?.cage || '', l.kind === 'copper' || (l.kind === 'external' && l.group.media === 'rj45')), capable: Math.max(0, ...l.unit.groups.map((g) => g.speed)) },
+    }))
+    trace.portHosts = devices.flatMap((d, i) => {
+      const at = placed[i]
+      if (!at) return []
+      const link: Link = { speed: at.speed, media: at.module ? 'RJ45 via SFP module' : media(at.group.cage, !at.cage), capable: Math.max(d.rj45 ?? 0, d.sfp ?? 0) }
+      return [{ line: d.line, host: ref(at.group.unit), link }]
+    })
+    trace.spare = units.map((u) => ({ unit: ref(u), spare: u.groups.reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0) }))
     trace.portLost = lostDevices.map((d) => d.line)
   }
   const lost = lostDevices.length + noUplink.length + poeShort

@@ -1,5 +1,5 @@
 import { lineKey } from './plan'
-import { planChecks, type DerivedLine, type Trace, type UnitRef } from './planChecks'
+import { planChecks, type DerivedLine, type Link, type Trace, type UnitRef } from './planChecks'
 import type { Hosting } from './roles'
 import { isGatewayProduct } from './roles'
 import type { Powering } from './powering'
@@ -12,6 +12,10 @@ export interface TopoNode {
   kind: 'gateway' | 'switch' | 'device'
   /** How many identical devices the box stands for. */
   qty: number
+  /** How it is plugged in, as "10GbE SFP+"; absent for a gateway, and for what has no port to be on. */
+  uplink?: { label: string; /** True when the link runs slower than the device could. */ slow: boolean }
+  /** Ports left free on a switch. */
+  spare?: number
   /** What is plugged into it: other switches first, then devices. */
   children: TopoNode[]
 }
@@ -25,6 +29,9 @@ export interface Topology {
 
 const name = (l: DerivedLine) => l.view.product?.title ?? l.view.line.ref
 const unitKey = (u: UnitRef) => `${lineKey(u.line.view.line)}#${u.n}`
+/** A speed as "10GbE", "2.5GbE" or "100Mbps"; empty when the store doesn't say. */
+const speedText = (mbps: number) => (!Number.isFinite(mbps) ? '' : mbps >= 1000 ? `${mbps / 1000}GbE` : `${mbps}Mbps`)
+const uplinkOf = (l: Link): NonNullable<TopoNode['uplink']> => ({ label: [speedText(l.speed), l.media].filter(Boolean).join(' '), slow: Number.isFinite(l.speed) && Number.isFinite(l.capable) && l.speed < l.capable })
 const isSwitch = (l: DerivedLine) => l.view.product?.type === 'Switches'
 
 /**
@@ -46,21 +53,25 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
   const gateways = units.filter((u) => u.kind === 'gateway')
 
   const parentOf = new Map<string, UnitRef | null>(trace.uplinks?.map((l) => [unitKey(l.unit), l.parent]))
+  const linkOf = new Map(trace.uplinks?.map((l) => [unitKey(l.unit), uplinkOf(l.link)]))
+  const spareOf = new Map(trace.spare?.map((s) => [unitKey(s.unit), s.spare]))
   const children = new Map<string, TopoNode[]>()
   const add = (host: UnitRef, node: TopoNode) => children.set(unitKey(host), [...(children.get(unitKey(host)) ?? []), node])
 
   // Devices on the same switch that are the same product share a box.
-  const groups = new Map<string, { host: UnitRef; line: DerivedLine; n: number }>()
+  // (Unless they are plugged in differently, which would otherwise be hidden.)
+  const groups = new Map<string, { host: UnitRef; line: DerivedLine; n: number; uplink: TopoNode['uplink'] }>()
   for (const h of [...(trace.portHosts ?? []), ...(trace.poeHosts ?? [])]) {
-    const key = `${unitKey(h.host)}|${lineKey(h.line.view.line)}`
+    const uplink = uplinkOf(h.link)
+    const key = `${unitKey(h.host)}|${lineKey(h.line.view.line)}|${uplink.label}|${uplink.slow}`
     const g = groups.get(key)
     if (g) g.n++
-    else groups.set(key, { host: h.host, line: h.line, n: 1 })
+    else groups.set(key, { host: h.host, line: h.line, n: 1, uplink })
   }
   const devices = [...groups.entries()].sort((a, b) => name(a[1].line).localeCompare(name(b[1].line)))
-  for (const [key, g] of devices) add(g.host, { key, title: name(g.line), kind: 'device', qty: g.n, children: [] })
+  for (const [key, g] of devices) add(g.host, { key, title: name(g.line), kind: 'device', qty: g.n, uplink: g.uplink, children: [] })
 
-  const node = (u: { ref: UnitRef; kind: 'gateway' | 'switch' }): TopoNode => ({ key: unitKey(u.ref), title: title(u.ref), kind: u.kind, qty: 1, children: [] })
+  const node = (u: { ref: UnitRef; kind: 'gateway' | 'switch' }): TopoNode => ({ key: unitKey(u.ref), title: title(u.ref), kind: u.kind, qty: 1, ...(u.kind === 'switch' ? { uplink: linkOf.get(unitKey(u.ref)), spare: spareOf.get(unitKey(u.ref)) } : {}), children: [] })
   const nodes = new Map(units.map((u) => [unitKey(u.ref), node(u)] as const))
   const roots: TopoNode[] = gateways.map((g) => nodes.get(unitKey(g.ref))!)
   const unconnected: TopoNode[] = []

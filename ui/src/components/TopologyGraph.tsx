@@ -9,6 +9,16 @@ function Box({ node }: { node: TopoNode }) {
     <div className={`rounded-lg border bg-surface px-3 py-1.5 text-center text-sm ${tone}`}>
       {node.title}
       {node.qty > 1 && <span className="text-muted"> × {node.qty}</span>}
+      {(node.uplink || node.spare !== undefined) && (
+        <div className="mt-0.5 flex justify-between gap-4 whitespace-nowrap text-left text-xs">
+          <span className={node.uplink?.slow ? 'text-warn' : 'text-muted'}>{node.uplink && `Uplink: ${node.uplink.label}`}</span>
+          {node.spare !== undefined && (
+            <span className="text-right text-muted">
+              {node.spare} spare {node.spare === 1 ? 'port' : 'ports'}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

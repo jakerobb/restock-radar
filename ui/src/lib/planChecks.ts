@@ -19,16 +19,28 @@ export interface UnitRef {
   n: number
 }
 
+/** How a device is plugged in: what the cable runs at, what the port is, and what the device could do given a better port. */
+export interface Link {
+  /** Mbps; Infinity when the store doesn't say. */
+  speed: number
+  /** The port as a person would name it: RJ45, SFP+, and so on. */
+  media: string
+  /** The fastest port the device has, in Mbps; Infinity when unknown. */
+  capable: number
+}
+
 /** Where the checks put things, for drawing the plan as a graph: filled in by the checks as they run. */
 export interface Trace {
   /** The devices on a switch for their power (and so their port): a PoE one, but not a switch. */
-  poeHosts?: { line: DerivedLine; host: UnitRef }[]
+  poeHosts?: { line: DerivedLine; host: UnitRef; link: Link }[]
   /** PoE devices with no switch to be on. */
   poeLost?: DerivedLine[]
   /** What each switch plugs into; null for the network outside the plan. */
-  uplinks?: { unit: UnitRef; parent: UnitRef | null }[]
+  uplinks?: { unit: UnitRef; parent: UnitRef | null; link: Link }[]
   /** The other devices on a switch or gateway port. */
-  portHosts?: { line: DerivedLine; host: UnitRef }[]
+  portHosts?: { line: DerivedLine; host: UnitRef; link: Link }[]
+  /** The ports each switch or gateway has left once everything is plugged in. */
+  spare?: { unit: UnitRef; spare: number }[]
   /** Devices that got no port. */
   portLost?: DerivedLine[]
 }
@@ -318,10 +330,10 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
   for (const l of consumers) for (let i = 0; i < qty(l); i++) placing.push({ line: l, rank: rank(needs.get(l)!), speed: (l.derived && deviceSpeed(l.derived)) ?? 0, draw: drawOf(l) ?? 0 })
   const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
   const budgets = units.map((u) => budget(u.line).watts ?? Infinity)
-  const groups: { unit: number; label: string; count: number; rank: number }[] = []
+  const groups: { unit: number; label: string; count: number; rank: number; speed: number }[] = []
   const socketList: Socket[] = units.flatMap((u, unit) =>
     poePortsOut(u.line.derived!).flatMap((p) => {
-      const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count, rank: rank(p.poe_class) }) - 1
+      const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count, rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity }) - 1
       return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group }))
     }),
   )
@@ -382,7 +394,7 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
   }
   const stranded = placing.filter((_, i) => placed[i] === null)
   if (trace) {
-    trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]! }] : []))
+    trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]!, link: { speed: Math.min(groups[placed[i]!.group]!.speed, d.speed > 0 ? d.speed : Infinity), media: 'RJ45', capable: d.speed > 0 ? d.speed : Infinity } }] : []))
     trace.poeLost = stranded.filter((d) => !poweredSwitches.has(d.line)).map((d) => d.line)
   }
 
