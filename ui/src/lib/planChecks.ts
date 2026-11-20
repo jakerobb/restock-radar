@@ -581,6 +581,32 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
   return [{ id: 'power-adapter', label: 'Power adapter', verdict: 'warn', text: `${[...new Set(short)].join('; ')}.` }]
 }
 
+/** True when nothing could be read from a product's specification: it has none yet (newly announced, or not collected yet), or none of it is usable. */
+export function lacksSpecs(l: DerivedLine): boolean {
+  const d = l.derived
+  if (!d) return true
+  const k = d.known
+  return !k.ports && !k.poe && !k.radios && !k.rack && !k.dims && d.metrics.length === 0 && d.power.length === 0
+}
+
+/**
+ * Says which products have no tech specs to check against. The other checks can only judge what the specs state, so
+ * a product without them is left out of them (it may need PoE, a port, rack space or an outlet, or be a controller
+ * or recorder, and the plan won't know). That is common for newly announced products, and for a catalogue just
+ * collected from the store.
+ */
+function specsCheck(lines: DerivedLine[]): PlanCheck[] {
+  const missing = lines.filter((l) => l.view.product && lacksSpecs(l))
+  if (missing.length === 0) return []
+  const n = missing.length
+  return [{
+    id: 'specs',
+    label: 'Tech specs',
+    verdict: 'unknown',
+    text: `No tech specs are known yet for ${list(missing)}, so ${n === 1 ? 'it is' : 'they are'} left out of the checks below: ${n === 1 ? 'its' : 'their'} power, ports, rack space, and whether ${n === 1 ? 'it is' : 'they are'} a controller or recorder, aren't counted. The results may be incomplete.`,
+  }]
+}
+
 /**
  * What the plan adds up to, from the products' derived specifications: whether the PoE switches can
  * power the PoE devices, whether every other device has a switch port, and how much rack they take. A check appears only when the plan has something
@@ -588,7 +614,7 @@ function powerInputCheck(lines: DerivedLine[], powering: Powering): PlanCheck[] 
  */
 export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
   const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  return [...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  return [...specsCheck(lines), ...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
 }
 
 export interface Answer {
