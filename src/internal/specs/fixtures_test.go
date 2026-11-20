@@ -346,3 +346,17 @@ func TestEveryRealProductDerivesTheSameTwice(t *testing.T) {
 		}
 	}
 }
+
+// A Cloud Gateway Fiber's port rows don't mention PoE; "PoE Support: (1) PoE+" does.
+func TestPoESupportFieldGivesPoEPort(t *testing.T) {
+	r := derived(t, "ucg-fiber")
+	var out int
+	for _, p := range r.Ports {
+		if p.PoEDirection == "out" && p.PoEClass == "PoE+" {
+			out += p.Count
+		}
+	}
+	if out != 1 {
+		t.Fatalf("PoE+ out ports = %d, ports %+v", out, r.Ports)
+	}
+}
