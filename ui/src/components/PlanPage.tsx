@@ -372,12 +372,14 @@ function ShareLink({ name, lines, products, hosting, powering }: { name: string;
 function PlanSwitcher() {
   const { plans, activeId, name, select, create, rename, destroy } = usePlan()
   const [dialog, setDialog] = useState<'new' | 'rename' | 'delete' | null>(null)
+  // Alphabetical in the list (with numbers in order: Plan 2 before Plan 10); the plans keep the order they were made in.
+  const byName = useMemo(() => [...plans].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })), [plans])
   const close = () => setDialog(null)
   const small = 'cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink'
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <Select className="min-w-0 max-w-full py-1 text-sm font-medium" value={activeId} onChange={(e) => select(e.target.value)} aria-label="Which plan">
-        {plans.map((p) => (
+        {byName.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>

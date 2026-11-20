@@ -527,6 +527,18 @@ describe('several plans', () => {
     expect(screen.getByRole('dialog', { name: 'Save as a new plan' })).toBeInTheDocument()
   })
 
+  it('lists the plans alphabetically, numbers in order', async () => {
+    catalog()
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    for (const n of ['zebra', 'Plan 10', 'Plan 2', 'apple']) {
+      await user.click(await screen.findByRole('button', { name: 'New plan' }))
+      await user.keyboard(`${n}{Enter}`)
+    }
+    const names = within(screen.getByRole('combobox', { name: 'Which plan' })).getAllByRole('option').map((o) => o.textContent)
+    expect(names).toEqual(['apple', 'My Plan', 'Plan 2', 'Plan 10', 'zebra'])
+  })
+
   it('keeps a name to 50 characters', async () => {
     catalog()
     renderRoute('/plan')
