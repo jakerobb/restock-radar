@@ -387,7 +387,7 @@ export default function PlanPage() {
   const checks = useMemo(() => planChecks(derivedLines, hosting, powering), [derivedLines, hosting, powering])
   const answer = useMemo(() => overall(checks), [checks])
   const topology = useMemo(() => buildTopology(derivedLines, hosting, powering), [derivedLines, hosting, powering])
-  const wide = useMediaQuery('(min-width: 80rem)') // Tailwind's xl: two columns, with the topology open
+  const wide = useMediaQuery('(min-width: 80rem)') // Tailwind's xl: two columns under a full-width topology, which is open
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
   const [findingRoles, setFindingRoles] = useState(false)
@@ -639,16 +639,16 @@ export default function PlanPage() {
           )
           const topologyCard = topology && <TopologyGraph topology={topology} open={wide} />
           return wide ? (
-            <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,4fr)] items-start gap-x-6">
-              <div>
-                {planCard}
-                {finders}
+            <>
+              {topologyCard}
+              <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,4fr)] items-start gap-x-6">
+                <div>
+                  {planCard}
+                  {finders}
+                </div>
+                <div>{checksCard}</div>
               </div>
-              <div>
-                {topologyCard}
-                {checksCard}
-              </div>
-            </div>
+            </>
           ) : (
             <>
               {planCard}
