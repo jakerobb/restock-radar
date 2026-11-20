@@ -181,7 +181,7 @@ function storageRows(u: Unit, someUnknown: boolean): DetailRow[] {
   const fixed = fixedStorageTb(u.line.derived)
   const m2 = (u.line.view.product?.linked ?? []).some((x) => x.slug.startsWith('uacc-ssd'))
   if (bays === 0 && !m2 && fixed === 0) return []
-  const retention = (tb: number) => (u.mbps > 0 ? `${days(retentionDays(tb, u.mbps))} days of footage` : 'no cameras on it to record')
+  const retention = (tb: number) => (u.mbps > 0 ? `approximately ${days(retentionDays(tb, u.mbps))} days of footage` : 'no cameras on it to record')
   const note = someUnknown && u.mbps > 0 ? ' (not counting cameras of unknown resolution)' : ''
   if (u.drives.length === 0) {
     if (bays === 0 && !m2) return [`${formatTb(fixed)} of storage built in: ${retention(fixed)}${note}`]
@@ -194,6 +194,6 @@ function storageRows(u: Unit, someUnknown: boolean): DetailRow[] {
     ? `${u.drives.length} drives, ${formatTb(raw)} in all (counted at the smallest, ${formatTb(size)}, as drives of different sizes are in an array)`
     : `${u.drives.length} × ${formatTb(size)} drive${u.drives.length === 1 ? '' : 's'}, ${formatTb(raw)} in all`
   const options = bays > 0 ? raidOptions(u.drives.length, bays) : [{ level: '', usable: 1 }]
-  const items = options.map((o) => `${o.level ? `${o.level}: ` : ''}${formatTb(o.usable * size)} effective, ${retention(o.usable * size)}${note}`)
+  const items = options.map((o) => `${o.level ? `${o.level}: ` : ''}${formatTb(o.usable * size)} effective; ${retention(o.usable * size)}${note}`)
   return [{ text: `${head}:`, items }]
 }
