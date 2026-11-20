@@ -78,7 +78,7 @@ export function TopologyGraph({ topology, open }: { topology: Topology; open: bo
           )}
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted">One arrangement the checks found, not to scale.</p>
+        <p className="mt-2 text-xs text-muted">One possible arrangement that satisfies the checks. Devices are not to scale.</p>
       </details>
     </Card>
   )
