@@ -2,6 +2,7 @@ import type { Product } from '../api/types'
 import type { CatalogRow } from './catalog'
 import { lineFor, viewLine } from './plan'
 import { acceptsRow, mountsFor, NO_FILTERS, withMounts, type FinderFilters, type Mount } from './finderFilters'
+import { isInjector } from './injectors'
 import { assumeBest, type Powering } from './powering'
 import { isPoePowered, planChecks, type DerivedLine, type PoeStats } from './planChecks'
 
@@ -89,7 +90,7 @@ export interface Fits {
  */
 export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: Map<string, Product>, powering: Powering = {}): Fits {
   // A switch that can't be bought now gives nothing to count on, so it is checked without and its stand-ins offered.
-  const replaces = fullPlan.filter((l) => l.view.state !== 'in' && !!l.derived?.known.ports && l.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out'))
+  const replaces = fullPlan.filter((l) => l.view.state !== 'in' && !isInjector(l.derived) && !!l.derived?.known.ports && l.derived.ports.some((p) => p.role === 'data' && p.poe_class !== '' && p.poe_direction === 'out'))
   const plan = fullPlan.filter((l) => !replaces.includes(l))
   // When the plan only falls short on speed, a switch has to speed devices up to be worth suggesting.
   // A switch whose power hasn't been chosen is taken to run on its best input, here: the finder is asked about ports and power, not that.

@@ -6,6 +6,7 @@ import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } fr
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
 import { roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
+import { isInjector } from './injectors'
 
 /** What a check found. 'info' is a fact with nothing to judge it against; 'warn' works, but not as well as it could. */
 export type CheckVerdict = 'ok' | 'bad' | 'warn' | 'unknown' | 'info'
@@ -64,6 +65,8 @@ export interface PlanCheck {
   detail?: { title: string; rows: DetailRow[] }[]
   /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
   shortfall?: boolean
+  /** True when PoE devices have no port or power on a switch but the plan has a switch port to spare, which a PoE injector for each could fix. */
+  injectorShortfall?: boolean
   /** True when there are cameras and no NVR with room for them, which an NVR could fix. */
   nvrShortfall?: boolean
   /** On a role check: the role (a gateway, a Network controller...) nothing in the plan that can be had fills, which a product could fix. */
@@ -285,7 +288,15 @@ function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Pl
   return [{ id: 'poe-speed', label: 'Port speed', verdict: 'warn', shortfall: true, text: `The PoE ports on offer aren't fast enough for every device: ${parts.join('; ')}.` }]
 }
 
-function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
+/** What the PoE check found about where the devices went, for the checks that follow it. */
+interface PoeOutcome {
+  /** PoE-powered devices that went on a switch's PoE port; null when the check didn't place any. */
+  onSwitches: number | null
+  /** Devices left with no port or power, on a switch or an injector. */
+  stranded: number
+}
+
+function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outcome?: PoeOutcome): PlanCheck[] {
   const budget = (l: DerivedLine) => budgetOf(l, powering)
   const needs = new Map(lines.map((l) => [l, needOf(l, powering)] as const))
   const consumers = lines.filter((l) => needs.get(l) !== null && needs.get(l) !== undefined)
@@ -310,6 +321,10 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
   const out: PlanCheck[] = []
 
   if (suppliers.length === 0) {
+    // Nothing supplies PoE, so every device is left without; a PoE injector for each would do.
+    const bare = consumers.filter((l) => powerOptions(l.derived) === null)
+    if (outcome) outcome.stranded = bare.reduce((n, l) => n + qty(l), 0)
+    if (trace) trace.poeLost = bare.flatMap((l) => Array.from({ length: qty(l) }, () => l))
     out.push({ id: 'poe-power', label: 'PoE power', verdict: 'info', shortfall: true, text: `${devices} PoE-powered ${devices === 1 ? 'device needs' : 'devices need'} up to ${demand} W (${byClass(need)}); nothing in the plan supplies PoE.` })
     return out
   }
@@ -359,7 +374,19 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
       d.best = true
     }
   })
-  let placed = allocate(placing, socketList, budgets)
+  // A PoE injector is a one-port supplier that takes a switch port of its own, so a device goes on one only when no switch can power it.
+  const injectorUnit = units.map((u) => isInjector(u.line.derived))
+  const place = (): (Placement | null)[] => {
+    const result = allocate(placing, socketList.filter((x) => !injectorUnit[x.unit]), budgets)
+    const rest = result.flatMap((at, i) => (at === null ? [i] : []))
+    if (rest.length === 0 || !injectorUnit.includes(true)) return result
+    const onInjectors = allocate(rest.map((i) => placing[i]!), socketList.filter((x) => injectorUnit[x.unit]), budgets)
+    rest.forEach((i, k) => {
+      result[i] = onInjectors[k]!
+    })
+    return result
+  }
+  let placed = place()
   // A switch on a PoE input draws the load of the devices placed on it, which depends on where it goes: settle it in a few rounds.
   if (poweredSwitches.size > 0) {
     const own = placing.map((d) => d.draw)
@@ -389,7 +416,7 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
         }
       })
       if (!changed) break
-      placed = allocate(placing, socketList, budgets)
+      placed = place()
     }
     // Two switches can't power each other: where the chain of who powers whom comes back round, none of them is.
     const hostOf = (line: DerivedLine): DerivedLine | null => {
@@ -409,6 +436,10 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
     })
   }
   const stranded = placing.filter((_, i) => placed[i] === null)
+  if (outcome) {
+    outcome.onSwitches = placed.filter((at) => at !== null && !injectorUnit[at.unit]).length
+    outcome.stranded = stranded.length
+  }
   if (trace) {
     trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]!, link: { speed: Math.min(groups[placed[i]!.group]!.speed, d.speed > 0 ? d.speed : Infinity), media: 'RJ45', capable: d.speed > 0 ? d.speed : Infinity } }] : []))
     trace.poeLost = stranded.filter((d) => !poweredSwitches.has(d.line)).map((d) => d.line)
@@ -457,8 +488,9 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): Plan
     crawling: placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < Math.min(1000, d.speed)).length,
     slowestMbps: slowest ? placed[slowest.i]!.speed : null,
     slowedFromMbps: slowest ? slowest.d.speed : null,
-    spareWatts: finite ? budgets.reduce((n, b) => n + b, 0) - placing.reduce((n, d, i) => n + (placed[i] ? d.draw : 0), 0) : null,
-    sparePorts: socketList.length - placing.filter((_, i) => placed[i] !== null).length,
+    // What is left on the switches: an injector in the plan is a way of powering one device, not room for more.
+    spareWatts: finite ? budgets.reduce((n, b, k) => n + (injectorUnit[k] ? 0 : b), 0) - placing.reduce((n, d, i) => n + (placed[i] && !injectorUnit[placed[i]!.unit] ? d.draw : 0), 0) : null,
+    sparePorts: socketList.filter((x) => !injectorUnit[x.unit]).length - placed.filter((at) => at !== null && !injectorUnit[at.unit]).length,
     devices: placing.length,
     netSpare: null,
   }
@@ -632,8 +664,16 @@ function specsCheck(lines: DerivedLine[]): PlanCheck[] {
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
 export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
-  const poeDevices = lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  return [...specsCheck(lines), ...poeCheck(lines, powering, trace), ...powerInputCheck(lines, powering), ...netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace), ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  const outcome: PoeOutcome = { onSwitches: null, stranded: 0 }
+  const poe = poeCheck(lines, powering, trace, outcome)
+  // Only the devices on a switch's PoE port take one of its ports: those on an injector take its (which is a device with a port of its own), and those with nothing take none.
+  const poeDevices = outcome.onSwitches ?? lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
+  const net = netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace)
+  // An injector for each device left without needs a switch port to plug into: say so when there is one to spare.
+  const spare = net.find((c) => c.id === 'net-ports')?.net?.spare ?? 0
+  const short = outcome.stranded > 0 && spare > 0 ? poe.find((c) => c.shortfall && (c.id === 'poe-ports' || c.id === 'poe-power')) : undefined
+  if (short) short.injectorShortfall = true
+  return [...specsCheck(lines), ...poe, ...powerInputCheck(lines, powering), ...net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
 }
 
 export interface Answer {

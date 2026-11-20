@@ -102,6 +102,7 @@ func deriveWith(in Input, hook func()) (r Result) {
 	deriveMetrics(ix, &r)
 	deriveFeatures(ix, &r)
 	derivePower(ix, &r)
+	deriveInjector(ix, in, &r)
 	deriveRack(ix, &r)
 	deriveDims(ix, &r)
 

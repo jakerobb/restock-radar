@@ -437,3 +437,60 @@ describe('the overall answer', () => {
     expect(overall([])).toBeNull()
   })
 })
+
+describe('a PoE injector', () => {
+  const ac = [src('ac')]
+  const switchOf = (qty = 1, budget = 30, plain = 4) => item('sw', qty, { ports: [poeOut(4), ...(plain > 0 ? [port({ count: plain })] : [])], metrics: [metric('poe_budget_w', budget)], power: ac })
+  const camera = (qty: number) => item('cam', qty, { ports: [poeIn], metrics: [metric('power_draw_max_w', 8)] })
+  const injector = (qty: number, cls = 'PoE+', watts = 30, speed = 1000) =>
+    item('inj', qty, { ports: [port({ count: 1, max_speed_mbps: speed, source: 'injector' }), port({ count: 1, max_speed_mbps: speed, poe_class: cls, poe_direction: 'out', source: 'injector' })], metrics: [metric('poe_budget_w', watts)], power: ac })
+  // item() gives every product the default type, which isn't a switch: the switch needs its own.
+  const asSwitch = (l: DerivedLine): DerivedLine => ({ ...l, view: { ...l.view, product: { ...l.view.product!, type: 'Switches' } } })
+
+  it('powers a device the switch has no budget left for, so the plan works, and takes a switch port of its own', () => {
+    const sw = asSwitch(switchOf())
+    // Four cameras draw 32 W of 30 W: one is left, which says an injector would do, as there is a port to plug it into.
+    const before = planChecks([camera(4), sw])
+    expect(before.find((c) => c.id === 'poe-power')).toMatchObject({ verdict: 'bad', shortfall: true, injectorShortfall: true })
+    const after = Object.fromEntries(planChecks([camera(4), sw, injector(1)]).map((c) => [c.id, c]))
+    expect(after['poe-power']).toMatchObject({ verdict: 'ok' })
+    expect(after['poe-ports']).toMatchObject({ verdict: 'ok' })
+    expect(after['poe-layout']!.stats).toMatchObject({ stranded: 0, devices: 4 })
+    expect(Object.values(after).some((c) => c.shortfall)).toBe(false)
+    // 8 ports: one for the switch's uplink, three PoE for cameras, one for the injector, so three are spare.
+    expect(after['net-ports']).toMatchObject({ verdict: 'ok', net: { spare: 3 } })
+  })
+
+  it("wants a port for the injector: with none to spare it isn't offered, and the one that was added is not placed", () => {
+    const full = asSwitch(switchOf(1, 30, 0))
+    // Four PoE ports and nothing else: the uplink and three cameras take them, and the fourth camera has nothing to plug into.
+    expect(planChecks([camera(4), full]).some((c) => c.injectorShortfall)).toBe(false)
+    expect(planChecks([camera(4), full, injector(1)]).find((c) => c.id === 'net-ports')).toMatchObject({ verdict: 'bad', shortfall: true })
+  })
+
+  it('is too weak when its class is below the device', () => {
+    const sw = asSwitch(switchOf())
+    const checks = Object.fromEntries(planChecks([camera(4), sw, injector(1, 'PoE', 15.4)]).map((c) => [c.id, c]))
+    expect(checks['poe-power']).toMatchObject({ verdict: 'bad' })
+    expect(checks['poe-layout']!.stats).toMatchObject({ stranded: 1 }) // a 15 W injector is no use to a PoE+ camera
+  })
+
+  it('is used only for what the switches cannot power, and its spare is not counted as the switches', () => {
+    const sw = asSwitch(switchOf(1, 400))
+    const layout = planChecks([camera(2), sw, injector(3)]).find((c) => c.id === 'poe-layout')!
+    // Both cameras fit the switch, so the injectors power nothing and add no PoE port to spare.
+    expect(layout.stats).toMatchObject({ stranded: 0, sparePorts: 2 })
+    expect(layout.detail?.find((d) => d.title.startsWith('inj'))?.rows.every((r) => typeof r === 'string' || r.items.every((i) => i.includes('spare')))).toBe(true)
+  })
+
+  it('lets a plan with no PoE switch at all be powered by one injector for each device', () => {
+    const plain = asSwitch(item('sw', 1, { ports: [port({ count: 8 })], power: ac }))
+    expect(planChecks([camera(3), plain]).find((c) => c.id === 'poe-power')).toMatchObject({ shortfall: true, injectorShortfall: true })
+    const fixed = Object.fromEntries(planChecks([camera(3), plain, injector(3)]).map((c) => [c.id, c]))
+    expect(fixed['poe-power']).toMatchObject({ verdict: 'ok' })
+    expect(fixed['net-ports']).toMatchObject({ verdict: 'ok', net: { spare: 4 } }) // 8 ports, the uplink and three injectors
+    // Each injector takes a mains outlet too.
+    expect(fixed['outlets']?.text).toContain('3 × inj')
+  })
+})
+

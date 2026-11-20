@@ -22,6 +22,7 @@ import { PageNav } from './PageNav'
 import { TopologyGraph } from './TopologyGraph'
 import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
+import { InjectorFinder } from './InjectorFinder'
 import { PlanSearch } from './PlanSearch'
 import { ConvertPlan } from './ConvertPlan'
 import { NamePlanDialog } from './NamePlanDialog'
@@ -483,9 +484,11 @@ export default function PlanPage() {
   const wide = useMediaQuery('(min-width: 80rem)') // Tailwind's xl: two columns under a full-width topology, which is open
   const [finding, setFinding] = useState(false)
   const [findingNvr, setFindingNvr] = useState(false)
+  const [findingInjector, setFindingInjector] = useState(false)
   const [findingRoles, setFindingRoles] = useState(false)
   const [searching, setSearching] = useState(false)
   const shortfall = checks.some((c) => c.shortfall)
+  const injectorShortfall = checks.some((c) => c.injectorShortfall)
   const nvrShortfall = checks.some((c) => c.nvrShortfall)
   const missingRoles = checks.flatMap((c) => (c.roleShortfall ? [c.roleShortfall] : []))
   const roleShortfall = missingRoles.length > 0
@@ -724,11 +727,16 @@ export default function PlanPage() {
                 ))}
               </ul>
               <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown stats are labeled as such, not guessed.</p>
-              {!shared && ((shortfall && !finding) || (nvrShortfall && !findingNvr) || (roleShortfall && !findingRoles)) && (
+              {!shared && ((shortfall && !finding) || (injectorShortfall && !findingInjector) || (nvrShortfall && !findingNvr) || (roleShortfall && !findingRoles)) && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {shortfall && !finding && (
                     <Button variant="secondary" className="py-1 text-sm" onClick={() => setFinding(true)}>
                       Find a switch
+                    </Button>
+                  )}
+                  {injectorShortfall && !findingInjector && (
+                    <Button variant="secondary" className="py-1 text-sm" onClick={() => setFindingInjector(true)}>
+                      Find a PoE injector
                     </Button>
                   )}
                   {nvrShortfall && !findingNvr && (
@@ -751,6 +759,10 @@ export default function PlanPage() {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)
           }} onClose={() => setFinding(false)} />}
+          {injectorShortfall && !shared && findingInjector && <InjectorFinder plan={derivedLines} products={offered} derived={derived ?? []} powering={powering} onAdd={(added, replacing) => {
+            for (const r of replacing) mine.remove(lineKey(r))
+            for (const l of added) mine.add(l)
+          }} onClose={() => setFindingInjector(false)} />}
           {roleShortfall && !shared && findingRoles && <RoleFinder plan={derivedLines} products={offered} derived={derived ?? []} hosting={hosting} onHost={(role) => mine.host(role, 'self')} onAdd={(added, replacing) => {
             for (const r of replacing) mine.remove(lineKey(r))
             for (const l of added) mine.add(l)

@@ -191,6 +191,8 @@ export interface Port {
   poe_watts?: number | null
   /** Shares its position with another port (a combo RJ45/SFP+ pair), so only one of the two is usable at a time. */
   combo?: boolean
+  /** Where the port came from: "port_layout", "networking_interface", or "injector" for a PoE injector's, which the store doesn't list. */
+  source?: string
 }
 
 export interface PoEScenario {
