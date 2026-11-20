@@ -188,7 +188,64 @@ func derivePorts(ix *index, r *Result) {
 	} else if e, ok := ix.scalar("Networking Interface"); ok {
 		r.Ports = append(r.Ports, portsFromInterface(ix, e)...)
 	}
+	r.Ports = applyPoESupport(ix, r.Ports, watts, maxRank)
 	r.Known.Ports = len(r.Ports) > 0
+}
+
+var poeSupportItemRe = regexp.MustCompile(`\((\d+)\)\s*(PoE\+{0,3})`)
+
+// applyPoESupport covers devices whose port rows say nothing about PoE (a Cloud
+// Gateway Fiber lists "4 (2.5G/1G/...)") and give it only in "PoE Support:
+// (1) PoE+". When no port already carries PoE, that count of PoE-out ports is
+// taken from the first group of ethernet data ports big enough to hold it; the
+// store doesn't say which group, so this is a guess, and only when it's needed.
+func applyPoESupport(ix *index, ports []Port, watts map[string]float64, maxRank int) []Port {
+	for _, p := range ports {
+		if p.PoEClass != "" {
+			return ports
+		}
+	}
+	var e Effective
+	found := false
+	for _, o := range ix.overview {
+		if o.Kind == unistore.SpecText && key(o.Label) == "poe support" {
+			e, found = o, true
+			break
+		}
+	}
+	if !found {
+		return ports
+	}
+	for _, m := range poeSupportItemRe.FindAllStringSubmatch(e.Value, -1) {
+		n, ok := parseCount(m[1])
+		if !ok || n == 0 {
+			continue
+		}
+		class := m[2]
+		if maxRank > 0 && poeRank(class) > maxRank {
+			continue
+		}
+		for i, p := range ports {
+			if p.Media != "rj45" || p.Role != "data" || p.PoEClass != "" || p.Count < n {
+				continue
+			}
+			rest := p
+			rest.Count -= n
+			p.Count, p.PoEClass, p.PoEDirection, p.PoEInferred = n, class, "out", true
+			if w, ok := watts[class]; ok {
+				w := w
+				p.PoEWatts = &w
+			}
+			out := append([]Port{}, ports[:i]...)
+			out = append(out, p)
+			if rest.Count > 0 {
+				out = append(out, rest)
+			}
+			ports = append(out, ports[i+1:]...)
+			break
+		}
+	}
+	return ports
 }
 
 // portsFromLayoutEntry turns one "Port Layout" entry into its Ports.

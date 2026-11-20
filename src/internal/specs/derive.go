@@ -123,6 +123,7 @@ func slicesAnyPoE(ports []Port) bool {
 // index finds entries by label.
 type index struct {
 	std      []Effective
+	overview []Effective               // the grid overview: a summary, read only for what the standard sections lack
 	children map[[2]string][]Effective // section id, group feature id -> entries under it
 	groups   map[string][]Effective    // lower-cased label -> group entries
 	res      *Result
@@ -132,6 +133,7 @@ func newIndex(specs []Effective) *index {
 	ix := &index{children: map[[2]string][]Effective{}, groups: map[string][]Effective{}}
 	for _, e := range specs {
 		if e.SectionType == "Overview" {
+			ix.overview = append(ix.overview, e)
 			continue
 		}
 		ix.std = append(ix.std, e)
