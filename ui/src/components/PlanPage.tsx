@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useDerived, useProducts } from '../api/queries'
 import type { Derived, Product } from '../api/types'
 import { usePlan } from '../hooks/usePlan'
@@ -11,6 +11,7 @@ import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOptio
 import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
+import { Dialog } from './Dialog'
 import { PageNav } from './PageNav'
 import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
@@ -301,6 +302,7 @@ function powerChoiceOf(l: DerivedLine, powering: Powering, products: Map<string,
 }
 
 function ShareLink({ lines, products, hosting, powering }: { lines: PlanLine[]; products: Product[]; hosting: Hosting; powering: Powering }) {
+  const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const slug = encodePlan(lines, products, hosting, powering)
   if (slug === '') return null
@@ -313,21 +315,47 @@ function ShareLink({ lines, products, hosting, powering }: { lines: PlanLine[]; 
       // The link is in the box to copy by hand.
     }
   }
+  const icon = (children: ReactNode) => (
+    <svg aria-hidden viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  )
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      <TextInput readOnly className="min-w-0 flex-1 py-1 text-sm" value={url} aria-label="Link to this plan" onFocus={(e) => e.currentTarget.select()} />
-      <Button variant="secondary" className="px-2 py-1" onClick={() => void copy()} aria-label={copied ? 'Copied' : 'Copy link'} title={copied ? 'Copied' : 'Copy link'}>
-        <svg aria-hidden viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {copied ? (
-            <path d="M5 13l4 4L19 7" />
-          ) : (
-            <>
-              <rect x="9" y="9" width="11" height="11" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </>
-          )}
-        </svg>
+    <div className="flex min-w-0 flex-1 items-center justify-end">
+      <Button variant="secondary" className="px-2 py-1" onClick={() => setOpen(true)} aria-label="Share this plan" title="Share this plan">
+        {icon(
+          <>
+            <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
+            <path d="M16 6l-4-4-4 4" />
+            <path d="M12 2v13" />
+          </>,
+        )}
       </Button>
+      {open && (
+        <Dialog
+          title="Share this plan"
+          onClose={() => {
+            setOpen(false)
+            setCopied(false)
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <TextInput readOnly className="min-w-0 flex-1 py-1 text-sm" value={url} aria-label="Link to this plan" onFocus={(e) => e.currentTarget.select()} />
+            <Button variant="secondary" className="px-2 py-1" onClick={() => void copy()} aria-label={copied ? 'Copied' : 'Copy link'} title={copied ? 'Copied' : 'Copy link'}>
+              {icon(
+                copied ? (
+                  <path d="M5 13l4 4L19 7" />
+                ) : (
+                  <>
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </>
+                ),
+              )}
+            </Button>
+          </div>
+        </Dialog>
+      )}
     </div>
   )
 }

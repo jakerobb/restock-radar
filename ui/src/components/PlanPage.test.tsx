@@ -438,7 +438,10 @@ describe('PlanPage', () => {
     catalog()
     setPlan([line({ qty: 2 })])
     renderRoute('/plan')
+    expect(screen.queryByLabelText('Link to this plan')).not.toBeInTheDocument() // behind the share button
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Share this plan' }))
     const box = await screen.findByLabelText('Link to this plan')
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
     expect(box).toHaveValue(`${window.location.origin}/plan/${encodePlan([line({ qty: 2 })], products)}`)
   })
 })
