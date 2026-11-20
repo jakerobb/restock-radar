@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react'
 import { useCan, useProducts } from './api/queries'
 import { usePlan } from './hooks/usePlan'
 import { useHistoryDays } from './hooks/useHistoryDays'
+import { useRegion } from './hooks/useRegion'
 import { useSidebarOpen } from './hooks/useSidebarOpen'
 import { useSort } from './hooks/useSort'
 import { AddProductDialog } from './components/AddProductDialog'
 import { HistoryRangePicker } from './components/HistoryRangePicker'
+import { RegionPicker } from './components/RegionPicker'
 import { ProductList } from './components/ProductList'
 import { SearchBox } from './components/SearchBox'
 import { SortPicker } from './components/SortPicker'
@@ -17,10 +19,12 @@ import { Notice } from './components/ui/Notice'
 import { cn } from './lib/cn'
 import { groupProducts } from './lib/group'
 import { filterProducts, prefixCounts, tagCounts, typeCounts } from './lib/filter'
+import { inRegion } from './lib/region'
 
 export default function App() {
   const planItems = usePlan().lines.reduce((n, l) => n + l.qty, 0)
-  const { data, isPending, isError, refetch } = useProducts()
+  const { data: allData, isPending, isError, refetch } = useProducts()
+  const { region } = useRegion()
   const canAdd = useCan('watchlist:write')
   const [historyDays, setHistoryDays] = useHistoryDays()
   const [sort, setSort] = useSort()
@@ -30,6 +34,11 @@ export default function App() {
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
   const [inStockOnly, setInStockOnly] = useState(false)
 
+  // The site shows one store at a time.
+  const data = useMemo(
+    () => allData && { ...allData, regions: [region], products: inRegion(allData.products, region), pending: allData.pending.filter((p) => p.region === region) },
+    [allData, region],
+  )
   // Products the store files in one collection are a single product to it, so they are here too.
   const products = useMemo(() => groupProducts(data?.products ?? []), [data?.products])
   const allTypes = useMemo(() => typeCounts(products), [products])
@@ -63,6 +72,7 @@ export default function App() {
       <div className="flex shrink-0 items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Restock Radar</h1>
         <div className="flex items-center gap-2">
+          <RegionPicker />
           <a href="/find" className="text-sm text-muted underline">
             Finder
           </a>
@@ -81,7 +91,7 @@ export default function App() {
           >
             {sidebarOpen ? '◂ Hide filters' : '▸ Show filters'}
           </Button>
-          {canAdd && <AddProductDialog regions={data?.regions ?? []} />}
+          {canAdd && <AddProductDialog regions={allData?.regions ?? []} />}
         </div>
       </div>
 

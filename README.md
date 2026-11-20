@@ -77,6 +77,8 @@ coming soon, white where nothing was observed). A form at the top adds a product
 or by pasting its store URL. The product is checked against the live store
 first, so a typo is rejected with a message instead of being saved.
 
+A dropdown at the top (with the store's flags) picks which region's products the site shows, and appears when more than one region is tracked. It starts at the region your browser's language points to (`en-GB` is the UK, `de-DE` Europe, `ja` Japan, ...) and remembers what you choose in the browser. Lists, the finder, compare and the plan's "add" searches follow it; a product page link or a plan keeps whatever regions it already names.
+
 Other pages (client-side routes; the server falls back to `index.html` for them):
 
 | Path | What |

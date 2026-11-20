@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { useMe } from '../api/queries'
 import { usePlan } from '../hooks/usePlan'
+import { RegionPicker } from './RegionPicker'
 
 /** The heading and links shared by the pages other than the home list. */
 export function PageNav({ title, children }: { title: string; children?: ReactNode }) {
@@ -18,6 +19,7 @@ export function PageNav({ title, children }: { title: string; children?: ReactNo
           </span>
         )}
         {children}
+        <RegionPicker />
         <Link to="/" className={link}>
           Products
         </Link>
