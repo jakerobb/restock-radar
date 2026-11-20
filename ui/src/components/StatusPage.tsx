@@ -56,6 +56,13 @@ export function every(seconds: number): string {
 
 /** What each region holds and how fresh it is, judged against how often that region is read. */
 function RegionsCard({ regions }: { regions: StatusRegion[] }) {
+  const sum = (pick: (r: StatusRegion) => number) => regions.reduce((n, r) => n + pick(r), 0)
+  // The newest of the newest checks, and the stalest of the stalest; null when no region has been checked.
+  const extreme = (pick: (r: StatusRegion) => string | null, newest: boolean): string | null =>
+    regions.map(pick).filter((t): t is string => t !== null).sort((a, b) => Date.parse(newest ? b : a) - Date.parse(newest ? a : b))[0] ?? null
+  const lastCheck = extreme((r) => r.last_check, true)
+  const oldestCheck = extreme((r) => r.oldest_check, false)
+  const overdue = sum((r) => r.overdue_variants)
   return (
     <Card aria-label="Regions" className="overflow-x-auto sm:col-span-2">
       <h2 className="font-semibold">Regions</h2>
@@ -95,6 +102,23 @@ function RegionsCard({ regions }: { regions: StatusRegion[] }) {
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="border-t-2 border-line align-top font-semibold">
+            <th scope="row" className="py-1.5 pr-3 text-left">
+              Total
+            </th>
+            <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(sum((r) => r.products))}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(sum((r) => r.variants))}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(sum((r) => r.in_stock))}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{nf.format(sum((r) => r.categories))}</td>
+            <td className="px-3 py-1.5" />
+            <td className="px-3 py-1.5 font-normal whitespace-nowrap">{lastCheck ? <RelativeTime iso={lastCheck} /> : <span className="text-muted">never</span>}</td>
+            <td className="py-1.5 pl-3 font-normal whitespace-nowrap">
+              {oldestCheck ? <RelativeTime iso={oldestCheck} /> : <span className="text-muted">never</span>}
+              {overdue > 0 && <span className="block font-semibold text-bad">{nf.format(overdue)} overdue</span>}
+            </td>
+          </tr>
+        </tfoot>
       </table>
       <p className="mt-2 text-xs text-muted">A variant is overdue when it has gone unchecked for three of its region's read intervals. A product the store has dropped from a region can stay overdue for good.</p>
     </Card>

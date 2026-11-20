@@ -109,6 +109,33 @@ describe('the per-region breakdown', () => {
     expect(eu.getByText('4 overdue (over 3 hours)')).toBeInTheDocument()
   })
 
+  it('ends with a total, which leaves out how often the regions are read', async () => {
+    stubFetch({
+      'GET /v1/status': {
+        body: status({
+          regions: { us: 30, eu: 12 },
+          by_region: [
+            region({ products: 30, variants: 40, in_stock: 25, categories: 7, last_check: '2026-11-15T11:58:00Z', oldest_check: '2026-11-15T11:50:00Z', overdue_variants: 1 }),
+            region({ region: 'eu', products: 12, variants: 15, in_stock: 9, categories: 5, last_check: '2026-11-15T11:30:00Z', oldest_check: '2026-11-15T10:00:00Z', read_every_seconds: 3600, overdue_after_seconds: 10800, overdue_variants: 4 }),
+          ],
+        }),
+      },
+    })
+    renderWithClient(<StatusPage />)
+    const card = await screen.findByRole('region', { name: 'Regions' })
+    const total = within(within(card).getByRole('rowheader', { name: 'Total' }).closest('tr')!)
+    expect(total.getAllByRole('cell').map((c) => c.textContent)).toEqual([
+      '42', // products
+      '55', // variants
+      '34', // in stock
+      '12', // categories
+      '', // read every: no one rate for the lot
+      expect.stringMatching(/ago|now|minute/), // the newest check of all
+      expect.stringContaining('5 overdue'),
+    ])
+    expect(total.getAllByRole('time').map((t) => t.getAttribute('datetime'))).toEqual(['2026-11-15T11:58:00Z', '2026-11-15T10:00:00Z'])
+  })
+
   it('is left out when there is only one region', async () => {
     stubFetch({ 'GET /v1/status': { body: status({ by_region: [region({})] }) } })
     renderWithClient(<StatusPage />)
