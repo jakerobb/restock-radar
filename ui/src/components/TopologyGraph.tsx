@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { Topology, TopoNode } from '../lib/topology'
+import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 
 function Box({ node }: { node: TopoNode }) {
@@ -30,13 +32,30 @@ function Branch({ node }: { node: TopoNode }) {
  * The plan's devices as a family tree: the gateway at the top, what plugs into it below, and so on. Boxes carry
  * product names only; nothing is to scale. A section that opens and closes, open or not as the caller says.
  */
+export const ZOOMS = [50, 75, 100, 125, 150, 200]
+
 export function TopologyGraph({ topology, open }: { topology: Topology; open: boolean }) {
+  const [zoom, setZoom] = useState(100)
+  const step = (d: number) => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, ZOOMS.indexOf(z) + d))]!)
   return (
     <Card className="mt-4" aria-label="Topology">
       {/* Keyed by the default, so crossing the breakpoint sets it again, while a click in between sticks. */}
       <details key={String(open)} open={open}>
         <summary className="cursor-pointer text-lg font-semibold">Topology</summary>
-        <div className="mt-3 overflow-x-auto pb-1">
+        <div className="mt-2 flex items-center justify-end gap-1" role="group" aria-label="Zoom">
+          <Button variant="secondary" className="px-2 py-0.5 text-sm" onClick={() => step(-1)} disabled={zoom === ZOOMS[0]} aria-label="Zoom out" title="Zoom out">
+            −
+          </Button>
+          <Button variant="secondary" className="min-w-14 px-2 py-0.5 text-sm tabular-nums" onClick={() => setZoom(100)} disabled={zoom === 100} aria-label="Reset zoom" title="Reset zoom">
+            {zoom}%
+          </Button>
+          <Button variant="secondary" className="px-2 py-0.5 text-sm" onClick={() => step(1)} disabled={zoom === ZOOMS[ZOOMS.length - 1]} aria-label="Zoom in" title="Zoom in">
+            +
+          </Button>
+        </div>
+        <div className="mt-2 overflow-x-auto pb-1">
+          {/* The CSS zoom property resizes the layout, so the scroll area follows it. */}
+          <div style={{ zoom: zoom / 100 }}>
           <ul className="topo-roots topo mx-auto w-max gap-8" aria-label="Device topology">
             {topology.roots.map((r) => (
               <Branch key={r.key} node={r} />
@@ -57,6 +76,7 @@ export function TopologyGraph({ topology, open }: { topology: Topology; open: bo
               </ul>
             </div>
           )}
+          </div>
         </div>
         <p className="mt-2 text-xs text-muted">One arrangement the checks found, not to scale.</p>
       </details>
