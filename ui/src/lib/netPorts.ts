@@ -15,6 +15,13 @@ export interface NetStats {
   onGateways: number
 }
 
+/** A PoE-powered device on a switch's or gateway's PoE port: which unit (by line and number) and the speed of the group of ports it took. */
+export interface PoeHost {
+  line: DerivedLine
+  n: number
+  speed: number
+}
+
 /** Which kind of device plugs in where: copper, an SFP-style cage (SFP, SFP+, SFP28), or a combo position that takes either. */
 type Media = 'rj45' | 'sfp' | 'either'
 
@@ -240,7 +247,7 @@ interface Placed {
  * one, then copper, then a copper port in a cage through a module. Gateways need no port, and the internet connection isn't modelled.
  *
  * Devices that aren't PoE-powered then take the ports that are left, a spare PoE port included (PoE-powered
- * devices already take PoE ports: `poeDevices` of them). A copper-only device may use a cage through a module,
+ * devices already take PoE ports, on the switch each was put on: `poeHosted`). A copper-only device may use a cage through a module,
  * but only when no copper port is left; one with only an SFP port needs a cage.
  *
  * A device takes the fastest port it can use before it is sent to a gateway's: a gateway's port is the last resort among ports
@@ -253,7 +260,7 @@ interface Placed {
  *
  * A second check warns when a switch with SFP cages has been uplinked over copper for want of a free cage upstream.
  */
-export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace, forSpare = false, carrying?: Map<DerivedLine, number>): PlanCheck[] {
+export function netPortCheck(lines: DerivedLine[], poeHosted: PoeHost[], poePowered: (l: DerivedLine) => boolean, trace?: Trace, forSpare = false, carrying?: Map<DerivedLine, number>): PlanCheck[] {
   const devices: Device[] = lines.flatMap((l) => {
     if (isSwitch(l) || isGateway(l) || poePowered(l)) return []
     const d = deviceOf(l)
@@ -272,17 +279,16 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
 
   const downstream = (g: Group) => !g.uplinkOnly
 
-  // PoE-powered devices are on PoE ports, the slowest ones being the likeliest. The uplinks have already taken theirs (from ports
-  // that aren't PoE where there are any); if that leaves too few PoE ports, the PoE check, which doesn't know about uplinks, has missed it.
-  const poeGroups = units.flatMap((u) => u.groups).filter((x) => x.poe)
-  const poeCapacity = poeGroups.reduce((n, g) => n + g.free, 0) + links.filter((l) => l.group.poe).length + links.filter((l) => l.parentGroup?.poe).length
-  let poeLeft = poeDevices
-  for (const g of [...poeGroups].sort((a, b) => a.speed - b.speed)) {
-    const take = Math.min(g.free, poeLeft)
-    g.free -= take
-    poeLeft -= take
+  // PoE-powered devices are on the PoE ports of the switch the PoE check put each on, in the group of ports it took. The uplinks have
+  // already taken theirs (from ports that aren't PoE where there are any); if that leaves a switch too few PoE ports, the PoE check,
+  // which doesn't know about uplinks, has missed it.
+  let poeShort = 0
+  for (const h of poeHosted) {
+    const open = (units.find((u) => u.line === h.line && u.n === h.n)?.groups ?? []).filter((g) => g.poe && g.free > 0)
+    const g = open.find((x) => x.speed === h.speed) ?? [...open].sort((a, b) => a.speed - b.speed)[0]
+    if (g) g.free--
+    else if (units.some((u) => u.line === h.line && u.n === h.n)) poeShort++
   }
-  const poeShort = poeDevices <= poeCapacity ? poeLeft : 0
   const total = units.flatMap((u) => u.groups).reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0)
 
   // Devices take what is left: a cage for one that has an SFP port, then the fastest port; the gateway's ports last of all.
