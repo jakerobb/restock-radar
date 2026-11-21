@@ -558,3 +558,40 @@ describe('a PoE injector that lets a device run faster than any PoE port on offe
     expect(trace.portHosts?.find((h) => h.line.view.line.ref === 'us/inj')).toMatchObject({ host: { line: { view: { line: { ref: 'us/sw' } } } } })
   })
 })
+
+describe('spare ports and where PoE devices go, with a gateway and two switches', () => {
+  const ac = [src('ac')]
+  const asType = (l: DerivedLine, type: string): DerivedLine => ({ ...l, view: { ...l.view, product: { ...l.view.product!, type } } })
+  // A gateway with a 2.5 GbE PoE+ port and a 10G SFP+; a big switch with 2.5 GbE PoE++ ports and SFP+ cages; a small 10 GbE PoE++ one with SFP+ cages.
+  const gateway = () => asType(item('gw', 1, { ports: [port({ count: 2, max_speed_mbps: 2500, poe_class: 'PoE+', poe_direction: 'out' }), port({ count: 2, media: 'sfp+', max_speed_mbps: 10000 })], metrics: [metric('poe_budget_w', 30)], power: ac }), 'Gateways')
+  const big = () => asType(item('big', 1, { ports: [port({ count: 16, max_speed_mbps: 2500, poe_class: 'PoE++', poe_direction: 'out' }), port({ count: 8, max_speed_mbps: 1000 }), port({ count: 4, media: 'sfp+', max_speed_mbps: 10000 })], metrics: [metric('poe_budget_w', 600)], power: ac }), 'Switches')
+  const small = () => asType(item('small', 1, { ports: [port({ count: 8, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'out' }), port({ count: 2, media: 'sfp+', max_speed_mbps: 10000 })], metrics: [metric('poe_budget_w', 155)], power: ac }), 'Switches')
+  const apXg = (qty: number) => item('apxg', qty, { ports: [port({ count: 1, max_speed_mbps: 10000, poe_class: 'PoE++', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 25)] })
+  const modem = () => item('modem', 1, { ports: [port({ count: 1, max_speed_mbps: 2500, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 14.5)] })
+  const spareOn = (t: Trace, slug: string) => t.spare?.find((s) => s.unit.line.view.line.ref === `us/${slug}`)?.spare
+  const run = (lines: DerivedLine[]) => {
+    const trace: Trace = {}
+    planChecks(lines, {}, {}, trace)
+    return trace
+  }
+
+  it('takes the PoE ports each switch is using out of that switch’s spare ports, not out of whichever switch’s ports are slowest', () => {
+    // The small switch carries the four 10 GbE access points; the big one carries nothing but is uplinked, with the small one, to the gateway.
+    const t = run([gateway(), big(), small(), apXg(4)])
+    expect(t.poeHosts?.every((h) => h.host.line.view.line.ref === 'us/small')).toBe(true)
+    // 10 ports on the small switch, one for its uplink and four for the access points.
+    expect(spareOn(t, 'small')).toBe(5)
+    // 28 ports on the big one, and only an uplink on it (or none): nothing of the small switch's PoE load is charged to it.
+    expect(spareOn(t, 'big')).toBeGreaterThanOrEqual(26)
+  })
+
+  it('puts a PoE device on a switch with room rather than on the gateway’s PoE port, though the gateway’s class is lower', () => {
+    const t = run([gateway(), big(), modem()])
+    expect(t.poeHosts?.find((h) => h.line.view.line.ref === 'us/modem')?.host.line.view.line.ref).toBe('us/big')
+  })
+
+  it('still uses the gateway’s PoE port when no switch can power the device', () => {
+    const t = run([gateway(), modem()])
+    expect(t.poeHosts?.find((h) => h.line.view.line.ref === 'us/modem')?.host.line.view.line.ref).toBe('us/gw')
+  })
+})

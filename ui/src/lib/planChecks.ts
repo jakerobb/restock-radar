@@ -1,6 +1,6 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
-import { netPortCheck, unitDepths, type NetStats } from './netPorts'
+import { netPortCheck, unitDepths, type NetStats, type PoeHost } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
@@ -209,7 +209,7 @@ interface Placement {
  * orders are tried and the one that places more devices wins. The first favours speed: devices fastest
  * first, each on the lowest class of port that is fast enough (so faster and higher-class ports stay free for
  * those that need them), with the rest put on the fastest port left. The second is by demand: highest class
- * and heaviest draw first. Where ports are otherwise alike, a switch's is used before a gateway's, and the switch nearer
+ * and heaviest draw first. Of the ports a device can use, a switch's is used before a gateway's (whatever their classes), and the switch nearer
  * the top of the network before a deeper one; then the switch with the least budget left that still
  * fits the device, so large budgets stay whole for heavy loads. Returns null for a device that fits nowhere.
  */
@@ -239,7 +239,7 @@ function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Pla
     if (speedFirst) {
       rest = []
       for (const i of [...idx].sort((a, b) => devices[b]!.speed - devices[a]!.speed || demand(a, b))) {
-        const k = pick(i, (f) => f.speed >= devices[i]!.speed, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || nearer(f, g) || left[f.unit]! - left[g.unit]! : (f, g) => f.rank - g.rank || f.speed - g.speed || nearer(f, g) || left[f.unit]! - left[g.unit]!)
+        const k = pick(i, (f) => f.speed >= devices[i]!.speed, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || nearer(f, g) || left[f.unit]! - left[g.unit]! : (f, g) => Number(f.gateway) - Number(g.gateway) || f.rank - g.rank || f.speed - g.speed || nearer(f, g) || left[f.unit]! - left[g.unit]!)
         if (k < 0) rest.push(i)
         else put(i, k)
       }
@@ -300,6 +300,8 @@ function speedCheck(devices: { line: DerivedLine; speed: number }[], placed: (Pl
 interface PoeOutcome {
   /** PoE-powered devices that went on a switch's PoE port; null when the check didn't place any. */
   onSwitches: number | null
+  /** Which switch or gateway (by line and unit) each of those went on, and the speed of the port group it took. */
+  hosted: PoeHost[]
   /** Devices left with no port or power, on a switch or an injector. */
   stranded: number
   /** How many units of each injector line have a device on them. */
@@ -479,6 +481,7 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
     // Cameras on an NVR's PoE ports take none of a switch's or gateway's, so only a switch or gateway counts as a host.
     const onNetwork = (k: number) => units[k]!.line.view.product?.type === 'Switches' || isGatewayProduct(units[k]!.line.view.product, units[k]!.line.derived)
     outcome.onSwitches = placed.filter((at) => at !== null && !injectorUnit[at.unit] && onNetwork(at.unit)).length
+    outcome.hosted = placed.flatMap((at) => (at !== null && !injectorUnit[at.unit] && onNetwork(at.unit) ? [{ line: units[at.unit]!.line, n: units[at.unit]!.n, speed: groups[at.group]!.speed }] : []))
     outcome.stranded = stranded.length
     outcome.carrying = new Map()
     placed.forEach((at) => {
@@ -757,13 +760,13 @@ const lex = (a: number[], b: number[]): number => a.reduce((d, x, i) => d || x -
  * Mbps lost to slow ports, devices on a gateway's ports, and devices put on injectors.
  */
 function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Trace) {
-  const outcome: PoeOutcome = { onSwitches: null, stranded: 0, carrying: new Map(), slowed: 0, crawling: 0, lostMbps: 0 }
+  const outcome: PoeOutcome = { onSwitches: null, hosted: [], stranded: 0, carrying: new Map(), slowed: 0, crawling: 0, lostMbps: 0 }
   const hasInjector = lines.some((l) => isInjector(l.derived))
   let poe = poeCheck(lines, powering, hasInjector ? undefined : trace, outcome, pins)
   // Only the devices on a switch's PoE port take one of its ports: those on an injector take its (which is a device with a port of its own), and those with nothing take none.
-  const poeDevices = outcome.onSwitches ?? lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
+  const hosted = outcome.hosted
   const scratch: Trace = trace ?? {}
-  const net = netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), scratch, false, outcome.carrying)
+  const net = netPortCheck(lines, hosted, (l) => isPoePowered(l, powering), scratch, false, outcome.carrying)
   const stranded = outcome.stranded
   if (hasInjector) {
     // What runs through an injector goes no faster than the port the injector is on, so the PoE check is run again knowing those.
@@ -773,7 +776,7 @@ function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Tr
   }
   // An injector for each device left without needs a switch port to plug into: say so when there is one to spare.
   // A gateway with only PoE devices on it has no ports check to show, but still has ports to spare.
-  const spare = (net.find((c) => c.id === 'net-ports') ?? (stranded > 0 ? netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), undefined, true).find((c) => c.id === 'net-ports') : undefined))?.net?.spare ?? 0
+  const spare = (net.find((c) => c.id === 'net-ports') ?? (stranded > 0 ? netPortCheck(lines, hosted, (l) => isPoePowered(l, powering), undefined, true).find((c) => c.id === 'net-ports') : undefined))?.net?.spare ?? 0
   const short = stranded > 0 && spare > 0 ? poe.find((c) => c.shortfall && (c.id === 'poe-ports' || c.id === 'poe-power')) : undefined
   if (short) short.injectorShortfall = true
   const stats = net.find((c) => c.id === 'net-ports')?.net
