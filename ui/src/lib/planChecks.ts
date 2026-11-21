@@ -1,6 +1,6 @@
 import type { Derived } from '../api/types'
 import type { LineView } from './plan'
-import { netPortCheck, type NetStats } from './netPorts'
+import { netPortCheck, unitDepths, type NetStats } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
@@ -177,7 +177,14 @@ interface Socket {
   unit: number
   /** Index of the port group (a count of alike ports on one switch) the port belongs to. */
   group: number
+  /** On a gateway's port, which is the last resort for a device. */
+  gateway: boolean
+  /** How many hops from the gateway the switch is (Infinity when it isn't known, as for an injector). */
+  depth: number
 }
+
+/** Which of two ports is nearer the top of the network, which is better: a switch's before a gateway's, then the shallower switch. */
+const nearer = (f: Socket, g: Socket): number => Number(f.gateway) - Number(g.gateway) || (f.depth === g.depth ? 0 : f.depth < g.depth ? -1 : 1)
 
 interface Device {
   rank: number
@@ -202,8 +209,9 @@ interface Placement {
  * orders are tried and the one that places more devices wins. The first favours speed: devices fastest
  * first, each on the lowest class of port that is fast enough (so faster and higher-class ports stay free for
  * those that need them), with the rest put on the fastest port left. The second is by demand: highest class
- * and heaviest draw first. Where ports are otherwise alike, the switch with the least budget left that still
- * fits the device is used, so large budgets stay whole for heavy loads. Returns null for a device that fits nowhere.
+ * and heaviest draw first. Where ports are otherwise alike, a switch's is used before a gateway's, and the switch nearer
+ * the top of the network before a deeper one; then the switch with the least budget left that still
+ * fits the device, so large budgets stay whole for heavy loads. Returns null for a device that fits nowhere.
  */
 function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Placement | null)[] {
   const attempt = (speedFirst: boolean): (Placement | null)[] => {
@@ -231,14 +239,14 @@ function allocate(devices: Device[], sockets: Socket[], budgets: number[]): (Pla
     if (speedFirst) {
       rest = []
       for (const i of [...idx].sort((a, b) => devices[b]!.speed - devices[a]!.speed || demand(a, b))) {
-        const k = pick(i, (f) => f.speed >= devices[i]!.speed, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || left[f.unit]! - left[g.unit]! : (f, g) => f.rank - g.rank || f.speed - g.speed || left[f.unit]! - left[g.unit]!)
+        const k = pick(i, (f) => f.speed >= devices[i]!.speed, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || nearer(f, g) || left[f.unit]! - left[g.unit]! : (f, g) => f.rank - g.rank || f.speed - g.speed || nearer(f, g) || left[f.unit]! - left[g.unit]!)
         if (k < 0) rest.push(i)
         else put(i, k)
       }
       rest.sort(demand)
     }
     for (const i of rest) {
-      const k = pick(i, () => true, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || left[f.unit]! - left[g.unit]! : (f, g) => g.speed - f.speed || f.rank - g.rank || left[f.unit]! - left[g.unit]!)
+      const k = pick(i, () => true, devices[i]!.best ? (f, g) => g.rank - f.rank || g.speed - f.speed || nearer(f, g) || left[f.unit]! - left[g.unit]! : (f, g) => g.speed - f.speed || f.rank - g.rank || nearer(f, g) || left[f.unit]! - left[g.unit]!)
       if (k >= 0) put(i, k)
     }
     return result
@@ -362,10 +370,11 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
   const units: { line: DerivedLine; n: number }[] = suppliers.flatMap((l) => Array.from({ length: qty(l) }, (_, n) => ({ line: l, n })))
   const budgets = units.map((u) => budget(u.line).watts ?? Infinity)
   const groups: { unit: number; label: string; count: number; rank: number; speed: number }[] = []
+  const depths = unitDepths(lines)
   const socketList: Socket[] = units.flatMap((u, unit) =>
     poePortsOut(u.line.derived!).flatMap((p) => {
       const group = groups.push({ unit, label: `${p.max_speed_mbps > 0 ? `${formatSpeed(p.max_speed_mbps)} ` : ''}${p.poe_class}`, count: p.count, rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity }) - 1
-      return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group }))
+      return Array.from({ length: p.count }, () => ({ rank: rank(p.poe_class), speed: p.max_speed_mbps > 0 ? p.max_speed_mbps : Infinity, unit, group, gateway: isGatewayProduct(u.line.view.product, u.line.derived), depth: depths.get(u.line)?.[u.n] ?? Infinity }))
     }),
   )
   placing.forEach((d) => {

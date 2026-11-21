@@ -112,3 +112,43 @@ describe('buildTopology with a PoE injector', () => {
   })
 })
 
+
+describe('buildTopology placing PoE devices', () => {
+  const out = (count: number, poe_class: string, max_speed_mbps: number): P => ({ count, poe_class, poe_direction: 'out', max_speed_mbps })
+  const sfp = (count: number): P => ({ count, max_speed_mbps: 10000, media: 'sfp+' })
+  const powered = (slug: string, qty: number, poe_class: string, max_speed_mbps: number) =>
+    item(slug, qty, 'Access Points', { ports: [port({ poe_class, poe_direction: 'in', max_speed_mbps })], metrics: [metric('power_draw_max_w', 20)] })
+  const switchWith = (slug: string, ports: P[], budget: number) => item(slug, 1, 'Switches', { ports: ports.map((p) => port(p)), metrics: [metric('poe_budget_w', budget)] })
+  const gateway = (ports: P[]) => item('gw', 1, 'Gateways', { ports: ports.map((p) => port(p)), metrics: [metric('poe_budget_w', 30)] })
+
+  it("puts a device on a switch's port before the gateway's, when the gateway's is just as good a fit", () => {
+    const t = buildTopology([gateway([sfp(1), out(1, 'PoE+', 2500)]), switchWith('sw', [sfp(1), out(4, 'PoE+', 2500)], 200), powered('modem', 1, 'PoE+', 2500)])!
+    expect(t.roots.map(show)).toEqual(['GW[SW[MODEM]]'])
+  })
+
+  it("still uses the gateway's PoE port when no switch has one left", () => {
+    const t = buildTopology([gateway([sfp(1), out(1, 'PoE+', 2500)]), switchWith('sw', [sfp(1), out(1, 'PoE+', 2500)], 200), powered('modem', 2, 'PoE+', 2500)])!
+    expect(t.roots.map(show)).toEqual(['GW[SW[MODEM], MODEM]'])
+  })
+
+  it('fills the shallower switch first, and puts the rest on the deeper one only where its ports are faster than what is left', () => {
+    // HD is the root (more cages); XG hangs from it. Both have 10GbE PoE++ ports; HD has two, the rest of its PoE ports being 2.5GbE.
+    const hd = switchWith('hd', [sfp(2), out(2, 'PoE++', 10000), out(8, 'PoE+', 2500)], 600)
+    const xg = switchWith('xg', [sfp(1), out(8, 'PoE++', 10000)], 155)
+    const t = buildTopology([gateway([sfp(1)]), xg, hd, powered('xgs', 4, 'PoE++', 10000)])!
+    expect(t.roots.map(show)).toEqual(['GW[HD[XG[XGS × 2], XGS × 2]]'])
+    const [hdNode] = t.roots[0]!.children
+    const xgNode = hdNode!.children.find((c) => c.kind === 'switch')!
+    // Nothing is held to 2.5GbE: the third and fourth went to the 10GbE ports of the deeper switch.
+    expect(xgNode.children[0]!.uplink!.slow).toBe(false)
+    expect(hdNode!.children.find((c) => c.kind === 'device')!.uplink!.slow).toBe(false)
+  })
+
+  it('does not hold a class-or-speed-matched port back for a shallower switch', () => {
+    // The 2.5GbE PoE+ camera takes the PoE+ port on the deeper switch rather than a PoE++ 10GbE one on the root, which an XGS will need.
+    const hd = switchWith('hd', [sfp(2), out(1, 'PoE++', 10000)], 600)
+    const xg = switchWith('xg', [sfp(1), out(2, 'PoE+', 2500)], 155)
+    const t = buildTopology([gateway([sfp(1)]), xg, hd, powered('cam2', 1, 'PoE+', 2500), powered('xgs', 1, 'PoE++', 10000)])!
+    expect(t.roots.map(show)).toEqual(['GW[HD[XG[CAM2], XGS]]'])
+  })
+})
