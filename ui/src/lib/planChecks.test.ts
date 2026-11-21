@@ -1,6 +1,6 @@
 import { scenarioCode } from './powering'
 import { lineKey } from './plan'
-import { overall, planChecks, type DerivedLine, type PlanCheck } from './planChecks'
+import { overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product, variant } from '../test/fixtures'
 
@@ -504,5 +504,57 @@ describe('a PoE injector on a gateway with only PoE devices', () => {
     expect(checks.some((c) => c.id === 'net-ports')).toBe(false)
     expect(checks.find((c) => c.id === 'poe-power' || c.id === 'poe-ports')).toBeDefined()
     expect(checks.some((c) => c.injectorShortfall)).toBe(true)
+  })
+})
+
+describe('a PoE injector that lets a device run faster than any PoE port on offer', () => {
+  const ac = [src('ac')]
+  const asType = (l: DerivedLine, type: string): DerivedLine => ({ ...l, view: { ...l.view, product: { ...l.view.product!, type } } })
+  // A gateway with two 2.5 GbE PoE+ ports (30 W) and a 10 GbE port, a gigabit switch, a 10 GbE access point and a 10 GbE injector.
+  const gateway = () => asType(item('gw', 1, { ports: [port({ count: 2, max_speed_mbps: 2500, poe_class: 'PoE+', poe_direction: 'out' }), port({ count: 1, max_speed_mbps: 10000 }), port({ count: 4 })], metrics: [metric('poe_budget_w', 30)], power: ac }), 'Gateways')
+  const switchOf = () => asType(item('sw', 1, { ports: [port({ count: 4, poe_class: 'PoE+', poe_direction: 'out' }), port({ count: 4 })], metrics: [metric('poe_budget_w', 52)], power: ac }), 'Switches')
+  const xg = () => item('xg', 1, { ports: [port({ count: 1, max_speed_mbps: 10000, poe_class: 'PoE+', poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 22)] })
+  const injector = (speed = 10000) => item('inj', 1, { ports: [port({ count: 1, max_speed_mbps: speed, source: 'injector' }), port({ count: 1, max_speed_mbps: speed, poe_class: 'PoE++', poe_direction: 'out', source: 'injector' })], metrics: [metric('poe_budget_w', 60)], power: ac })
+  const run = (lines: DerivedLine[]) => {
+    const trace: Trace = {}
+    const checks = Object.fromEntries(planChecks(lines, {}, {}, trace).map((c) => [c.id, c]))
+    return { trace, checks }
+  }
+  const hostOf = (t: Trace, slug: string) => t.poeHosts?.find((h) => h.line.view.line.ref === `us/${slug}`)
+
+  it('runs the device at full speed through an injector on a fast port, though the gateway has a PoE port that powers it slower', () => {
+    const { trace, checks } = run([gateway(), switchOf(), xg(), injector()])
+    expect(checks['poe-speed']).toBeUndefined()
+    expect(hostOf(trace, 'xg')).toMatchObject({ host: { line: { view: { line: { ref: 'us/inj' } } } }, link: { speed: 10000, capable: 10000 } })
+    // The injector is plugged into the gateway's 10 GbE port, not a gigabit port on the switch.
+    expect(trace.portHosts?.find((h) => h.line.view.line.ref === 'us/inj')).toMatchObject({ host: { line: { view: { line: { ref: 'us/gw' } } } }, link: { speed: 10000 } })
+  })
+
+  it('leaves the device on the PoE port when the plan has no injector to do better', () => {
+    const { trace, checks } = run([gateway(), switchOf(), xg()])
+    expect(hostOf(trace, 'xg')).toMatchObject({ host: { line: { view: { line: { ref: 'us/gw' } } } }, link: { speed: 2500, capable: 10000 } })
+    expect(checks['poe-speed']).toMatchObject({ verdict: 'warn' })
+  })
+
+  it('does not count an injector as faster than the port it is plugged into', () => {
+    // Nothing on a gateway or a switch is faster than 2.5 GbE here, so the injector gains nothing and the device stays on the gateway's PoE port.
+    const slowGateway = asType(item('gw', 1, { ports: [port({ count: 2, max_speed_mbps: 2500, poe_class: 'PoE+', poe_direction: 'out' }), port({ count: 4, max_speed_mbps: 2500 })], metrics: [metric('poe_budget_w', 30)], power: ac }), 'Gateways')
+    const { trace } = run([slowGateway, switchOf(), xg(), injector()])
+    expect(hostOf(trace, 'xg')).toMatchObject({ host: { line: { view: { line: { ref: 'us/gw' } } } }, link: { speed: 2500 } })
+  })
+
+  it('says a device on an injector plugged into a gigabit port is slowed to gigabit', () => {
+    // The only data ports are the switch's gigabit ones and a gateway with no spare fast port: the 10 GbE injector can't do better than 1 GbE.
+    const gw = asType(item('gw', 1, { ports: [port({ count: 1, max_speed_mbps: 1000 })], power: ac }), 'Gateways')
+    const { trace, checks } = run([gw, switchOf(), xg(), injector()])
+    const h = hostOf(trace, 'xg')
+    expect(h?.link.speed).toBeLessThanOrEqual(2500)
+    expect(checks['poe-speed']).toMatchObject({ verdict: 'warn' })
+  })
+
+  it('does not put an injector that powers nothing on the gateway for its speed', () => {
+    const cam = item('cam', 1, { ports: [poeIn], metrics: [metric('power_draw_max_w', 8)] })
+    const { trace } = run([gateway(), switchOf(), cam, injector()])
+    expect(trace.portHosts?.find((h) => h.line.view.line.ref === 'us/inj')).toMatchObject({ host: { line: { view: { line: { ref: 'us/sw' } } } } })
   })
 })
