@@ -672,7 +672,8 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
   const poeDevices = outcome.onSwitches ?? lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
   const net = netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace)
   // An injector for each device left without needs a switch port to plug into: say so when there is one to spare.
-  const spare = net.find((c) => c.id === 'net-ports')?.net?.spare ?? 0
+  // A gateway with only PoE devices on it has no ports check to show, but still has ports to spare.
+  const spare = (net.find((c) => c.id === 'net-ports') ?? (outcome.stranded > 0 ? netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), undefined, true).find((c) => c.id === 'net-ports') : undefined))?.net?.spare ?? 0
   const short = outcome.stranded > 0 && spare > 0 ? poe.find((c) => c.shortfall && (c.id === 'poe-ports' || c.id === 'poe-power')) : undefined
   if (short) short.injectorShortfall = true
   return [...specsCheck(lines), ...poe, ...powerInputCheck(lines, powering), ...net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]

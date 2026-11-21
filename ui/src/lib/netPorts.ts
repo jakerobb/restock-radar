@@ -179,9 +179,11 @@ interface Placed {
  * devices already take PoE ports: `poeDevices` of them). A copper-only device may use a cage through a module,
  * but only when no copper port is left; one with only an SFP port needs a cage.
  *
+ * With `forSpare`, a gateway alone (with only PoE devices) is still counted, to say how many ports are spare; the result is not for display.
+ *
  * A second check warns when a switch with SFP cages has been uplinked over copper for want of a free cage upstream.
  */
-export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace): PlanCheck[] {
+export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace, forSpare = false): PlanCheck[] {
   const devices: Device[] = lines.flatMap((l) => {
     if (isSwitch(l) || isGateway(l) || poePowered(l)) return []
     const d = deviceOf(l)
@@ -201,7 +203,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   )
   const switches = units.filter((u) => u.kind === 'switch')
   const gateways = units.filter((u) => u.kind === 'gateway')
-  if (devices.length === 0 && switches.length === 0) return []
+  if (devices.length === 0 && switches.length === 0 && !(forSpare && gateways.length > 0)) return []
 
   if (units.length === 0 && unsure.length === 0) {
     return [{ id: 'net-ports', label: 'Switch ports', verdict: 'info', shortfall: true, text: `${devices.length} ${devices.length === 1 ? 'device needs' : 'devices need'} a switch port (${unique(devices.map((d) => name(d.line)))}); nothing in the plan provides switch ports.` }]
