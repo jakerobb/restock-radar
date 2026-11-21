@@ -302,9 +302,21 @@ interface PoeOutcome {
   onSwitches: number | null
   /** Devices left with no port or power, on a switch or an injector. */
   stranded: number
+  /** How many units of each injector line have a device on them. */
+  carrying: Map<DerivedLine, number>
+  /** Devices on a port slower than their own, those below 1 GbE of them, and the Mbps lost in all. */
+  slowed: number
+  crawling: number
+  lostMbps: number
 }
 
-function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outcome?: PoeOutcome): PlanCheck[] {
+/** How many devices of each line are put on an injector whatever the switches could do. */
+type Pins = Map<DerivedLine, number>
+
+/** The speed of the link each injector's units are plugged in by, from the ports check, by line and then unit: what runs through an injector runs no faster. */
+type InjectorLinks = Map<DerivedLine, number[]>
+
+function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outcome?: PoeOutcome, pins: Pins = new Map(), links: InjectorLinks = new Map()): PlanCheck[] {
   const budget = (l: DerivedLine) => budgetOf(l, powering)
   const needs = new Map(lines.map((l) => [l, needOf(l, powering)] as const))
   const consumers = lines.filter((l) => needs.get(l) !== null && needs.get(l) !== undefined)
@@ -385,15 +397,33 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
   })
   // A PoE injector is a one-port supplier that takes a switch port of its own, so a device goes on one only when no switch can power it.
   const injectorUnit = units.map((u) => isInjector(u.line.derived))
+  const capOf = (k: number) => (injectorUnit[k] ? (links.get(units[k]!.line)?.[units[k]!.n] ?? Infinity) : Infinity)
+  // Devices the search has chosen to go on an injector whatever the switches could do: this many of each line, the first ones.
+  const pinned = new Set<number>()
+  for (const [line, n] of pins) placing.flatMap((d, i) => (d.line === line && !d.exclude ? [i] : [])).slice(0, n).forEach((i) => pinned.add(i))
   const place = (): (Placement | null)[] => {
-    const result = allocate(placing, socketList.filter((x) => !injectorUnit[x.unit]), budgets)
-    const rest = result.flatMap((at, i) => (at === null ? [i] : []))
-    if (rest.length === 0 || !injectorUnit.includes(true)) return result
-    const onInjectors = allocate(rest.map((i) => placing[i]!), socketList.filter((x) => injectorUnit[x.unit]), budgets)
-    rest.forEach((i, k) => {
-      result[i] = onInjectors[k]!
+    const result: (Placement | null)[] = placing.map(() => null)
+    let onInjector = socketList.filter((x) => injectorUnit[x.unit])
+    const take = (at: Placement) => {
+      const k = onInjector.findIndex((x) => x.unit === at.unit && x.group === at.group)
+      if (k >= 0) onInjector = onInjector.filter((_, j) => j !== k)
+    }
+    const fill = (idx: number[], sockets: Socket[]) => {
+      const got = allocate(idx.map((i) => placing[i]!), sockets, budgets)
+      idx.forEach((i, k) => {
+        result[i] = got[k]!
+        if (got[k] && injectorUnit[got[k]!.unit]) take(got[k]!)
+      })
+    }
+    if (pinned.size > 0) fill([...pinned], onInjector)
+    // Everything else goes on the switches, and what they can't power on whatever injectors are left.
+    const rest = () => placing.flatMap((_, i) => (result[i] === null ? [i] : []))
+    fill(rest(), socketList.filter((x) => !injectorUnit[x.unit]))
+    if (injectorUnit.includes(true)) fill(rest(), onInjector)
+    // What runs through an injector goes no faster than the link the injector is plugged in by.
+    return result.map((at) => {
+      return at && injectorUnit[at.unit] ? { ...at, speed: Math.min(at.speed, capOf(at.unit)) } : at
     })
-    return result
   }
   let placed = place()
   // A switch on a PoE input draws the load of the devices placed on it, which depends on where it goes: settle it in a few rounds.
@@ -450,9 +480,17 @@ function poeCheck(lines: DerivedLine[], powering: Powering, trace?: Trace, outco
     const onNetwork = (k: number) => units[k]!.line.view.product?.type === 'Switches' || isGatewayProduct(units[k]!.line.view.product, units[k]!.line.derived)
     outcome.onSwitches = placed.filter((at) => at !== null && !injectorUnit[at.unit] && onNetwork(at.unit)).length
     outcome.stranded = stranded.length
+    outcome.carrying = new Map()
+    placed.forEach((at) => {
+      if (at && injectorUnit[at.unit]) outcome.carrying.set(units[at.unit]!.line, (outcome.carrying.get(units[at.unit]!.line) ?? 0) + 1)
+    })
+    const slowedNow = placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < d.speed)
+    outcome.slowed = slowedNow.length
+    outcome.crawling = placing.filter((d, i) => placed[i] !== null && placed[i]!.speed < Math.min(1000, d.speed)).length
+    outcome.lostMbps = placing.reduce((n, d, i) => n + (placed[i] !== null && placed[i]!.speed < d.speed ? d.speed - placed[i]!.speed : 0), 0)
   }
   if (trace) {
-    trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]!, link: { speed: Math.min(groups[placed[i]!.group]!.speed, d.speed > 0 ? d.speed : Infinity), media: 'RJ45', capable: d.speed > 0 ? d.speed : Infinity } }] : []))
+    trace.poeHosts = placing.flatMap((d, i) => (placed[i] && !poweredSwitches.has(d.line) ? [{ line: d.line, host: units[placed[i]!.unit]!, link: { speed: Math.min(groups[placed[i]!.group]!.speed, d.speed > 0 ? d.speed : Infinity, capOf(placed[i]!.unit)), media: 'RJ45', capable: d.speed > 0 ? d.speed : Infinity } }] : []))
     trace.poeLost = stranded.filter((d) => !poweredSwitches.has(d.line)).map((d) => d.line)
     trace.poe = units.map((u, k) => ({
       unit: u,
@@ -675,17 +713,72 @@ function specsCheck(lines: DerivedLine[]): PlanCheck[] {
  * for it, and says "can't tell" rather than guessing when a number is missing.
  */
 export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering: Powering = {}, trace?: Trace): PlanCheck[] {
-  const outcome: PoeOutcome = { onSwitches: null, stranded: 0 }
-  const poe = poeCheck(lines, powering, trace, outcome)
+  const first = layout(lines, powering, new Map())
+  let best = first
+  // The checks above put each device where its own port and power are best and use an injector only for what is left over. An injector
+  // already in the plan is also a way to run a device at the speed of the port it is plugged into, so where the plan has devices stranded or
+  // slowed, try giving some of them to injectors and keep whichever way of dividing them leaves the plan best off.
+  const injectors = lines.reduce((n, l) => n + (isInjector(l.derived) ? l.view.line.qty : 0), 0)
+  if (injectors > 0 && first.score.slice(0, 3).some((x) => x > 0)) {
+    const movable = lines.filter((l) => isPoePowered(l, powering) && powerOptions(l.derived) === null && !isInjector(l.derived))
+    let tried = 0
+    const walk = (i: number, left: number, pins: Pins) => {
+      if (tried > MAX_LAYOUTS) return
+      if (i === movable.length) {
+        if (pins.size === 0) return
+        tried++
+        const r = layout(lines, powering, pins)
+        if (lex(r.score, best.score) < 0) best = r
+        return
+      }
+      const l = movable[i]!
+      for (let n = 0; n <= Math.min(left, l.view.line.qty); n++) {
+        const next = new Map(pins)
+        if (n > 0) next.set(l, n)
+        walk(i + 1, left - n, next)
+      }
+    }
+    walk(0, injectors, new Map())
+  }
+  const run = best === first && !trace ? best : layout(lines, powering, best.pins, trace)
+  return [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+}
+
+/** The most ways of dividing devices between switches and injectors that are tried. */
+const MAX_LAYOUTS = 400
+
+/** Compares two lists of numbers, the first difference deciding; negative when `a` is better (lower). */
+const lex = (a: number[], b: number[]): number => a.reduce((d, x, i) => d || x - b[i]!, 0)
+
+/**
+ * One way of putting the plan's devices on ports: the PoE check and the ports check, the first working out which injectors carry something
+ * and how fast their links are for the second and the second saying how fast the first's devices end up. `pins` are devices put on
+ * injectors by choice. The score says how well it came out, lower being better: devices with no port or power, devices below 1 GbE,
+ * Mbps lost to slow ports, devices on a gateway's ports, and devices put on injectors.
+ */
+function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Trace) {
+  const outcome: PoeOutcome = { onSwitches: null, stranded: 0, carrying: new Map(), slowed: 0, crawling: 0, lostMbps: 0 }
+  const hasInjector = lines.some((l) => isInjector(l.derived))
+  let poe = poeCheck(lines, powering, hasInjector ? undefined : trace, outcome, pins)
   // Only the devices on a switch's PoE port take one of its ports: those on an injector take its (which is a device with a port of its own), and those with nothing take none.
   const poeDevices = outcome.onSwitches ?? lines.reduce((n, l) => n + (isPoePowered(l, powering) ? l.view.line.qty : 0), 0)
-  const net = netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), trace)
+  const scratch: Trace = trace ?? {}
+  const net = netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), scratch, false, outcome.carrying)
+  const stranded = outcome.stranded
+  if (hasInjector) {
+    // What runs through an injector goes no faster than the port the injector is on, so the PoE check is run again knowing those.
+    const links: InjectorLinks = new Map()
+    for (const h of scratch.portHosts ?? []) if (isInjector(h.line.derived)) links.set(h.line, [...(links.get(h.line) ?? []), h.link.speed])
+    poe = poeCheck(lines, powering, trace, outcome, pins, links)
+  }
   // An injector for each device left without needs a switch port to plug into: say so when there is one to spare.
   // A gateway with only PoE devices on it has no ports check to show, but still has ports to spare.
-  const spare = (net.find((c) => c.id === 'net-ports') ?? (outcome.stranded > 0 ? netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), undefined, true).find((c) => c.id === 'net-ports') : undefined))?.net?.spare ?? 0
-  const short = outcome.stranded > 0 && spare > 0 ? poe.find((c) => c.shortfall && (c.id === 'poe-ports' || c.id === 'poe-power')) : undefined
+  const spare = (net.find((c) => c.id === 'net-ports') ?? (stranded > 0 ? netPortCheck(lines, poeDevices, (l) => isPoePowered(l, powering), undefined, true).find((c) => c.id === 'net-ports') : undefined))?.net?.spare ?? 0
+  const short = stranded > 0 && spare > 0 ? poe.find((c) => c.shortfall && (c.id === 'poe-ports' || c.id === 'poe-power')) : undefined
   if (short) short.injectorShortfall = true
-  return [...specsCheck(lines), ...poe, ...powerInputCheck(lines, powering), ...net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  const stats = net.find((c) => c.id === 'net-ports')?.net
+  const score = [outcome.stranded + (stats?.unplaced ?? 0), outcome.crawling, outcome.lostMbps, stats?.onGateways ?? 0, [...pins.values()].reduce((a, b) => a + b, 0)]
+  return { poe, net, score, pins }
 }
 
 export interface Answer {

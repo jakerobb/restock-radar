@@ -124,6 +124,21 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     expect(net([copperOnly(8), gw([{ count: 4 }]), sw([{ count: 8 }])])).toMatchObject({ verdict: 'ok' }) // 7 on the switch, one on the gateway
   })
 
+  it('puts a device on the gateway’s faster port when that is the only way it runs at full speed, but not for the same speed', () => {
+    const fast = item('fast', 1, 'Storage', { ports: [port({ max_speed_mbps: 10000 })] })
+    const lines = [fast, copperOnly(1), gw([{ count: 1, max_speed_mbps: 10000 }, { count: 4 }]), sw([{ count: 8 }])]
+    expect(rows(lines, 'gw')).toEqual(['10 GbE RJ45 ports: 1 × fast'])
+    // The gigabit device stays on the switch; the gateway's gigabit ports are no better.
+    expect(rows(lines, 'sw')).toEqual(['1 GbE RJ45 ports: 1 × key'])
+  })
+
+  it('has a switch uplink to the slowest gateway port that gives it its speed, leaving the fast one for a device', () => {
+    const fast = item('fast', 1, 'Storage', { ports: [port({ max_speed_mbps: 10000 })] })
+    const checks = net([fast, gw([{ count: 1, max_speed_mbps: 10000 }, { count: 1 }]), sw([{ count: 8 }])])
+    expect(checks?.detail?.find((b) => b.title === 'Uplinks')?.rows).toEqual(['sw → gw (root): 1 GbE copper'])
+    expect(rows([fast, gw([{ count: 1, max_speed_mbps: 10000 }, { count: 1 }]), sw([{ count: 8 }])], 'gw')).toEqual(['10 GbE RJ45 ports: 1 × fast'])
+  })
+
   it('says it can’t tell when a switch’s ports are unknown and the known ones fall short', () => {
     const mystery = item('mystery', 1, 'Switches', { known: { ...known, ports: false }, ports: [] })
     expect(net([copperOnly(3), sw([{ count: 3 }]), mystery])).toMatchObject({ verdict: 'unknown' })

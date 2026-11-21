@@ -1,6 +1,7 @@
 import type { Port } from '../api/types'
 import type { DerivedLine, Link, PlanCheck, Trace } from './planChecks'
 import { formatSpeed } from './requirements'
+import { isInjector } from './injectors'
 import { isGatewayProduct } from './roles'
 
 export interface NetStats {
@@ -10,6 +11,8 @@ export interface NetStats {
   spare: number
   /** Switches with SFP-style cages that, for want of a free cage upstream, are uplinked over copper (or through a module). */
   sfpMisses: number
+  /** Devices that ended up on a gateway's port, the last resort. */
+  onGateways: number
 }
 
 /** Which kind of device plugs in where: copper, an SFP-style cage (SFP, SFP+, SFP28), or a combo position that takes either. */
@@ -48,6 +51,8 @@ interface Device {
   line: DerivedLine
   rj45: number | null
   sfp: number | null
+  /** False for a device whose speed means nothing (an injector with no device on it): it takes a port by the other rules, not the fastest. */
+  fast: boolean
 }
 
 const isSfp = (m: string) => m.startsWith('sfp') // QSFP is left out: nothing here assumes an adapter
@@ -104,7 +109,7 @@ function deviceOf(l: DerivedLine): Device | null {
   const best = (ps: Port[]) => (ps.length === 0 ? null : Math.max(...ps.map(speedOf)))
   const rj45 = best(ports.filter((p) => p.media === 'rj45'))
   const sfp = best(ports.filter((p) => isSfp(p.media)))
-  return rj45 === null && sfp === null ? null : { line: l, rj45, sfp }
+  return rj45 === null && sfp === null ? null : { line: l, rj45, sfp, fast: true }
 }
 
 type LinkKind = 'sfp' | 'copper' | 'module'
@@ -149,8 +154,9 @@ function uplink(child: Unit, parents: Unit[] | null): Uplink | null {
           if (l) cands.push({ cg, pg, ...l })
         }
   }
-  // Cages before copper before modules; then the fastest; then ports that aren't PoE (those are for devices), a PoE-in port first as it's no use to anything else.
-  const key = (c: Cand) => [c.kind === 'external' ? (c.cg.media === 'rj45' ? 1 : 0) : KIND_RANK[c.kind], -rankSpeed(c.speed), (c.cg.poe ? 1 : 0) + (c.pg?.poe ? 1 : 0), c.cg.uplinkOnly ? 0 : 1]
+  // Cages before copper before modules; then the fastest; then the slowest port upstream that gives that (so a quicker one stays free for a device that could use it);
+  // then ports that aren't PoE (those are for devices), a PoE-in port first as it's no use to anything else.
+  const key = (c: Cand) => [c.kind === 'external' ? (c.cg.media === 'rj45' ? 1 : 0) : KIND_RANK[c.kind], -rankSpeed(c.speed), c.pg ? rankSpeed(c.pg.speed) : 0, (c.cg.poe ? 1 : 0) + (c.pg?.poe ? 1 : 0), c.cg.uplinkOnly ? 0 : 1]
   cands.sort((a, b) => lex(key(a), key(b)))
   const c = cands[0]
   if (!c) return null
@@ -237,15 +243,23 @@ interface Placed {
  * devices already take PoE ports: `poeDevices` of them). A copper-only device may use a cage through a module,
  * but only when no copper port is left; one with only an SFP port needs a cage.
  *
+ * A device takes the fastest port it can use before it is sent to a gateway's: a gateway's port is the last resort among ports
+ * that give a device the same speed, not a reason to leave it slower than it could be.
+ *
  * With `forSpare`, a gateway alone (with only PoE devices) is still counted, to say how many ports are spare; the result is not for display.
+ *
+ * `carrying` says how many of an injector's units have a device on them: only those take a port for their speed, since
+ * what runs through an injector runs at the speed of its link, and an idle one has nothing to carry.
  *
  * A second check warns when a switch with SFP cages has been uplinked over copper for want of a free cage upstream.
  */
-export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace, forSpare = false): PlanCheck[] {
+export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowered: (l: DerivedLine) => boolean, trace?: Trace, forSpare = false, carrying?: Map<DerivedLine, number>): PlanCheck[] {
   const devices: Device[] = lines.flatMap((l) => {
     if (isSwitch(l) || isGateway(l) || poePowered(l)) return []
     const d = deviceOf(l)
-    return d ? Array.from({ length: l.view.line.qty }, () => d) : []
+    if (!d) return []
+    const busy = carrying && isInjector(l.derived) ? (carrying.get(l) ?? 0) : Infinity
+    return Array.from({ length: l.view.line.qty }, (_, n) => ({ ...d, fast: n < busy }))
   })
   const suppliers = lines.filter((l) => isSwitch(l) || isGateway(l))
   const unsure = suppliers.filter((l) => !l.derived?.known.ports)
@@ -274,7 +288,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   // Devices take what is left: a cage for one that has an SFP port, then the fastest port; the gateway's ports last of all.
   const order = devices.map((_, i) => i).sort((a, b) => {
     const kind = (d: Device) => (d.rj45 === null ? 0 : d.sfp === null ? 2 : 1)
-    return kind(devices[a]!) - kind(devices[b]!) || Math.max(devices[b]!.rj45 ?? 0, devices[b]!.sfp ?? 0) - Math.max(devices[a]!.rj45 ?? 0, devices[a]!.sfp ?? 0)
+    return Number(!devices[a]!.fast) - Number(!devices[b]!.fast) || kind(devices[a]!) - kind(devices[b]!) || Math.max(devices[b]!.rj45 ?? 0, devices[b]!.sfp ?? 0) - Math.max(devices[a]!.rj45 ?? 0, devices[a]!.sfp ?? 0)
   })
   const sockets = units.flatMap((u) => u.groups.filter(downstream))
   const freeOn = (u: Unit) => u.groups.filter(downstream).reduce((n, g) => n + g.free, 0)
@@ -292,9 +306,9 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
       if (g.free <= 0) continue
       const f = fit(dev, g)
       if (!f) continue
-      // A switch's port before a gateway's; no module; a cage for a device with an SFP port; the fastest; the slowest port that gives it (so quicker ones stay free); a plain port over a combo.
+      // No module; a cage for a device with an SFP port; the fastest port; a switch's before a gateway's; the slowest port that gives that speed (so quicker ones stay free); a plain port over a combo.
       // Ties then go to the switch nearest the root, then to the one with the most ports left, so the result doesn't depend on the order of the plan's lines.
-      const key = [g.unit.kind === 'gateway' ? 1 : 0, f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, -rankSpeed(f.speed), rankSpeed(g.speed), g.media === 'either' ? 1 : 0, g.unit.depth, -freeOn(g.unit)]
+      const key = [f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, dev.fast ? -rankSpeed(f.speed) : 0, g.unit.kind === 'gateway' ? 1 : 0, rankSpeed(g.speed), g.media === 'either' ? 1 : 0, g.unit.depth, -freeOn(g.unit)]
       if (!best || lex(key, best.key) < 0) best = { g, key, f }
     }
     if (best) {
@@ -329,7 +343,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   const spare = units.flatMap((u) => u.groups).reduce((n, g) => n + (g.uplinkOnly ? 0 : g.free), 0)
   const modules = placed.filter((p) => p?.module).length + links.filter((l) => l.kind === 'module').length
 
-  const stats: NetStats = { unplaced: lost, spare, sfpMisses: misses.length }
+  const stats: NetStats = { unplaced: lost, spare, sfpMisses: misses.length, onGateways: placed.filter((p) => p?.group.unit.kind === 'gateway').length }
 
   const how = (l: Uplink) => `${speedLabel(l.speed)}${l.kind === 'sfp' ? l.group.cage || l.parentGroup?.cage || 'SFP' : l.kind === 'copper' ? 'copper' : 'copper through an SFP module'}`
   const wiring = links.map((l) => `${unitName(l.unit)} → ${l.parent ? unitName(l.parent) : 'the network outside the plan'}${l.unit === root ? ' (root)' : ''}: ${l.kind === 'external' ? `${l.group.label} port` : how(l)}`)

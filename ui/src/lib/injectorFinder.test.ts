@@ -25,7 +25,7 @@ function plan(c: ReturnType<typeof catalog>, ...items: [string, number][]): Deri
 
 /** A camera, which takes PoE+ at 8 W, and a switch with 4 PoE+ ports of a 30 W budget, and 4 that give none. */
 const cam = (cls = 'PoE+', speed = 1000): Partial<Derived> => ({ ports: [port({ count: 1, max_speed_mbps: speed, poe_class: cls, poe_direction: 'in' })], metrics: [metric('power_draw_max_w', 8)] })
-const sw = (plain = 4): Partial<Derived> => ({ ports: [port({ count: 4, poe_class: 'PoE+', poe_direction: 'out' }), ...(plain > 0 ? [port({ count: plain })] : [])], metrics: [metric('poe_budget_w', 30)], power: ac })
+const sw = (plain = 4, speed = 1000): Partial<Derived> => ({ ports: [port({ count: 4, poe_class: 'PoE+', poe_direction: 'out' }), ...(plain > 0 ? [port({ count: plain, max_speed_mbps: speed })] : [])], metrics: [metric('poe_budget_w', 30)], power: ac })
 /** What deriveInjector gives: a port to plug into a switch, and one PoE port out, of a budget of its own. */
 const inj = (cls: string, watts: number, speed = 1000): Partial<Derived> => ({
   ports: [port({ count: 1, max_speed_mbps: speed, source: 'injector' }), port({ count: 1, max_speed_mbps: speed, poe_class: cls, poe_direction: 'out', source: 'injector' })],
@@ -55,9 +55,12 @@ describe('findInjectors', () => {
   })
 
   it('offers a slower injector too: the cheapest overall, and the cheapest that keeps the speed', () => {
-    const c = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, ...base.slice(1)])
-    // A 2.5 GbE camera: the gigabit injector is cheapest but slows it; the 2.5 GbE one keeps its speed.
+    const c = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, { slug: 'sw', type: 'Switches', cents: 30000, d: sw(4, 2500) }, ...base.slice(2)])
+    // A 2.5 GbE camera on a switch with 2.5 GbE ports: the gigabit injector is cheapest but slows it; the 2.5 GbE one keeps its speed.
     expect(slugs(c, ['cam', 4], ['sw', 1])).toEqual(['Cheapest that fits: 1 × at', 'Cheapest at full speed: 1 × at25'])
+    // On a switch with only gigabit ports even the 2.5 GbE injector is held to gigabit, so none keeps the camera's speed.
+    const slowSwitch = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, ...base.slice(1)])
+    expect(slugs(slowSwitch, ['cam', 4], ['sw', 1])).toEqual(['Cheapest that fits: 1 × at'])
     const gigabit = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, ...base.slice(1).filter((b) => b.slug !== 'at25')])
     const found = findInjectors(plan(gigabit, ['cam', 4], ['sw', 1]), gigabit.rows, gigabit.map)
     expect(found.slow).toBe(true)
