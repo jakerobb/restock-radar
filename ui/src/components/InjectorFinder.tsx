@@ -77,8 +77,7 @@ export function InjectorFinder({ plan, products, derived, powering, onAdd, onClo
         </button>
       </div>
       <p className="mt-1 text-sm text-muted">
-        {found.devices === 1 ? 'One device has' : `${found.devices} devices have`} no port with the PoE class and power it needs on a switch. An injector goes between a switch port and the device, so each takes a port of the switch and a wall outlet. Only injectors of a high enough class
-        {found.slow ? '' : ' and speed'} are listed.
+        {found.devices === 1 ? 'One device has' : `${found.devices} devices have`} no port with the PoE class and power it needs on a switch. An injector goes between a switch port and the device, so each takes a port of the switch and a wall outlet. Only injectors of a high enough class are listed; one slower than a device's own port says so.
       </p>
       {found.devices === 0 ? (
         <p className="mt-3 text-sm">Every device now has power.</p>

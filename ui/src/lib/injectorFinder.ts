@@ -33,7 +33,7 @@ export interface InjectorSuggestions {
   options: InjectorOption[]
   /** Every injector (or pair) that would do, in stock or not, cheapest first. */
   all: ListedInjector[]
-  /** True when the options are all slower than some device could run, because no injector at full speed would do. */
+  /** True when every injector that would do holds some device back to a slower speed than its own port. */
   slow: boolean
   /** Injectors in the plan that can't be bought now; the options were worked out without them. */
   replaces: DerivedLine[]
@@ -44,7 +44,8 @@ export interface InjectorSuggestions {
  * class (or isn't PoE at all) or because the switch's budget is spent. Each candidate is added to the plan, one to
  * as many as there are devices, and kept when the plan's own checks then find power, a high enough class and a switch
  * port for every injector (an injector is a device that has to be plugged in too). One that would hold a device
- * back to a slower speed than its own is kept apart; so is an injector that can't be bought now. Two different
+ * back to a slower speed than its own is still offered, marked, with the cheapest at full speed beside the cheapest overall; an injector
+ * that can't be bought now is kept apart. Two different
  * injectors are tried only where neither does alone, say a PoE+ one for the cameras and a PoE++ one for the access point.
  * An injector already in the plan counts, and one that can't be bought now is checked without and replaced.
  */
@@ -121,17 +122,16 @@ export function findInjectors(fullPlan: DerivedLine[], rows: CatalogRow[], produ
 
   const price = (f: Fit) => f.cents ?? Infinity
   const best = (xs: Fit[], by: (f: Fit) => number) => xs.reduce<Fit | undefined>((a, b) => (a === undefined || by(b) < by(a) ? b : a), undefined)
-  // Enough speed is what is asked for; a slower injector is offered only when no other would do.
-  const full = fits.filter((f) => f.slowed === 0)
-  const pool = full.length > 0 ? full : fits
-  const stocked = pool.filter((f) => f.inStock)
+  // Any injector with enough class and power does the job; a slower one costs the device some speed, which is said on it.
+  const stocked = fits.filter((f) => f.inStock)
   const cheapest = best(stocked, price)
   const picks: [string, Fit | undefined][] = [
-    [full.length > 0 ? 'Cheapest that fits' : 'Cheapest, though slower than the devices', cheapest],
-    ['Cheaper, but not in stock', best(pool.filter((f) => !f.inStock && price(f) < price(cheapest ?? f)), price)],
+    ['Cheapest that fits', cheapest],
+    ['Cheapest at full speed', best(stocked.filter((f) => f.slowed === 0), price)],
+    ['Cheaper, but not in stock', best(fits.filter((f) => !f.inStock && price(f) < price(cheapest ?? f)), price)],
   ]
   const options: InjectorOption[] = []
-  for (const [label, fit] of picks) if (fit) options.push({ ...fit, label, replaces })
-  const all = pool.map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.adds[0]!.row.product.title.localeCompare(b.adds[0]!.row.product.title))
-  return { devices, options, all, slow: full.length === 0 && fits.length > 0, replaces }
+  for (const [label, fit] of picks) if (fit && !options.some((o) => o.adds === fit.adds)) options.push({ ...fit, label, replaces })
+  const all = fits.map((f) => ({ ...f, replaces })).sort((a, b) => price(a) - price(b) || a.adds[0]!.row.product.title.localeCompare(b.adds[0]!.row.product.title))
+  return { devices, options, all, slow: fits.length > 0 && fits.every((f) => f.slowed > 0), replaces }
 }
