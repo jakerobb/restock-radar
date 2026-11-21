@@ -159,6 +159,64 @@ function uplink(child: Unit, parents: Unit[] | null): Uplink | null {
   return { unit: child, parent: c.pg?.unit ?? null, kind: c.kind, speed: c.speed, group: c.cg, parentGroup: c.pg }
 }
 
+/** The network as wired: the units of every switch and gateway with known ports, and how the switches uplink. */
+function wire(lines: DerivedLine[]) {
+  const units: Unit[] = lines
+    .filter((l) => isSwitch(l) || isGateway(l))
+    .flatMap((l) =>
+      l.derived?.known.ports
+        ? Array.from({ length: l.view.line.qty }, (_, n): Unit => {
+            const u: Unit = { line: l, n, kind: isGateway(l) ? 'gateway' : 'switch', groups: [], cages: 0, depth: 0 }
+            u.groups = groupsOf(u)
+            u.cages = u.groups.filter((g) => g.media !== 'rj45' && !g.uplinkOnly).reduce((a, g) => a + g.free, 0)
+            return u
+          })
+        : [],
+    )
+  const switches = units.filter((u) => u.kind === 'switch')
+  const gateways = units.filter((u) => u.kind === 'gateway')
+
+  // The wiring: the switch with the most cages is the root; the rest attach to it, then to whatever is nearest, flattest first.
+  const links: Uplink[] = []
+  const noUplink: Unit[] = []
+  const attach = (u: Unit, to: Uplink | null) => {
+    if (!to) noUplink.push(u)
+    else {
+      u.depth = (to.parent && to.parent.kind === 'switch' ? to.parent.depth : 0) + 1
+      links.push(to)
+    }
+  }
+  const ranked = [...switches].sort((a, b) => b.cages - a.cages || b.groups.reduce((n, g) => n + g.free, 0) - a.groups.reduce((n, g) => n + g.free, 0))
+  const [root, ...rest] = ranked
+  if (root) {
+    attach(root, uplink(root, gateways.length > 0 ? gateways : null))
+    for (const u of rest) {
+      let to: Uplink | null = null
+      const attached = switches.filter((s) => s.depth > 0 && s !== u)
+      for (const d of [...new Set(attached.map((s) => s.depth))].sort((a, b) => a - b)) {
+        to = uplink(u, attached.filter((s) => s.depth === d))
+        if (to) break
+      }
+      attach(u, to ?? (gateways.length > 0 ? uplink(u, gateways) : null))
+    }
+  }
+  return { units, switches, gateways, links, noUplink, root }
+}
+
+/**
+ * How many hops from the gateway each switch is (1 for the root switch), by line and then unit number: what the
+ * PoE check needs to prefer a switch nearer the top. A switch with no uplink is as deep as it gets; a gateway is 0.
+ */
+export function unitDepths(lines: DerivedLine[]): Map<DerivedLine, number[]> {
+  const depths = new Map<DerivedLine, number[]>()
+  for (const u of wire(lines).units) {
+    const row = depths.get(u.line) ?? []
+    row[u.n] = u.kind === 'gateway' ? 0 : u.depth > 0 ? u.depth : Infinity
+    depths.set(u.line, row)
+  }
+  return depths
+}
+
 interface Placed {
   group: Group
   speed: number
@@ -191,18 +249,7 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   })
   const suppliers = lines.filter((l) => isSwitch(l) || isGateway(l))
   const unsure = suppliers.filter((l) => !l.derived?.known.ports)
-  const units: Unit[] = suppliers.flatMap((l) =>
-    l.derived?.known.ports
-      ? Array.from({ length: l.view.line.qty }, (_, n): Unit => {
-          const u: Unit = { line: l, n, kind: isGateway(l) ? 'gateway' : 'switch', groups: [], cages: 0, depth: 0 }
-          u.groups = groupsOf(u)
-          u.cages = u.groups.filter((g) => g.media !== 'rj45' && !g.uplinkOnly).reduce((a, g) => a + g.free, 0)
-          return u
-        })
-      : [],
-  )
-  const switches = units.filter((u) => u.kind === 'switch')
-  const gateways = units.filter((u) => u.kind === 'gateway')
+  const { units, switches, gateways, links, noUplink, root } = wire(lines)
   if (devices.length === 0 && switches.length === 0 && !(forSpare && gateways.length > 0)) return []
 
   if (units.length === 0 && unsure.length === 0) {
@@ -210,31 +257,6 @@ export function netPortCheck(lines: DerivedLine[], poeDevices: number, poePowere
   }
 
   const downstream = (g: Group) => !g.uplinkOnly
-
-  // The wiring: the switch with the most cages is the root; the rest attach to it, then to whatever is nearest, flattest first.
-  const links: Uplink[] = []
-  const noUplink: Unit[] = []
-  const attach = (u: Unit, to: Uplink | null) => {
-    if (!to) noUplink.push(u)
-    else {
-      u.depth = (to.parent && to.parent.kind === 'switch' ? to.parent.depth : 0) + 1
-      links.push(to)
-    }
-  }
-  const ranked = [...switches].sort((a, b) => b.cages - a.cages || b.groups.reduce((n, g) => n + g.free, 0) - a.groups.reduce((n, g) => n + g.free, 0))
-  const [root, ...rest] = ranked
-  if (root) {
-    attach(root, uplink(root, gateways.length > 0 ? gateways : null))
-    for (const u of rest) {
-      let to: Uplink | null = null
-      const attached = switches.filter((s) => s.depth > 0 && s !== u)
-      for (const d of [...new Set(attached.map((s) => s.depth))].sort((a, b) => a - b)) {
-        to = uplink(u, attached.filter((s) => s.depth === d))
-        if (to) break
-      }
-      attach(u, to ?? (gateways.length > 0 ? uplink(u, gateways) : null))
-    }
-  }
 
   // PoE-powered devices are on PoE ports, the slowest ones being the likeliest. The uplinks have already taken theirs (from ports
   // that aren't PoE where there are any); if that leaves too few PoE ports, the PoE check, which doesn't know about uplinks, has missed it.
