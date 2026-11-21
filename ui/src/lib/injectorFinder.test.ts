@@ -54,14 +54,15 @@ describe('findInjectors', () => {
     expect(found.all.map((f) => f.adds[0]!.row.product.slug)).toEqual(['at', 'at25', 'bt'])
   })
 
-  it('wants an injector that is fast enough, and falls back to a slower one only when none is', () => {
+  it('offers a slower injector too: the cheapest overall, and the cheapest that keeps the speed', () => {
     const c = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, ...base.slice(1)])
-    // A 2.5 GbE camera: only the 2.5 GbE injector keeps its speed.
-    expect(slugs(c, ['cam', 4], ['sw', 1])).toEqual(['Cheapest that fits: 1 × at25'])
+    // A 2.5 GbE camera: the gigabit injector is cheapest but slows it; the 2.5 GbE one keeps its speed.
+    expect(slugs(c, ['cam', 4], ['sw', 1])).toEqual(['Cheapest that fits: 1 × at', 'Cheapest at full speed: 1 × at25'])
     const gigabit = catalog([{ slug: 'cam', type: 'Cameras', cents: 19900, d: cam('PoE+', 2500) }, ...base.slice(1).filter((b) => b.slug !== 'at25')])
     const found = findInjectors(plan(gigabit, ['cam', 4], ['sw', 1]), gigabit.rows, gigabit.map)
     expect(found.slow).toBe(true)
-    expect(found.options[0]).toMatchObject({ label: 'Cheapest, though slower than the devices', slowed: 1 })
+    expect(found.options).toHaveLength(1)
+    expect(found.options[0]).toMatchObject({ label: 'Cheapest that fits', slowed: 1 })
   })
 
   it('is for a port that exists but gives no PoE: every camera on a switch with plain ports only', () => {
