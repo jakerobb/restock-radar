@@ -494,3 +494,15 @@ describe('a PoE injector', () => {
   })
 })
 
+
+describe('a PoE injector on a gateway with only PoE devices', () => {
+  it('is offered when the gateway has a data port to spare, though no ports check is shown', () => {
+    const gw = item('gw', 1, { ports: [poeOut(1), port({ count: 3 })], metrics: [metric('poe_budget_w', 30)], power: [src('ac')] })
+    const gateway = { ...gw, view: { ...gw.view, product: { ...gw.view.product!, type: 'Gateways' } } } as DerivedLine
+    const cam = item('cam', 2, { ports: [poeIn], metrics: [metric('power_draw_max_w', 8)] })
+    const checks = planChecks([cam, gateway])
+    expect(checks.some((c) => c.id === 'net-ports')).toBe(false)
+    expect(checks.find((c) => c.id === 'poe-power' || c.id === 'poe-ports')).toBeDefined()
+    expect(checks.some((c) => c.injectorShortfall)).toBe(true)
+  })
+})
