@@ -15,6 +15,7 @@ import (
 	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/unifidevices"
 	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
@@ -466,5 +467,35 @@ func TestDebugPoller(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("response missing %s: %s", want, rec.Body)
 		}
+	}
+}
+
+type fakeDevices struct {
+	devices []unifidevices.Device
+	err     error
+}
+
+func (f fakeDevices) Devices(context.Context) ([]unifidevices.Device, error) { return f.devices, f.err }
+
+func TestUnifiDevices(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.devices = fakeDevices{devices: []unifidevices.Device{{SKU: "USW-Flex-Mini", Name: "Switch Flex Mini", Type: "switch", Shortnames: []string{"USMINI"}, SysIDs: []string{"ed30"}}}}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/unifi-devices", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Devices []unifidevices.Device `json:"devices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Devices) != 1 || body.Devices[0].SKU != "USW-Flex-Mini" {
+		t.Fatalf("unexpected body %s (%v)", rec.Body, err)
+	}
+
+	srv.devices = fakeDevices{err: errors.New("down")}
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/unifi-devices", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status %d, want 502", rec.Code)
 	}
 }

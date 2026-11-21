@@ -458,3 +458,19 @@ export interface OverrideChange {
   /** The override as it became; null for a deletion. */
   after: SpecOverride | null
 }
+
+/** One device of Ubiquiti's public list, as the server serves it, for matching the codes a console reports to products. */
+export interface UnifiDeviceInfo {
+  /** The product's SKU without its region ("USW-Pro-HD-24-PoE"). */
+  sku: string
+  name: string
+  type: string
+  /** The codes devices report, and the regional SKUs. */
+  shortnames: string[]
+  /** Hex system ids, lower case; a device's model code ends in its own. */
+  sysids: string[]
+}
+
+export interface UnifiDevicesResponse {
+  devices: UnifiDeviceInfo[]
+}

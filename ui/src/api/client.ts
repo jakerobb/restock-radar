@@ -1,4 +1,4 @@
-import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, Me, OverrideChange, OverrideRequest, ProductSpecsResponse, SpecOverride, SpecsGapsResponse, SpecsNotExpected, ProductsResponse, RefreshResult, StatusResponse } from './types'
+import type { AddItemRequest, AddItemResult, Derived, HistoryResponse, Me, OverrideChange, OverrideRequest, ProductSpecsResponse, SpecOverride, SpecsGapsResponse, SpecsNotExpected, ProductsResponse, RefreshResult, StatusResponse, UnifiDevicesResponse } from './types'
 
 /** An error response from the API; message is safe to show to the user. */
 export class ApiError extends Error {
@@ -71,3 +71,5 @@ export const markSpecsNotExpected = (slug: string, reason = '') =>
   })
 
 export const unmarkSpecsNotExpected = (slug: string) => request<null>(`/v1/specs/not-expected/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+
+export const getUnifiDevices = () => request<UnifiDevicesResponse>('/v1/unifi-devices')

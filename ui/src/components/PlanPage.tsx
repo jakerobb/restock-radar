@@ -25,6 +25,7 @@ import { NvrFinder } from './NvrFinder'
 import { InjectorFinder } from './InjectorFinder'
 import { PlanSearch } from './PlanSearch'
 import { ConvertPlan } from './ConvertPlan'
+import { ImportUnifi } from './ImportUnifi'
 import { NamePlanDialog } from './NamePlanDialog'
 import { SwitchFinder } from './SwitchFinder'
 import { Badge } from './ui/Badge'
@@ -534,6 +535,7 @@ export default function PlanPage() {
               Add product
             </Button>
           )}
+          {!shared && <ImportUnifi products={offered} region={region} />}
           <ConvertPlan
             name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name}
             lines={lines}
