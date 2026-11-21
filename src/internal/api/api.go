@@ -15,6 +15,7 @@ import (
 	"github.com/jakerobb/restock-radar/internal/metrics"
 	"github.com/jakerobb/restock-radar/internal/poller"
 	"github.com/jakerobb/restock-radar/internal/store"
+	"github.com/jakerobb/restock-radar/internal/unifidevices"
 	"github.com/jakerobb/restock-radar/internal/webui"
 )
 
@@ -47,6 +48,13 @@ type Server struct {
 	refreshes *windowLimiter
 	// auth says who each request is from, and so what it may change.
 	auth auth.Authenticator
+	// devices is Ubiquiti's public list of devices, for matching the codes a console reports to products.
+	devices DeviceSource
+}
+
+// DeviceSource gives Ubiquiti's device list.
+type DeviceSource interface {
+	Devices(ctx context.Context) ([]unifidevices.Device, error)
 }
 
 const (
@@ -58,7 +66,7 @@ const (
 )
 
 func New(s *store.Store, p Poller, cfg *config.Config) *Server {
-	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow), refreshes: newWindowLimiter(refreshesPerWindow, refreshesWindow), auth: auth.New(cfg.Auth)}
+	return &Server{store: s, poller: p, cfg: cfg, adds: newWindowLimiter(addsPerWindow, addsWindow), overrides: newWindowLimiter(overridesPerWindow, overridesWindow), refreshes: newWindowLimiter(refreshesPerWindow, refreshesWindow), auth: auth.New(cfg.Auth), devices: unifidevices.New(cfg.UserAgent)}
 }
 
 func (srv *Server) Handler() http.Handler {
@@ -75,6 +83,7 @@ func (srv *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/specs/gaps", srv.handleSpecsGaps)
 	mux.HandleFunc("PUT /v1/specs/not-expected", srv.require(auth.OverridesWrite, srv.handleMarkSpecsNotExpected))
 	mux.HandleFunc("DELETE /v1/specs/not-expected/{slug}", srv.require(auth.OverridesWrite, srv.handleUnmarkSpecsNotExpected))
+	mux.HandleFunc("GET /v1/unifi-devices", srv.handleUnifiDevices)
 	mux.HandleFunc("GET /v1/me", srv.handleMe)
 	mux.HandleFunc("GET /health", srv.handleHealth)
 	mux.HandleFunc("GET /metrics", srv.handleMetrics)
@@ -207,4 +216,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("failed to encode JSON response", "err", err)
 	}
+}
+
+// handleUnifiDevices serves Ubiquiti's device list, cut down to what the plan's UniFi import needs to turn the
+// model codes in a console's support file or backup into products. It holds nothing about the user: the import
+// reads their file in the browser and only ever asks for this.
+func (srv *Server) handleUnifiDevices(w http.ResponseWriter, r *http.Request) {
+	devices, err := srv.devices.Devices(r.Context())
+	if err != nil {
+		slog.Error("failed to read the UniFi device list", "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the UniFi device list is unavailable"})
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
 }

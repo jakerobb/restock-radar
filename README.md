@@ -81,6 +81,8 @@ A dropdown at the top (with the store's flags) picks which region's products the
 
 On the plan page, "Convert to another region" remakes the plan from another store's products, matching each line to the store's product (by its id or slug, and for the few the store sells separately in each region, such as `ups-tower-us` and `ups-tower-eu`, by the slug without its region, then the title) and its variant by SKU (a region's own SKU, such as `UNAS-2-B-EU` for `UNAS-2-B`, counts, and where a store lists several, such as an EU and a UK plug, the one made for that region), then by name. It lists what that store doesn't sell and opens the result in a new tab as a shared plan, priced in that store's currency, so your own plan stays as it is and the two can be compared.
 
+"Import from UniFi" makes a new plan from the equipment a UniFi console already has. Give it a support file (Settings, System, Support File; the one with only UniFi Network in it is quickest) or a UniFi Network backup (`.unf`) and it lists the devices it found as products of the store you are viewing, with the quantity of each, at today's prices; tick or untick what to include and it makes a new plan. The file is read in your browser and isn't uploaded: only each device's model is kept, never its address, serial, name or any password or key in it, and the only request made is for Ubiquiti's public list of device codes (`GET /v1/unifi-devices`) that tells the model codes apart. Devices the store doesn't list, or that can't be identified, are named so you can add them yourself. A UniFi OS backup (`.unifi`) of the whole console can't be read.
+
 Other pages (client-side routes; the server falls back to `index.html` for them):
 
 | Path | What |

@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrideHistory, getProductSpecs, getProducts, getSpecsGaps, getStatus, markSpecsNotExpected, putOverride, refreshProduct, unmarkSpecsNotExpected } from './client'
+import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrideHistory, getProductSpecs, getProducts, getSpecsGaps, getStatus, getUnifiDevices, markSpecsNotExpected, putOverride, refreshProduct, unmarkSpecsNotExpected } from './client'
 import type { OverrideRequest, Permission } from './types'
 
 const productsKey = ['products'] as const
@@ -115,4 +115,9 @@ export function useSetSpecsNotExpected() {
     mark: useMutation({ mutationFn: (v: { slug: string; reason?: string }) => markSpecsNotExpected(v.slug, v.reason), onSuccess: done }),
     unmark: useMutation({ mutationFn: (slug: string) => unmarkSpecsNotExpected(slug), onSuccess: done }),
   }
+}
+
+/** Ubiquiti's device list, for the UniFi import; read only once it is wanted, and kept, since it changes with new models. */
+export function useUnifiDevices(enabled: boolean) {
+  return useQuery({ queryKey: ['unifi-devices'], queryFn: getUnifiDevices, enabled, staleTime: 60 * 60_000 })
 }
