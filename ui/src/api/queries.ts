@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrideHistory, getProductSpecs, getProducts, getSpecsGaps, getStatus, getUnifiDevices, markSpecsNotExpected, putOverride, refreshProduct, unmarkSpecsNotExpected } from './client'
+import { addItem, deleteOverride, getDerived, getHistory, getMe, getOverrides, getOverrideHistory, getProductSpecs, getProducts, getSpecsGaps, getStatus, getUnifiDevices, markSpecsNotExpected, putOverride, refreshProduct, unmarkSpecsNotExpected } from './client'
 import type { OverrideRequest, Permission } from './types'
 
 const productsKey = ['products'] as const
@@ -58,6 +58,7 @@ export function useRefreshProduct(region: string, slug: string) {
         queryClient.invalidateQueries({ queryKey: productsKey }),
         queryClient.invalidateQueries({ queryKey: ['specs', region, slug] }),
         queryClient.invalidateQueries({ queryKey: ['derived'] }),
+      queryClient.invalidateQueries({ queryKey: ['overrides'] }),
         queryClient.invalidateQueries({ queryKey: ['history'] }),
       ]),
   })
@@ -85,6 +86,11 @@ function useRefreshAfterOverrideChange(region: string, slug: string) {
       queryClient.invalidateQueries({ queryKey: ['derived'] }),
       queryClient.invalidateQueries({ queryKey: ['override-history', region, slug] }),
     ])
+}
+
+/** Every override, for every product. */
+export function useOverrides() {
+  return useQuery({ queryKey: ['overrides'], queryFn: getOverrides })
 }
 
 export function useSaveOverride(region: string, slug: string) {

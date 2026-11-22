@@ -44,7 +44,7 @@ interface FormProps {
 }
 
 /** Edits, hides or reverts one entry of a product's specification, as an override. */
-function EntryForm({ region, slug, target, initial, published, revert, canHide, onDone }: FormProps) {
+export function EntryForm({ region, slug, target, initial, published, revert, canHide, onDone }: FormProps) {
   const save = useSaveOverride(region, slug)
   const remove = useDeleteOverride(region, slug)
   const [kind, setKind] = useState(initial?.kind === 'flag' ? 'flag' : 'text')
