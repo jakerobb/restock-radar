@@ -173,6 +173,7 @@ describe('products with no tech specs', () => {
       'PUT /v1/specs/not-expected': { body: { slug: 'cable', reason: '', created_at: '2026-11-15T10:00:00Z' } },
     })
     renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Products without tech specs' }))
     const card = await screen.findByRole('region', { name: 'Products with no tech specs' })
     expect(within(card).getAllByRole('listitem')).toHaveLength(3) // the cable (both regions), the tie and the panels; not the one yet to be read
     expect(within(card).queryByText('Soon')).not.toBeInTheDocument()
@@ -196,6 +197,7 @@ describe('products with no tech specs', () => {
       },
     })
     renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Parser issues' }))
     const card = await screen.findByRole('region', { name: 'Spec issues' })
     expect(card).toHaveTextContent('3 issues in 2 products')
     const items = within(card).getAllByRole('link').map((a) => a.textContent)
@@ -207,7 +209,21 @@ describe('products with no tech specs', () => {
   it('has no issues card when no product has an issue', async () => {
     stubFetch({ 'GET /v1/status': { body: status() }, 'GET /v1/derived': { body: [derived({ slug: 'clean' })] } })
     renderRoute('/status')
-    await screen.findByRole('region', { name: 'Overview' })
+    await userEvent.click(await screen.findByRole('tab', { name: 'Parser issues' }))
+    expect(await screen.findByText('No parser issues.')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Spec issues' })).not.toBeInTheDocument()
+  })
+
+  it('splits the page into three tabs, showing only the stats at first', async () => {
+    stubFetch({ 'GET /v1/status': { body: status() }, 'GET /v1/derived': { body: [] }, 'GET /v1/specs/gaps': { body: { products: [], not_expected: [] } } })
+    renderRoute('/status')
+    expect((await screen.findAllByRole('tab')).map((t) => t.textContent)).toEqual(['Stats', 'Products without tech specs', 'Parser issues'])
+    expect(screen.getByRole('tab', { name: 'Stats' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('region', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Products with no tech specs' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Parser issues' }))
+    expect(screen.queryByRole('region', { name: 'Overview' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Parser issues' })).toHaveAttribute('aria-selected', 'true')
   })
 })

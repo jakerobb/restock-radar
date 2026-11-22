@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useCan, useDerived, useSetSpecsNotExpected, useSpecsGaps, useStatus } from '../api/queries'
 import type { Presence, StatusRegion, StatusResponse } from '../api/types'
@@ -180,11 +180,11 @@ function NoSpecsCard() {
     rows.set(key, row)
   }
   const list = [...rows.values()]
-  if (list.length === 0) return null
+  if (list.length === 0) return <p className="py-4 text-muted">No products are missing tech specs.</p>
   const open = list.filter((r) => !r.notExpected).length
   const error = mark.error ?? unmark.error
   return (
-    <Card aria-label="Products with no tech specs" className="sm:col-span-2">
+    <Card aria-label="Products with no tech specs">
       <h2 className="font-semibold">Products with no usable tech specs</h2>
       <p className="mt-1 text-sm text-muted">
         {nf.format(open)} of {nf.format(list.length)} {list.length === 1 ? 'product is' : 'products are'} not marked as having none to expect. Plans holding an unmarked one are called unsure.
@@ -228,10 +228,10 @@ function NoSpecsCard() {
 function IssuesCard() {
   const { data } = useDerived()
   const rows = (data ?? []).filter((d) => d.issues.length > 0).sort((a, b) => a.title.localeCompare(b.title) || a.region.localeCompare(b.region))
-  if (rows.length === 0) return null
+  if (rows.length === 0) return <p className="py-4 text-muted">No parser issues.</p>
   const total = rows.reduce((n, d) => n + d.issues.length, 0)
   return (
-    <Card aria-label="Spec issues" className="sm:col-span-2">
+    <Card aria-label="Spec issues">
       <h2 className="font-semibold">Specs the parsers couldn't read or had doubts about</h2>
       <p className="mt-1 text-sm text-muted">
         {nf.format(total)} {total === 1 ? 'issue' : 'issues'} in {nf.format(rows.length)} {rows.length === 1 ? 'product' : 'products'}. The checks use what could be read; a correction or a parser fix clears one.
@@ -259,14 +259,60 @@ function IssuesCard() {
   )
 }
 
+const TABS = [
+  { id: 'stats', label: 'Stats' },
+  { id: 'no-specs', label: 'Products without tech specs' },
+  { id: 'issues', label: 'Parser issues' },
+] as const
+type TabId = (typeof TABS)[number]['id']
+
 function StatusContent({ s }: { s: StatusResponse }) {
+  const [tab, setTab] = useState<TabId>('stats')
+  const move = (e: React.KeyboardEvent, i: number) => {
+    const next = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : null
+    if (next === null) return
+    e.preventDefault()
+    const t = TABS[(next + TABS.length) % TABS.length]!
+    setTab(t.id)
+    document.getElementById(`status-tab-${t.id}`)?.focus()
+  }
+  return (
+    <>
+      <div role="tablist" aria-label="Status sections" className="mt-4 flex gap-1 overflow-x-auto border-b border-line">
+        {TABS.map((t, i) => (
+          <button
+            key={t.id}
+            id={`status-tab-${t.id}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`status-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            onClick={() => setTab(t.id)}
+            onKeyDown={(e) => move(e, i)}
+            className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 ${tab === t.id ? 'border-current font-semibold' : 'border-transparent text-muted'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`status-panel-${tab}`} aria-labelledby={`status-tab-${tab}`} className="mt-4">
+        {tab === 'stats' && <StatsTab s={s} />}
+        {tab === 'no-specs' && <NoSpecsCard />}
+        {tab === 'issues' && <IssuesCard />}
+      </div>
+    </>
+  )
+}
+
+function StatsTab({ s }: { s: StatusResponse }) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const regions = Object.entries(s.regions).sort(([a], [b]) => a.localeCompare(b))
   const multiRegion = regions.length > 1 || new Set(s.categories.map((c) => c.region)).size > 1
   const variantStatuses = Object.entries(s.variants_by_status).sort(([, a], [, b]) => b - a)
 
   return (
-    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2">
       <Card aria-label="Overview" className="sm:col-span-2">
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Stat label="Tracked products">{nf.format(s.products)}</Stat>
@@ -316,8 +362,6 @@ function StatusContent({ s }: { s: StatusResponse }) {
         withoutLabel="Without URL"
         notCheckedLabel="not checked yet"
       />
-      <NoSpecsCard />
-      <IssuesCard />
 
       <Card aria-label="Stock">
         <h2 className="font-semibold">Variants by stock status</h2>
