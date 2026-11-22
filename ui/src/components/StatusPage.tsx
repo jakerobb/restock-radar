@@ -192,8 +192,8 @@ function NoSpecsCard() {
       {error && <p role="alert" className="mt-1 text-sm text-bad">{error.message}</p>}
       <ul className="mt-2">
         {list.map((r) => (
-          <li key={r.slug} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line py-1.5">
-            <span>
+          <li key={r.slug} className="flex items-center justify-between gap-x-3 border-b border-line py-1.5">
+            <span className="min-w-0">
               <Link to="/p/$region/$slug" params={r.regions[0]!} className="underline underline-offset-2">
                 {r.title}
               </Link>{' '}
@@ -206,7 +206,7 @@ function NoSpecsCard() {
             {canEdit && (
               <button
                 type="button"
-                className="cursor-pointer text-sm underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="shrink-0 cursor-pointer whitespace-nowrap text-sm underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={mark.isPending || unmark.isPending}
                 onClick={() => (r.notExpected ? unmark.mutate(r.slug) : mark.mutate({ slug: r.slug }))}
               >
