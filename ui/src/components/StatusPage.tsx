@@ -328,32 +328,6 @@ function StatsTab({ s }: { s: StatusResponse }) {
 
       {s.by_region.length > 1 && <RegionsCard regions={s.by_region} />}
 
-      <Card aria-label="Categories" className="sm:col-span-2">
-        <h2 className="font-semibold">
-          Enrolled categories <span className="font-normal text-muted">({s.categories.length})</span>
-        </h2>
-        {s.categories.length === 0 ? (
-          <p className="mt-2 text-muted">No categories enrolled yet.</p>
-        ) : (
-          <ul className="mt-2 columns-1 gap-8 sm:columns-2">
-            {s.categories.map((c) => (
-              <li key={`${c.region}/${c.id}`} className="flex break-inside-avoid justify-between gap-3 border-b border-line py-1.5">
-                <span>
-                  {categoryName(c.id)}
-                  {multiRegion && <span className="text-muted"> · {c.region}</span>}
-                </span>
-                <span className="font-semibold tabular-nums">{nf.format(c.products)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {s.uncategorized > 0 && (
-          <p className="mt-2 text-sm text-muted">
-            {nf.format(s.uncategorized)} {s.uncategorized === 1 ? 'product has' : 'products have'} no known category yet.
-          </p>
-        )}
-      </Card>
-
       <PresenceCard title="Tech specs collected" data={s.specs} withLabel="With specs" withoutLabel="Without specs" notCheckedLabel="not fetched yet" />
       <PresenceCard
         title="techspecs.ui.com page"
@@ -409,6 +383,32 @@ function StatsTab({ s }: { s: StatusResponse }) {
         {regions.length > 0 && (
           <p className="mt-2 text-sm text-muted">
             Regions: {regions.map(([id, n]) => `${id} (${nf.format(n)})`).join(', ')}
+          </p>
+        )}
+      </Card>
+
+      <Card aria-label="Categories" className="sm:col-span-2">
+        <h2 className="font-semibold">
+          Enrolled categories <span className="font-normal text-muted">({s.categories.length})</span>
+        </h2>
+        {s.categories.length === 0 ? (
+          <p className="mt-2 text-muted">No categories enrolled yet.</p>
+        ) : (
+          <ul className="mt-2 columns-1 gap-8 sm:columns-2">
+            {s.categories.map((c) => (
+              <li key={`${c.region}/${c.id}`} className="flex break-inside-avoid justify-between gap-3 border-b border-line py-1.5">
+                <span>
+                  {categoryName(c.id)}
+                  {multiRegion && <span className="text-muted"> · {c.region}</span>}
+                </span>
+                <span className="font-semibold tabular-nums">{nf.format(c.products)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {s.uncategorized > 0 && (
+          <p className="mt-2 text-sm text-muted">
+            {nf.format(s.uncategorized)} {s.uncategorized === 1 ? 'product has' : 'products have'} no known category yet.
           </p>
         )}
       </Card>
