@@ -312,9 +312,10 @@ export function netPortCheck(lines: DerivedLine[], poeHosted: PoeHost[], poePowe
       if (g.free <= 0) continue
       const f = fit(dev, g)
       if (!f) continue
-      // No module; a cage for a device with an SFP port; the fastest port; a switch's before a gateway's; the slowest port that gives that speed (so quicker ones stay free); a plain port over a combo.
-      // Ties then go to the switch nearest the root, then to the one with the most ports left, so the result doesn't depend on the order of the plan's lines.
-      const key = [f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, dev.fast ? -rankSpeed(f.speed) : 0, g.unit.kind === 'gateway' ? 1 : 0, rankSpeed(g.speed), g.media === 'either' ? 1 : 0, g.unit.depth, -freeOn(g.unit)]
+      // No module; a cage for a device with an SFP port; the fastest port; a switch's before a gateway's; the switch nearest the root; then, among ports that
+      // are equally near, the slowest that gives that speed; a plain port over a combo. Ties then go to the switch with the most ports left, so the result doesn't
+      // depend on the order of the plan's lines. Nothing is kept back for a faster device: those were placed first, so what is left is no use to one.
+      const key = [f.module ? 1 : 0, dev.sfp !== null && !f.cage ? 1 : 0, dev.fast ? -rankSpeed(f.speed) : 0, g.unit.kind === 'gateway' ? 1 : 0, g.unit.depth, rankSpeed(g.speed), g.media === 'either' ? 1 : 0, -freeOn(g.unit)]
       if (!best || lex(key, best.key) < 0) best = { g, key, f }
     }
     if (best) {

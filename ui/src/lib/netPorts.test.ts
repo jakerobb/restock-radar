@@ -86,6 +86,21 @@ describe('switch ports: devices that aren’t PoE-powered, and the switches’ u
     }
   })
 
+  it('puts a device on the switch nearest the root even when a deeper one has a slower port that would do', () => {
+    // The Pro HD has only 2.5G ports and the Flex, uplinked to it, has 1G ones: a gigabit device runs at full speed on either, so it goes on the nearer.
+    const hd = sw([{ count: 8, max_speed_mbps: 2500 }, sfp(2)], 'hd')
+    const flex = sw([{ count: 5, max_speed_mbps: 1000 }], 'flex')
+    const lines = [copperOnly(2), flex, hd, gw([sfp(1)])]
+    expect(rows(lines, 'flex')).toBeUndefined()
+    expect(rows(lines, 'hd')).toEqual(['2.5 GbE RJ45 ports: 2 × key'])
+  })
+
+  it('takes the slowest port that gives a device its full speed among those on one switch, leaving the faster for a device that needs it', () => {
+    const fast = item('fast', 1, 'Storage', { ports: [port({ max_speed_mbps: 10000 })] })
+    const lines = [copperOnly(1), fast, sw([{ count: 4, max_speed_mbps: 1000 }, { count: 2, max_speed_mbps: 10000 }], 'only')]
+    expect(rows(lines, 'only')).toEqual(['1 GbE RJ45 ports: 1 × key', '10 GbE RJ45 ports: 1 × fast'])
+  })
+
   it('takes the ports PoE-powered devices are on out of what is free, and keeps uplinks off the PoE ports', () => {
     // 8 PoE ports and 2 others; 6 cameras are on PoE ports, the uplink takes a plain port, so 3 ports are left.
     const lines = (n: number) => [camera(6), copperOnly(n), poeSwitch([poeOut(8), { count: 2 }])]
