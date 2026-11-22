@@ -1,8 +1,8 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { StatusResponse } from '../api/types'
 import { derived } from '../test/fixtures'
-import { renderRoute, renderWithClient, stubFetch } from '../test/render'
+import { renderRoute, renderWithClient, signedInMe, stubFetch } from '../test/render'
 import StatusPage, { every } from './StatusPage'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -217,7 +217,7 @@ describe('products with no tech specs', () => {
   it('splits the page into three tabs, showing only the stats at first', async () => {
     stubFetch({ 'GET /v1/status': { body: status() }, 'GET /v1/derived': { body: [] }, 'GET /v1/specs/gaps': { body: { products: [], not_expected: [] } } })
     renderRoute('/status')
-    expect((await screen.findAllByRole('tab')).map((t) => t.textContent)).toEqual(['Stats', 'Products without tech specs', 'Parser issues'])
+    expect((await screen.findAllByRole('tab')).map((t) => t.textContent)).toEqual(['Stats', 'Products without tech specs', 'Parser issues', 'Spec overrides'])
     expect(screen.getByRole('tab', { name: 'Stats' })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByRole('region', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Products with no tech specs' })).not.toBeInTheDocument()
@@ -225,5 +225,74 @@ describe('products with no tech specs', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Parser issues' }))
     expect(screen.queryByRole('region', { name: 'Overview' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Parser issues' })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('spec overrides', () => {
+  const ov = (o: object) => ({ id: 1, region: 'us', slug: 'sw', action: 'set', section: 'Hardware', group: '', label: 'Max. Power', kind: 'text', value: '60 W', note: '', source_url: '', reason: 'teardown', status: 'overrides', stale: false, published_now: '30 W', ...o })
+
+  it('lists every override by product, with the official value beside the override, and links the product', async () => {
+    stubFetch({
+      'GET /v1/status': { body: status() },
+      'GET /v1/derived': { body: [derived({ slug: 'sw', title: 'A Switch' }), derived({ slug: 'cam', title: 'A Camera' })] },
+      'GET /v1/overrides': { body: [ov({}), ov({ id: 2, label: 'Ports', value: '', action: 'hide', published_now: '8' }), ov({ id: 3, slug: 'cam', label: 'Night Vision', value: 'true', kind: 'flag', published_now: null })] },
+    })
+    renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Spec overrides' }))
+    const sw = await screen.findByRole('region', { name: /Overrides of A Switch/ })
+    expect(within(sw).getByRole('link', { name: 'A Switch' })).toHaveAttribute('href', '/p/us/sw')
+    expect(within(sw).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(sw).getByText('Hardware › Max. Power').closest('li')).toHaveTextContent('30 W')
+    expect(within(sw).getByText('Hardware › Max. Power').closest('li')).toHaveTextContent('60 W')
+    expect(within(sw).getByText('(hidden)')).toBeInTheDocument()
+    const cam = screen.getByRole('region', { name: /Overrides of A Camera/ })
+    expect(cam).toHaveTextContent('not published')
+    expect(cam).toHaveTextContent('Yes')
+  })
+
+  it('lets an editor change and remove an override, and add one to a product', async () => {
+    const calls = stubFetch({
+      'GET /v1/status': { body: status() },
+      'GET /v1/derived': { body: [derived({ slug: 'sw', title: 'A Switch' }), derived({ slug: 'cam', title: 'A Camera' })] },
+      'GET /v1/overrides': { body: [ov({})] },
+      'PUT /v1/overrides': { body: ov({ value: '65 W' }) },
+      'DELETE /v1/overrides/1': { status: 204, body: null },
+    })
+    renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Spec overrides' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit the override of Max. Power' }))
+    const value = screen.getByRole('textbox', { name: 'Value' })
+    await userEvent.clear(value)
+    await userEvent.type(value, '65 W')
+    await userEvent.click(screen.getByRole('button', { name: 'Save correction' }))
+    await waitFor(() => expect(calls.some((c) => c.key === 'PUT /v1/overrides' && JSON.parse(c.body as string).value === '65 W')).toBe(true))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove the correction to Max. Power' }))
+    await waitFor(() => expect(calls.some((c) => c.key === 'DELETE /v1/overrides/1')).toBe(true))
+
+    expect(screen.queryByRole('region', { name: 'Add a fact' })).not.toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Product to add an override to' }), 'us/cam')
+    expect(screen.getByRole('region', { name: 'Add a fact' })).toBeInTheDocument()
+  })
+
+  it('offers no controls to someone who may not edit', async () => {
+    stubFetch({
+      'GET /v1/me': { body: signedInMe('v', []) },
+      'GET /v1/status': { body: status() },
+      'GET /v1/derived': { body: [derived({ slug: 'sw', title: 'A Switch' })] },
+      'GET /v1/overrides': { body: [ov({})] },
+    })
+    renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Spec overrides' }))
+    await screen.findByText('Hardware › Max. Power')
+    expect(screen.queryByRole('button', { name: /Edit the override/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Product to add an override to' })).not.toBeInTheDocument()
+  })
+
+  it('says so when there are none', async () => {
+    stubFetch({ 'GET /v1/status': { body: status() }, 'GET /v1/derived': { body: [] }, 'GET /v1/overrides': { body: [] } })
+    renderRoute('/status')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Spec overrides' }))
+    expect(await screen.findByText(/No overrides yet\./)).toBeInTheDocument()
   })
 })

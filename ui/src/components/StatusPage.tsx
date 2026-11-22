@@ -7,6 +7,7 @@ import { formatExact } from '../lib/format'
 import { regionName } from '../lib/region'
 import { statusInfo } from '../lib/status'
 import { RelativeTime } from './RelativeTime'
+import { SpecOverridesTab } from './SpecOverridesTab'
 import { Card } from './ui/Card'
 import { Notice } from './ui/Notice'
 
@@ -263,6 +264,7 @@ const TABS = [
   { id: 'stats', label: 'Stats' },
   { id: 'no-specs', label: 'Products without tech specs' },
   { id: 'issues', label: 'Parser issues' },
+  { id: 'overrides', label: 'Spec overrides' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
@@ -300,6 +302,7 @@ function StatusContent({ s }: { s: StatusResponse }) {
         {tab === 'stats' && <StatsTab s={s} />}
         {tab === 'no-specs' && <NoSpecsCard />}
         {tab === 'issues' && <IssuesCard />}
+        {tab === 'overrides' && <SpecOverridesTab />}
       </div>
     </>
   )
