@@ -2,11 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -226,7 +226,7 @@ func TestRederiveStaleCoversOldVersionsAndNeverDerived(t *testing.T) {
 		t.Fatalf("everything is current: derived %d (%v)", n, err)
 	}
 
-	// One derived by an older version, one never derived (as before this existed).
+	// One derived by an older version of the derivation, one with a specification but no derived rows.
 	if _, err := s.db.Exec(`UPDATE product_derived SET version = ? WHERE product_id = 'id-u7-pro'`, specs.Version-1); err != nil {
 		t.Fatal(err)
 	}
@@ -268,40 +268,14 @@ func TestDerivedRowsGoWithTheProduct(t *testing.T) {
 	}
 }
 
-func TestMigratesDerivedTablesIntoAnExistingDatabase(t *testing.T) {
-	// A database from before derived specifications: products with specifications
-	// stored, nothing derived. Opening it adds the tables, and RederiveStale fills them.
-	path := t.TempDir() + "/old.db"
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior := len(migrations) - 1
-	for i := 0; i < prior; i++ {
-		if _, err := raw.Exec(migrations[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := raw.Exec(`PRAGMA user_version = ` + fmt.Sprint(prior)); err != nil {
-		t.Fatal(err)
-	}
+func TestUpgradeAddsDerivedTablesAndRederiveStaleFillsThem(t *testing.T) {
 	f := realSpecs(t)["usw-ultra"]
-	if _, err := raw.Exec(`INSERT INTO products (region, id, slug, name, title, category, specs_hash, specs_fetched_at) VALUES ('us', 'p1', 'usw-ultra', 'U', 'Ultra', ?, 'h', '2026-11-01T00:00:00Z')`, f.Category); err != nil {
-		t.Fatal(err)
-	}
+	setup := []string{`INSERT INTO products (region, id, slug, name, title, category, specs_hash, specs_fetched_at) VALUES ('us', 'p1', 'usw-ultra', 'U', 'Ultra', '` + f.Category + `', 'h', '2026-11-01T00:00:00Z')`}
 	for i, sp := range f.Specs {
-		if _, err := raw.Exec(`INSERT INTO product_specs (region, product_id, position, section_id, section, section_type, feature_id, parent_feature_id, label, kind, value, note)
-			VALUES ('us', 'p1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, i, sp.SectionID, sp.Section, sp.SectionType, sp.FeatureID, sp.ParentID, sp.Label, sp.Kind, sp.Value, sp.Note); err != nil {
-			t.Fatal(err)
-		}
+		setup = append(setup, fmt.Sprintf(`INSERT INTO product_specs (region, product_id, position, section_id, section, section_type, feature_id, parent_feature_id, label, kind, value, note)
+			VALUES ('us', 'p1', %d, %s, %s, %s, %s, %s, %s, %s, %s, %s)`, i, quote(sp.SectionID), quote(sp.Section), quote(sp.SectionType), quote(sp.FeatureID), quote(sp.ParentID), quote(sp.Label), quote(sp.Kind), quote(sp.Value), quote(sp.Note)))
 	}
-	_ = raw.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("upgrade: %v", err)
-	}
-	defer func() { _ = s.Close() }()
+	s := openBeforeMigration(t, "CREATE TABLE product_derived", setup...)
 	ctx := context.Background()
 	if d, _ := s.Derived(ctx, "us", "p1"); d != nil {
 		t.Fatalf("nothing is derived yet: %+v", d)
@@ -313,3 +287,6 @@ func TestMigratesDerivedTablesIntoAnExistingDatabase(t *testing.T) {
 		t.Errorf("derived = %+v", d)
 	}
 }
+
+// quote is a SQL string literal.
+func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }

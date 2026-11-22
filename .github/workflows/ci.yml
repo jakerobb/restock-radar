@@ -78,11 +78,8 @@ jobs:
       - name: Build
         run: npm run build
 
-  # Lints the Dockerfile with hadolint. This used to build the image (both
-  # platforms) to catch Dockerfile breakage; docker-publish.yml still builds it
-  # on merge to main. The job is still called `docker` because the repo's
-  # ruleset requires a check with that name.
-  docker:
+  # Lints the Dockerfile with hadolint. docker-publish.yml builds the image on merge to main.
+  dockerfile:
     runs-on: ubuntu-latest
 
     steps:

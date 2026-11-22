@@ -1,7 +1,7 @@
 import type { Product, Variant } from '../api/types'
 import { totalCents } from './format'
 import type { Powering } from './powering'
-import { HOSTED_ROLES, type Hosting } from './roles'
+import { HOSTED_ROLES, type HostedRole, type Hosting } from './roles'
 import { cleanRefs, productRef } from './compare'
 
 /** One line of the build plan: a variant of a product, and how many. */
@@ -104,29 +104,19 @@ function readVarint(bytes: number[], at: number): { value: number; next: number 
 }
 
 /**
- * Where a controller is run when it isn't a product, in a slug: a number no variant has, above 2^30, for each
- * role that is self-hosted with a quantity of 1 after it, following the lines.
- */
-const HOSTING_BASE = 2 ** 30
-/**
- * How a switch is powered, in a slug: the number 2^29 plus the variant's, with the scenario's code (from 1) in
- * place of a quantity. Variant numbers are far below 2^29, and hosting begins at 2^30.
+ * A slug is a sequence of integers, each in its own range so they can be told apart:
+ *   - variant numbers, below POWER_BASE;
+ *   - POWER_BASE + a variant's number, followed by the code of how that switch is powered;
+ *   - HOSTING_BASE + a role's position in HOSTED_ROLES, followed by 1, for each controller run on your own machine;
+ *   - NAME_BASE + the length in bytes of the plan's name, first, followed by those bytes of UTF-8 (MAX_NAME characters of up to four bytes each at most).
  */
 const POWER_BASE = 2 ** 29
-/**
- * The plan's name, in a slug, first: the number 2^31 plus its length in bytes, then the bytes of its UTF-8. The
- * longest name is MAX_NAME characters of four bytes each.
- */
+const HOSTING_BASE = 2 ** 30
 const NAME_BASE = 2 ** 31
 const MAX_NAME_BYTES = MAX_NAME * 4
-const hostingNumber = (role: (typeof HOSTED_ROLES)[number]) => HOSTING_BASE + HOSTED_ROLES.indexOf(role) * 2
-/** The role a number stands for; null for one that isn't self-hosting (an odd number was cloud hosting, once, before it became a product). */
-const hostingOf = (num: number): [(typeof HOSTED_ROLES)[number], 'self'] | 'ignore' | null => {
-  const i = num - HOSTING_BASE
-  const role = HOSTED_ROLES[Math.floor(i / 2)]
-  if (i < 0 || !role) return null
-  return i % 2 === 0 ? [role, 'self'] : 'ignore'
-}
+const hostingNumber = (role: HostedRole) => HOSTING_BASE + HOSTED_ROLES.indexOf(role)
+/** The role a number stands for; null when it stands for none. */
+const hostingOf = (num: number): HostedRole | null => HOSTED_ROLES[num - HOSTING_BASE] ?? null
 
 /** The variants by number: which product (as "region/slug") and which SKU each is. */
 export function variantsByNum(products: Iterable<Product>): Map<number, { ref: string; sku: string }> {
@@ -167,8 +157,7 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosti
     writeVarint(bytes, code)
   }
   for (const role of HOSTED_ROLES) {
-    const where = hosting[role]
-    if (!where) continue
+    if (!hosting[role]) continue
     writeVarint(bytes, hostingNumber(role))
     writeVarint(bytes, 1)
   }
@@ -230,7 +219,7 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     at = qty.next
     const host = hostingOf(num.value)
     if (host) {
-      if (host !== 'ignore') hosting[host[0]] = host[1]
+      hosting[host] = 'self'
       continue
     }
     const target = byNum.get(num.value)

@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -347,44 +345,14 @@ func TestDetailsDueIgnoresProductsNotOnTheWatchList(t *testing.T) {
 	}
 }
 
-func TestMigratesSpecsFromTheTechSpecsSchema(t *testing.T) {
-	// A database as deployed before specs were stored: a product that was already
-	// detailed, with no knowledge of its specification.
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior := len(migrations) - 1
-	for i := 0; i < prior; i++ {
-		if _, err := raw.Exec(migrations[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, q := range []string{
-		fmt.Sprintf(`PRAGMA user_version = %d`, prior),
+func TestUpgradeMakesDetailedProductsDueForSpecs(t *testing.T) {
+	// A product already detailed, with no stored specification, is due.
+	s := openBeforeMigration(t, "ADD COLUMN specs_hash",
 		`INSERT INTO products (region, id, slug, name, title, detailed_at) VALUES ('us', 'p1', 'widget', 'W', 'Widget', '2026-10-01T00:00:00Z')`,
-		`INSERT INTO items (region, slug, source, product_id, added_at) VALUES ('us', 'widget', 'config', 'p1', '2026-10-01T00:00:00Z')`,
-	} {
-		if _, err := raw.Exec(q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-	_ = raw.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("upgrade failed: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-	var version int
-	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
-		t.Fatalf("user_version = %d (%v), want %d", version, err, len(migrations))
-	}
-	// Already detailed, but its specs were never read, so it is due.
+		`INSERT INTO items (region, slug, source, product_id, added_at) VALUES ('us', 'widget', 'config', 'p1', '2026-10-01T00:00:00Z')`)
 	due, err := s.DetailsDue(context.Background(), time.Now().Add(-time.Hour))
 	if err != nil || len(due) != 1 || due[0].Slug != "widget" {
-		t.Fatalf("a product detailed before specs existed must be due: %+v (%v)", due, err)
+		t.Fatalf("a detailed product with no specification must be due: %+v (%v)", due, err)
 	}
 	if got, err := s.ProductSpecs(context.Background(), "us", "p1"); err != nil || len(got) != 0 {
 		t.Errorf("specs = %+v (%v)", got, err)

@@ -108,7 +108,7 @@ var migrations = []string{
 	ALTER TABLE products ADD COLUMN surcharge_types TEXT NOT NULL DEFAULT '';`,
 	// Events carry the price including surcharges and the surcharge types before
 	// and after, so a notification can say which of them changed. NULL / empty
-	// means unknown (events recorded before this, or a response that didn't say).
+	// means unknown (the response didn't say).
 	`ALTER TABLE events ADD COLUMN old_total_cents INTEGER;
 	ALTER TABLE events ADD COLUMN new_total_cents INTEGER;
 	ALTER TABLE events ADD COLUMN old_surcharge_types TEXT NOT NULL DEFAULT '';
@@ -286,7 +286,7 @@ var migrations = []string{
 	);
 	CREATE INDEX spec_override_history_product ON spec_override_history (region, slug, id);`,
 
-	// 16: how each product is powered, derived from "Power Method".
+	// How each product is powered, derived from "Power Method".
 	`CREATE TABLE product_power (
 		region     TEXT NOT NULL,
 		product_id TEXT NOT NULL,

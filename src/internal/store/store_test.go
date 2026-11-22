@@ -33,6 +33,37 @@ func openTest(t *testing.T) *Store {
 	return s
 }
 
+// openBeforeMigration opens a database whose schema stops just short of the migration containing marker, with the
+// setup statements run against it, so that opening it applies that migration and every one after.
+func openBeforeMigration(t *testing.T, marker string, setup ...string) *Store {
+	t.Helper()
+	prior := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, marker) })
+	if prior < 0 {
+		t.Fatalf("no migration contains %q", marker)
+	}
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range append(append(slices.Clone(migrations[:prior]), fmt.Sprintf(`PRAGMA user_version = %d`, prior)), setup...) {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	_ = raw.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
+		t.Fatalf("user_version = %d (%v), want %d", version, err, len(migrations))
+	}
+	return s
+}
+
 func TestApplyDetectsChanges(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
@@ -167,37 +198,9 @@ func TestMarkFailedStopsRetrying(t *testing.T) {
 	}
 }
 
-func TestMigratesFromSchemaVersion2(t *testing.T) {
-	// A database as the first deployed release left it: migrations 1 and 2 applied.
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 2; i++ {
-		if _, err := raw.Exec(migrations[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := raw.Exec(`PRAGMA user_version = 2`); err != nil {
-		t.Fatal(err)
-	}
-	_, err = raw.Exec(`INSERT INTO events (ts, region, product_id, variant_id, kind) VALUES ('2026-10-05T00:00:00Z', 'us', 'p', 'v', 'status')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = raw.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("upgrade failed: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-	var version int
-	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
-		t.Fatalf("user_version = %d (%v), want %d", version, err, len(migrations))
-	}
-	// The existing event is intact and still counts as pending.
+func TestUpgradeKeepsPendingEvents(t *testing.T) {
+	s := openBeforeMigration(t, "ADD COLUMN failed_at",
+		`INSERT INTO events (ts, region, product_id, variant_id, kind) VALUES ('2026-10-05T00:00:00Z', 'us', 'p', 'v', 'status')`)
 	if st, err := s.Stats(context.Background()); err != nil || st.PendingEvents != 1 {
 		t.Fatalf("existing event lost: %+v %v", st, err)
 	}
@@ -612,38 +615,12 @@ func TestVariantsGetPermanentNumbers(t *testing.T) {
 	}
 }
 
-func TestMigrationNumbersExistingVariantsOldestFirst(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, "CREATE TABLE variant_numbers") }) // everything before the variant numbers
-	if prior < 0 {
-		t.Fatal("no migration creates variant_numbers")
-	}
-	for i := 0; i < prior; i++ {
-		if _, err := raw.Exec(migrations[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, q := range []string{
-		fmt.Sprintf(`PRAGMA user_version = %d`, prior),
+func TestUpgradeNumbersExistingVariantsOldestFirst(t *testing.T) {
+	s := openBeforeMigration(t, "CREATE TABLE variant_numbers",
 		`INSERT INTO products (region, id, slug, name, title) VALUES ('us', 'p1', 'widget', 'W', 'Widget')`,
 		`INSERT INTO variants (region, id, product_id, sku, title, status, first_seen, last_checked, last_changed) VALUES
 			('us', 'late', 'p1', 'W-2', 'B', 'Available', '2026-02-01T00:00:00Z', '', ''),
-			('us', 'early', 'p1', 'W-1', 'A', 'Available', '2026-01-01T00:00:00Z', '', '')`,
-	} {
-		if _, err := raw.Exec(q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-	_ = raw.Close()
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("upgrade failed: %v", err)
-	}
-	defer func() { _ = s.Close() }()
+			('us', 'early', 'p1', 'W-1', 'A', 'Available', '2026-01-01T00:00:00Z', '', '')`)
 	vs, err := s.Variants(context.Background(), "us")
 	if err != nil || len(vs) != 2 {
 		t.Fatalf("variants = %+v, err = %v", vs, err)
