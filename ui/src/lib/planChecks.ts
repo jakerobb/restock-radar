@@ -3,6 +3,7 @@ import type { LineView } from './plan'
 import { netPortCheck, unitDepths, type NetStats, type PoeHost } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
+import { acSocketsOf } from './acSockets'
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
 import { isGatewayProduct, roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
@@ -48,8 +49,8 @@ export interface Trace {
   poe?: { unit: UnitRef; usedW: number; budgetW: number | null; sparePorts: number }[]
   /** Rack height of each line that goes in a rack, per unit of the line; null for one that sits on a shelf or desk. */
   rack?: { line: DerivedLine; units: number | null }[]
-  /** The lines that each take a wall outlet, per unit of the line. */
-  outlets?: DerivedLine[]
+  /** The lines that take wall outlets, and how many of their units do: those a PDU or UPS has no socket for. */
+  outlets?: { line: DerivedLine; n: number }[]
   /** Devices that got no port. */
   portLost?: DerivedLine[]
 }
@@ -626,33 +627,69 @@ function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
 }
 
 /**
- * The wall outlets the plan needs: a device that runs on mains power (its own cord or an adapter) and isn't powered over PoE
- * takes one, each. A switch that can run either way counts by the input chosen for it; until that's chosen it can't be told.
+ * The wall outlets the plan needs. A device that runs on mains power (its own cord or an adapter) and isn't powered over
+ * PoE has a plug to place. PDUs are plugged in first: into a UPS socket if there is one, else the wall. Then each other
+ * device takes a PDU socket, failing that a UPS socket, failing that a wall outlet. A UPS always needs a wall outlet.
+ * Only what is left for the wall is counted. A switch that can run either way counts by the input chosen for it; until
+ * that's chosen it can't be told.
  */
 function outletCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
-  const counted: { l: DerivedLine; n: number }[] = []
+  const socketsOf = (l: DerivedLine) => acSocketsOf(l.view.product?.slug ?? '')
+  const gives = (kind: 'pdu' | 'ups') => lines.filter((l) => socketsOf(l)?.kind === kind)
+  const pdus = gives('pdu')
+  const upses = gives('ups')
+  const leaf: { l: DerivedLine; n: number }[] = []
   const undecided: DerivedLine[] = []
   for (const l of lines) {
     const d = l.derived
-    if (!d || !d.power.some((p) => p.kind === 'ac') || isPoePowered(l, powering)) continue
+    if (socketsOf(l) || !d || !d.power.some((p) => p.kind === 'ac') || isPoePowered(l, powering)) continue
     const b = budgetOf(l, powering)
     if (b.choose) undecided.push(l)
-    else if (!b.option || b.option.poeClass === null) counted.push({ l, n: l.view.line.qty })
+    else if (!b.option || b.option.poeClass === null) leaf.push({ l, n: l.view.line.qty })
   }
-  if (counted.length === 0 && undecided.length === 0) return []
-  if (trace) trace.outlets = counted.map((x) => x.l)
-  const total = counted.reduce((n, x) => n + x.n, 0)
+  if (leaf.length === 0 && undecided.length === 0 && pdus.length === 0 && upses.length === 0) return []
+
+  const capacity = (ls: DerivedLine[]) => ls.reduce((n, l) => n + l.view.line.qty * socketsOf(l)!.sockets, 0)
+  const pduSockets = capacity(pdus)
+  const upsSockets = capacity(upses)
+  let pduLeft = pduSockets
+  let upsLeft = upsSockets
+
+  const wall = new Map<DerivedLine, number>()
+  const wallFor = (l: DerivedLine, n: number) => n > 0 && wall.set(l, (wall.get(l) ?? 0) + n)
+  // A UPS is plugged into the wall, and then a PDU into a UPS socket if one is left.
+  for (const l of upses) wallFor(l, l.view.line.qty)
+  for (const l of pdus) {
+    const onUps = Math.min(l.view.line.qty, upsLeft)
+    upsLeft -= onUps
+    wallFor(l, l.view.line.qty - onUps)
+  }
+  for (const { l, n } of leaf) {
+    const onPdu = Math.min(n, pduLeft)
+    pduLeft -= onPdu
+    const onUps = Math.min(n - onPdu, upsLeft)
+    upsLeft -= onUps
+    wallFor(l, n - onPdu - onUps)
+  }
+
+  if (trace) trace.outlets = [...wall].map(([line, n]) => ({ line, n }))
+  const total = [...wall.values()].reduce((a, b) => a + b, 0)
   const heading = `${total} AC ${total === 1 ? 'outlet' : 'outlets'}`
-  const items = counted.map((x) => `${x.n > 1 ? `${x.n} × ` : ''}${name(x.l)}`)
+  const items = [...wall].map(([l, n]) => `${n > 1 ? `${n} × ` : ''}${name(l)}`)
   const unsure = undecided.length > 0 ? `Can't tell how ${list(undecided)} will be powered, so ${undecided.length === 1 ? 'it is' : 'they are'} not counted.` : ''
   const label = undecided.length > 0 ? `${heading} so far` : heading
+  const sockets = [
+    pdus.length > 0 && `${pduSockets - pduLeft} of ${pduSockets} PDU ${pduSockets === 1 ? 'socket' : 'sockets'} used`,
+    upses.length > 0 && `${upsSockets - upsLeft} of ${upsSockets} UPS ${upsSockets === 1 ? 'socket' : 'sockets'} used`,
+  ].filter((x): x is string => !!x)
+  const socketText = sockets.length > 0 ? `${sockets.join(', ')}.` : ''
   return [
     {
       id: 'outlets',
       label: 'AC outlets',
       verdict: undecided.length > 0 ? 'unknown' : 'info',
-      text: [`${label}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, unsure].filter(Boolean).join(' '),
-      groups: [...(unsure ? [{ text: unsure }] : []), { text: label, items }],
+      text: [`${label}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, socketText, unsure].filter(Boolean).join(' '),
+      groups: [...(unsure ? [{ text: unsure }] : []), { text: label, items }, ...(socketText ? [{ text: socketText }] : [])],
     },
   ]
 }

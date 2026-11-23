@@ -131,6 +131,20 @@ describe('planChecks', () => {
     expect(byId([item('cam', 1, { power: [src('ac'), src('poe', 'PoE')], ports: [poeIn] })]).outlets).toBeUndefined()
   })
 
+  it('plugs devices into PDU and UPS sockets, and counts only the wall outlets left', () => {
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')] })
+    // UPS -> PDU -> everything: the UPS takes the one wall outlet.
+    expect(byId([item('ups-tower-us', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets).toMatchObject({
+      text: '1 AC outlet (ups-tower-us). 3 of 16 PDU sockets used, 1 of 8 UPS sockets used.',
+    })
+    // A PDU alone takes a wall outlet; what it can't hold goes to the wall too.
+    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.text).toBe('2 AC outlets (usp-pdu-pro, gw). 16 of 16 PDU sockets used.')
+    // Overflow from the PDU goes to the UPS, after the PDU has taken its own socket.
+    expect(byId([item('ups-2u', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 20)]).outlets?.text).toBe('1 AC outlet (ups-2u). 16 of 16 PDU sockets used, 5 of 8 UPS sockets used.')
+    // A UPS with no PDU powers devices directly.
+    expect(byId([item('ups-tower', 1, null), mains('gw', 2)]).outlets?.text).toBe('1 AC outlet (ups-tower). 2 of 8 UPS sockets used.')
+  })
+
   it('adds up rack space, and says when a height is missing', () => {
     const rack = (slug: string, qty: number, units: number) => item(slug, qty, { rack: { mountable: true, units, full_depth: false } })
     expect(byId([rack('sw', 2, 2), rack('gw', 1, 1), item('ap', 1, { rack: { mountable: false, units: 0, full_depth: false } })]).rack).toMatchObject({ verdict: 'info', text: '5U of rack space (2 × sw 2U, gw 1U).' })
