@@ -118,8 +118,8 @@ describe('planChecks', () => {
   })
 
   it('ignores products whose ports aren’t known, and says nothing when nothing applies', () => {
-    // Only the note about the product with no specs at all; nothing from the PoE or port checks.
-    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['specs'])
+    // Only the note about the product with no specs at all (and that everything is in stock); nothing from the PoE or port checks.
+    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['stock', 'specs'])
   })
 
   it('counts the AC outlets: mains-powered devices that aren’t on PoE', () => {
@@ -331,7 +331,25 @@ describe('planChecks', () => {
       const gone = item('gone', 1, { ports: [poeOut(8)], metrics: [metric('poe_budget_w', 100)] })
       gone.view = { ...gone.view, state: 'out' }
       const c = byId([ap(2), gone])
-      expect(c['poe-stock']).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
+      expect(c['poe-stock']).toBeUndefined()
+      expect(c.stock).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
+    })
+  })
+
+  describe('stock', () => {
+    it('says so when everything in the plan is in stock, and says nothing for an empty plan', () => {
+      expect(byId([ap(2), sw(1, 100)]).stock).toMatchObject({ verdict: 'ok', text: 'Everything in the plan is in stock.' })
+      expect(planChecks([]).map((c) => c.id)).toEqual([])
+    })
+    it('names every item that is not in stock, whatever it is, in one check, without calling for a switch', () => {
+      const a = item('lamp', 1, { power: [src('ac')] })
+      a.view = { ...a.view, state: 'out' }
+      const b = item('gong', 2, { power: [src('ac')] })
+      b.view = { ...b.view, state: 'soon' }
+      const checks = planChecks([a, b, ap(2), sw(1, 100)])
+      expect(checks.filter((c) => c.id === 'stock')).toHaveLength(1)
+      expect(checks.find((c) => c.id === 'stock')).toMatchObject({ verdict: 'warn', text: "lamp, gong aren't in stock." })
+      expect(checks.some((c) => c.shortfall)).toBe(false)
     })
   })
 
@@ -645,11 +663,12 @@ describe('spare ports and where PoE devices go, with a gateway and two switches'
 describe('groupChecks', () => {
   const check = (id: string): PlanCheck => ({ id, label: id, verdict: 'ok', text: id })
   it('puts the checks in sections in order, each keeping its own order, and leaves out empty sections', () => {
-    const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'poe-stock', 'net-sfp', 'nvr-stock']
+    const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'stock', 'net-sfp']
     const groups = groupChecks(ids.map(check))
     expect(groups.map((g) => [g.title, g.checks.map((c) => c.id)])).toEqual([
-      ['Controllers', ['nvr', 'role-network-capacity', 'nvr-stock']],
-      ['Network', ['net-ports', 'role-gateway', 'poe-speed', 'poe-stock', 'net-sfp']],
+      ['In Stock', ['stock']],
+      ['Controllers', ['nvr', 'role-network-capacity']],
+      ['Network', ['net-ports', 'role-gateway', 'poe-speed', 'net-sfp']],
       ['Physical Space', ['rack']],
       ['Power', ['outlets', 'poe-power', 'poe-layout', 'power-adapter']],
     ])
@@ -659,7 +678,7 @@ describe('groupChecks', () => {
     expect(groupChecks([check('rack'), check('specs')]).map((g) => g.title)).toEqual([null, 'Physical Space'])
   })
   it('keeps every check', () => {
-    const ids = ['specs', 'poe-ports', 'poe-stock', 'role-access', 'nvr', 'outlets']
+    const ids = ['specs', 'poe-ports', 'stock', 'role-access', 'nvr', 'outlets']
     expect(groupChecks(ids.map(check)).flatMap((g) => g.checks).length).toBe(ids.length)
   })
 })

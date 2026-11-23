@@ -56,7 +56,8 @@ describe('the NVR check', () => {
   it('warns when an NVR in the plan cannot be bought now', () => {
     const s = setup([nvr('gone', 10000, [60, 30, 18], {}, 'SoldOut'), cam('c4k', 8.3)])
     const checks = planChecks(s.plan(['gone', 1], ['c4k', 2]))
-    expect(checks.find((c) => c.id === 'nvr-stock')).toMatchObject({ verdict: 'warn', nvrShortfall: true, text: expect.stringContaining("gone isn't in stock") })
+    expect(checks.find((c) => c.id === 'nvr-stock')).toBeUndefined()
+    expect(checks.find((c) => c.id === 'stock')).toMatchObject({ verdict: 'warn', nvrShortfall: true, text: expect.stringContaining("gone isn't in stock") })
   })
 
   it('says nothing without cameras', () => {

@@ -857,7 +857,28 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
     walk(0, injectors, new Map())
   }
   const run = best === first && !trace ? best : layout(lines, powering, best.pins, trace)
-  return [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  const all = [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  // The PoE and NVR checks each notice a switch or NVR that can't be bought, and say what a replacement could fix. That is reported once, with the rest of the plan's stock.
+  const inStock = (c: PlanCheck) => c.id !== 'poe-stock' && c.id !== 'nvr-stock'
+  return [...stockCheck(lines, all.filter((c) => !inStock(c))), ...all.filter(inStock)]
+}
+
+/** Whether everything in the plan can be bought now. Carries the shortfalls of a switch or NVR that can't, so that the finders still offer a replacement. */
+function stockCheck(lines: DerivedLine[], unavailable: PlanCheck[]): PlanCheck[] {
+  if (lines.length === 0) return []
+  const out = lines.filter((l) => l.view.state !== 'in')
+  if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'ok', text: 'Everything in the plan is in stock.' }]
+  const poe = unavailable.some((c) => c.shortfall)
+  const nvr = unavailable.some((c) => c.nvrShortfall)
+  const effects = [poe && "the PoE power and ports a switch gives can't be had now", nvr && "the camera capacity an NVR gives can't be had now"].filter(Boolean)
+  return [{
+    id: 'stock',
+    label: 'Stock',
+    verdict: 'warn',
+    ...(poe ? { shortfall: true } : {}),
+    ...(nvr ? { nvrShortfall: true } : {}),
+    text: `${list(out)} ${out.length === 1 && out[0]!.view.line.qty === 1 ? "isn't" : "aren't"} in stock${effects.length > 0 ? `, so ${effects.join(' and ')}` : ''}.`,
+  }]
 }
 
 /** The most ways of dividing devices between switches and injectors that are tried. */
@@ -898,11 +919,12 @@ function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Tr
 }
 
 /** The sections the checks are shown in, in order. */
-export const CHECK_SECTIONS = ['Controllers', 'Network', 'Physical Space', 'Power'] as const
+export const CHECK_SECTIONS = ['In Stock', 'Controllers', 'Network', 'Physical Space', 'Power'] as const
 export type CheckSection = (typeof CHECK_SECTIONS)[number]
 
 /** Which section a check belongs in, or null for one that is about the plan as a whole (the missing tech specs). */
 export function sectionOf(c: PlanCheck): CheckSection | null {
+  if (c.id === 'stock') return 'In Stock'
   if (c.id === 'role-gateway' || c.id.startsWith('role-gateway-')) return 'Network'
   if (c.id.startsWith('role-') || c.id.startsWith('nvr')) return 'Controllers'
   if (c.id === 'rack') return 'Physical Space'
