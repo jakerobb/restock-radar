@@ -897,6 +897,25 @@ function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Tr
   return { poe, net, score, pins }
 }
 
+/** The sections the checks are shown in, in order. */
+export const CHECK_SECTIONS = ['Controllers', 'Network', 'Physical Space', 'Power'] as const
+export type CheckSection = (typeof CHECK_SECTIONS)[number]
+
+/** Which section a check belongs in, or null for one that is about the plan as a whole (the missing tech specs). */
+export function sectionOf(c: PlanCheck): CheckSection | null {
+  if (c.id.startsWith('role-') || c.id.startsWith('nvr')) return 'Controllers'
+  if (c.id === 'rack') return 'Physical Space'
+  if (c.id === 'poe-power' || c.id === 'power-adapter' || c.id === 'outlets') return 'Power'
+  if (c.id.startsWith('poe-') || c.id.startsWith('net-')) return 'Network'
+  return null
+}
+
+/** The checks under their section headings, in section order and each section's checks in their own order; checks with no section come first, with no heading. Empty sections are left out. */
+export function groupChecks(checks: PlanCheck[]): { title: CheckSection | null; checks: PlanCheck[] }[] {
+  const groups = [null, ...CHECK_SECTIONS].map((title) => ({ title, checks: checks.filter((c) => sectionOf(c) === title) }))
+  return groups.filter((g) => g.checks.length > 0)
+}
+
 export interface Answer {
   word: string
   emoji: string

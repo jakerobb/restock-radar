@@ -1,6 +1,6 @@
 import { scenarioCode } from './powering'
 import { lineKey } from './plan'
-import { overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
+import { groupChecks, overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product, variant } from '../test/fixtures'
 
@@ -639,5 +639,27 @@ describe('spare ports and where PoE devices go, with a gateway and two switches'
   it('still uses the gateway’s PoE port when no switch can power the device', () => {
     const t = run([gateway(), modem()])
     expect(t.poeHosts?.find((h) => h.line.view.line.ref === 'us/modem')?.host.line.view.line.ref).toBe('us/gw')
+  })
+})
+
+describe('groupChecks', () => {
+  const check = (id: string): PlanCheck => ({ id, label: id, verdict: 'ok', text: id })
+  it('puts the checks in sections in order, each keeping its own order, and leaves out empty sections', () => {
+    const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'poe-stock', 'net-sfp', 'nvr-stock']
+    const groups = groupChecks(ids.map(check))
+    expect(groups.map((g) => [g.title, g.checks.map((c) => c.id)])).toEqual([
+      ['Controllers', ['role-gateway', 'nvr', 'role-network-capacity', 'nvr-stock']],
+      ['Network', ['net-ports', 'poe-layout', 'poe-speed', 'poe-stock', 'net-sfp']],
+      ['Physical Space', ['rack']],
+      ['Power', ['outlets', 'poe-power', 'power-adapter']],
+    ])
+    expect(groupChecks([check('rack')]).map((g) => g.title)).toEqual(['Physical Space'])
+  })
+  it('shows a check about the plan as a whole first, with no heading', () => {
+    expect(groupChecks([check('rack'), check('specs')]).map((g) => g.title)).toEqual([null, 'Physical Space'])
+  })
+  it('keeps every check', () => {
+    const ids = ['specs', 'poe-ports', 'poe-stock', 'role-access', 'nvr', 'outlets']
+    expect(groupChecks(ids.map(check)).flatMap((g) => g.checks).length).toBe(ids.length)
   })
 })
