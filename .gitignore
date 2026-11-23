@@ -18,3 +18,4 @@
 
 # Other
 settings.local.json
+*.tsbuildinfo
