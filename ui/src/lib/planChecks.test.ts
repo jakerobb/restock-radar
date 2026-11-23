@@ -145,6 +145,23 @@ describe('planChecks', () => {
     expect(byId([item('ups-tower', 1, null), mains('gw', 2)]).outlets?.text).toBe('1 AC outlet (ups-tower). 2 of 8 UPS sockets used.')
   })
 
+  it('lays the outlets out as a tree: each UPS and PDU with what is plugged into it, then what is left for the wall', () => {
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')] })
+    const tree = byId([item('ups-2u', 1, null), item('ups-tower', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets?.tree
+    expect(tree).toEqual({
+      heading: 'Requires 2 AC outlets',
+      nodes: [
+        { text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (3 of 16 outlets used)', children: [{ text: 'gw' }, { text: '2 × nvr' }] }] },
+        { text: 'ups-tower' },
+      ],
+    })
+    // What fits nowhere is listed last, after the PDUs on the wall.
+    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.tree?.nodes).toEqual([
+      { text: 'usp-pdu-pro (16 of 16 outlets used)', children: [{ text: '16 × gw' }] },
+      { text: 'gw' },
+    ])
+  })
+
   it('adds up rack space, and says when a height is missing', () => {
     const rack = (slug: string, qty: number, units: number) => item(slug, qty, { rack: { mountable: true, units, full_depth: false } })
     expect(byId([rack('sw', 2, 2), rack('gw', 1, 1), item('ap', 1, { rack: { mountable: false, units: 0, full_depth: false } })]).rack).toMatchObject({ verdict: 'info', text: '5U of rack space (2 × sw 2U, gw 1U).' })

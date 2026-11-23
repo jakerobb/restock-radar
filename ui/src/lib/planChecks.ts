@@ -62,6 +62,8 @@ export interface PlanCheck {
   text: string
   /** The same, laid out as a list of points, each with a list under it (`text` is those run together). */
   groups?: { text: string; ordered?: boolean; items?: string[] }[]
+  /** The same, laid out as a nested list under a heading, with an optional note before it. */
+  tree?: { heading: string; note?: string; nodes: TreeNode[] }
   /** A breakdown to show on request, as blocks of lines (one block per switch, say). */
   detail?: { title: string; rows: DetailRow[] }[]
   /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
@@ -626,18 +628,35 @@ function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
   return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: flat.join(' '), groups }]
 }
 
+/** A point in a nested list: a device, with what is plugged into it under it. */
+export interface TreeNode {
+  text: string
+  children?: TreeNode[]
+}
+
+/** A PDU or UPS in the plan (one unit of it), and what is plugged into its sockets. */
+interface SocketHost {
+  line: DerivedLine
+  sockets: number
+  pdus: SocketHost[]
+  devices: Map<DerivedLine, number>
+}
+
+const hostUsed = (h: SocketHost) => h.pdus.length + [...h.devices.values()].reduce((a, b) => a + b, 0)
+
 /**
  * The wall outlets the plan needs. A device that runs on mains power (its own cord or an adapter) and isn't powered over
- * PoE has a plug to place. PDUs are plugged in first: into a UPS socket if there is one, else the wall. Then each other
- * device takes a PDU socket, failing that a UPS socket, failing that a wall outlet. A UPS always needs a wall outlet.
- * Only what is left for the wall is counted. A switch that can run either way counts by the input chosen for it; until
+ * PoE has a plug to place. A UPS is plugged into the wall. PDUs are plugged in next: into a UPS socket if there is one,
+ * else the wall. Then each other device takes a PDU socket, failing that a UPS socket, failing that a wall outlet. Only
+ * what is left for the wall is counted. A switch that can run either way counts by the input chosen for it; until
  * that's chosen it can't be told.
  */
 function outletCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
   const socketsOf = (l: DerivedLine) => acSocketsOf(l.view.product?.slug ?? '')
-  const gives = (kind: 'pdu' | 'ups') => lines.filter((l) => socketsOf(l)?.kind === kind)
-  const pdus = gives('pdu')
-  const upses = gives('ups')
+  const hostsOf = (kind: 'pdu' | 'ups'): SocketHost[] =>
+    lines.filter((l) => socketsOf(l)?.kind === kind).flatMap((l) => Array.from({ length: l.view.line.qty }, () => ({ line: l, sockets: socketsOf(l)!.sockets, pdus: [], devices: new Map() })))
+  const pdus = hostsOf('pdu')
+  const upses = hostsOf('ups')
   const leaf: { l: DerivedLine; n: number }[] = []
   const undecided: DerivedLine[] = []
   for (const l of lines) {
@@ -649,47 +668,56 @@ function outletCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): P
   }
   if (leaf.length === 0 && undecided.length === 0 && pdus.length === 0 && upses.length === 0) return []
 
-  const capacity = (ls: DerivedLine[]) => ls.reduce((n, l) => n + l.view.line.qty * socketsOf(l)!.sockets, 0)
-  const pduSockets = capacity(pdus)
-  const upsSockets = capacity(upses)
-  let pduLeft = pduSockets
-  let upsLeft = upsSockets
+  // PDUs first, into the first UPS socket free.
+  const wallPdus: SocketHost[] = []
+  for (const p of pdus) {
+    const ups = upses.find((u) => hostUsed(u) < u.sockets)
+    if (ups) ups.pdus.push(p)
+    else wallPdus.push(p)
+  }
+  // Then the devices: PDU sockets, then UPS sockets, then the wall.
+  const loose = new Map<DerivedLine, number>()
+  for (const { l, n } of leaf) {
+    let left = n
+    for (const h of [...pdus, ...upses]) {
+      const take = Math.min(left, h.sockets - hostUsed(h))
+      if (take > 0) h.devices.set(l, (h.devices.get(l) ?? 0) + take)
+      left -= Math.max(take, 0)
+    }
+    if (left > 0) loose.set(l, left)
+  }
 
   const wall = new Map<DerivedLine, number>()
-  const wallFor = (l: DerivedLine, n: number) => n > 0 && wall.set(l, (wall.get(l) ?? 0) + n)
-  // A UPS is plugged into the wall, and then a PDU into a UPS socket if one is left.
-  for (const l of upses) wallFor(l, l.view.line.qty)
-  for (const l of pdus) {
-    const onUps = Math.min(l.view.line.qty, upsLeft)
-    upsLeft -= onUps
-    wallFor(l, l.view.line.qty - onUps)
-  }
-  for (const { l, n } of leaf) {
-    const onPdu = Math.min(n, pduLeft)
-    pduLeft -= onPdu
-    const onUps = Math.min(n - onPdu, upsLeft)
-    upsLeft -= onUps
-    wallFor(l, n - onPdu - onUps)
-  }
-
+  for (const h of [...upses, ...wallPdus]) wall.set(h.line, (wall.get(h.line) ?? 0) + 1)
+  for (const [l, n] of loose) wall.set(l, (wall.get(l) ?? 0) + n)
   if (trace) trace.outlets = [...wall].map(([line, n]) => ({ line, n }))
   const total = [...wall.values()].reduce((a, b) => a + b, 0)
   const heading = `${total} AC ${total === 1 ? 'outlet' : 'outlets'}`
   const items = [...wall].map(([l, n]) => `${n > 1 ? `${n} × ` : ''}${name(l)}`)
   const unsure = undecided.length > 0 ? `Can't tell how ${list(undecided)} will be powered, so ${undecided.length === 1 ? 'it is' : 'they are'} not counted.` : ''
   const label = undecided.length > 0 ? `${heading} so far` : heading
+  const used = (hosts: SocketHost[]) => hosts.reduce((n, h) => n + hostUsed(h), 0)
+  const cap = (hosts: SocketHost[]) => hosts.reduce((n, h) => n + h.sockets, 0)
   const sockets = [
-    pdus.length > 0 && `${pduSockets - pduLeft} of ${pduSockets} PDU ${pduSockets === 1 ? 'socket' : 'sockets'} used`,
-    upses.length > 0 && `${upsSockets - upsLeft} of ${upsSockets} UPS ${upsSockets === 1 ? 'socket' : 'sockets'} used`,
+    pdus.length > 0 && `${used(pdus)} of ${cap(pdus)} PDU ${cap(pdus) === 1 ? 'socket' : 'sockets'} used`,
+    upses.length > 0 && `${used(upses)} of ${cap(upses)} UPS ${cap(upses) === 1 ? 'socket' : 'sockets'} used`,
   ].filter((x): x is string => !!x)
   const socketText = sockets.length > 0 ? `${sockets.join(', ')}.` : ''
+
+  const deviceNode = (l: DerivedLine, n: number): TreeNode => ({ text: `${n > 1 ? `${n} × ` : ''}${name(l)}` })
+  const hostNode = (h: SocketHost): TreeNode => {
+    const u = hostUsed(h)
+    const children = [...h.pdus.map(hostNode), ...[...h.devices].map(([l, n]) => deviceNode(l, n))]
+    return { text: `${name(h.line)}${u > 0 ? ` (${u} of ${h.sockets} outlets used)` : ''}`, ...(children.length > 0 ? { children } : {}) }
+  }
+  const nodes = [...upses.map(hostNode), ...wallPdus.map(hostNode), ...[...loose].map(([l, n]) => deviceNode(l, n))]
   return [
     {
       id: 'outlets',
       label: 'AC outlets',
       verdict: undecided.length > 0 ? 'unknown' : 'info',
       text: [`${label}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, socketText, unsure].filter(Boolean).join(' '),
-      groups: [...(unsure ? [{ text: unsure }] : []), { text: label, items }, ...(socketText ? [{ text: socketText }] : [])],
+      tree: { heading: `Requires ${label}`, ...(unsure ? { note: unsure } : {}), nodes },
     },
   ]
 }
