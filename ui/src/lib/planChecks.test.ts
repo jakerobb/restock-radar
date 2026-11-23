@@ -1,6 +1,6 @@
 import { scenarioCode } from './powering'
 import { lineKey } from './plan'
-import { overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
+import { groupChecks, overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product, variant } from '../test/fixtures'
 
@@ -118,8 +118,8 @@ describe('planChecks', () => {
   })
 
   it('ignores products whose ports aren’t known, and says nothing when nothing applies', () => {
-    // Only the note about the product with no specs at all; nothing from the PoE or port checks.
-    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['specs'])
+    // Only the note about the product with no specs at all (and that everything is in stock); nothing from the PoE or port checks.
+    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['stock', 'specs'])
   })
 
   it('counts the AC outlets: mains-powered devices that aren’t on PoE', () => {
@@ -331,7 +331,30 @@ describe('planChecks', () => {
       const gone = item('gone', 1, { ports: [poeOut(8)], metrics: [metric('poe_budget_w', 100)] })
       gone.view = { ...gone.view, state: 'out' }
       const c = byId([ap(2), gone])
-      expect(c['poe-stock']).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
+      expect(c['poe-stock']).toBeUndefined()
+      expect(c.stock).toMatchObject({ verdict: 'warn', shortfall: true, text: "The following items aren't in stock:", stock: { note: expect.stringContaining('PoE power and ports') } })
+      expect(c.stock!.stock!.items.map((v) => v.line.ref)).toEqual(['us/gone'])
+    })
+  })
+
+  describe('stock', () => {
+    it('notes that everything in the plan is in stock, without it counting towards the answer, and says nothing for an empty plan', () => {
+      expect(byId([ap(2), sw(1, 100)]).stock).toMatchObject({ verdict: 'info', text: 'Everything in the plan is in stock.' })
+      expect(planChecks([]).map((c) => c.id)).toEqual([])
+      expect(overall(planChecks([item('plain', 1, { power: [src('ac')] })]))).toBeNull()
+    })
+    it('lists every item that is not in stock, whatever it is, in one check, dearest line first and unpriced ones last, without calling for a switch', () => {
+      const out = (slug: string, qty: number, cents: number | null, state: 'out' | 'soon' | 'unlisted' = 'out') => {
+        const l = item(slug, qty, { power: [src('ac')] })
+        l.view = { ...l.view, state, totalCents: cents }
+        return l
+      }
+      const checks = planChecks([out('cheap', 1, 1000), out('gone', 1, null, 'unlisted'), out('dear', 2, 90000, 'soon'), out('mid', 1, 5000), ap(2), sw(1, 100)])
+      expect(checks.filter((c) => c.id === 'stock')).toHaveLength(1)
+      const c = checks.find((x) => x.id === 'stock')!
+      expect(c).toMatchObject({ verdict: 'warn', text: "The following items aren't in stock:" })
+      expect(c.stock!.items.map((v) => v.line.ref)).toEqual(['us/dear', 'us/mid', 'us/cheap', 'us/gone'])
+      expect(checks.some((x) => x.shortfall)).toBe(false)
     })
   })
 
@@ -639,5 +662,28 @@ describe('spare ports and where PoE devices go, with a gateway and two switches'
   it('still uses the gateway’s PoE port when no switch can power the device', () => {
     const t = run([gateway(), modem()])
     expect(t.poeHosts?.find((h) => h.line.view.line.ref === 'us/modem')?.host.line.view.line.ref).toBe('us/gw')
+  })
+})
+
+describe('groupChecks', () => {
+  const check = (id: string): PlanCheck => ({ id, label: id, verdict: 'ok', text: id })
+  it('puts the checks in sections in order, each keeping its own order, and leaves out empty sections', () => {
+    const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'stock', 'net-sfp']
+    const groups = groupChecks(ids.map(check))
+    expect(groups.map((g) => [g.title, g.checks.map((c) => c.id)])).toEqual([
+      ['In Stock', ['stock']],
+      ['Controllers', ['nvr', 'role-network-capacity']],
+      ['Network', ['net-ports', 'role-gateway', 'poe-speed', 'net-sfp']],
+      ['Physical Space', ['rack']],
+      ['Power', ['outlets', 'poe-power', 'poe-layout', 'power-adapter']],
+    ])
+    expect(groupChecks([check('rack')]).map((g) => g.title)).toEqual(['Physical Space'])
+  })
+  it('shows a check about the plan as a whole first, with no heading', () => {
+    expect(groupChecks([check('rack'), check('specs')]).map((g) => g.title)).toEqual([null, 'Physical Space'])
+  })
+  it('keeps every check', () => {
+    const ids = ['specs', 'poe-ports', 'stock', 'role-access', 'nvr', 'outlets']
+    expect(groupChecks(ids.map(check)).flatMap((g) => g.checks).length).toBe(ids.length)
   })
 })

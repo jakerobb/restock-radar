@@ -237,17 +237,24 @@ describe('PlanPage', () => {
     expect(within(row).getByText('$400')).toBeInTheDocument() // 2 × 200
     const totals = screen.getByLabelText('Totals')
     expect(totals).toHaveTextContent('Total $600') // 400 + 150 + 50
-    expect(totals).toHaveTextContent('Not in stock: Sold Out Thing.')
+    expect(totals).not.toHaveTextContent('in stock')
+    const checks = screen.getByLabelText('Checks')
+    expect(checks).toHaveTextContent("The following items aren't in stock:")
+    expect(checks).toHaveTextContent('Sold Out Thing')
   })
 
-  it('lists several lines that are not in stock one per line under a heading', async () => {
+  it('lists the lines that are not in stock under the stock check, dearest first, each with its status', async () => {
     catalog()
-    setPlan([line({}), line({ ref: 'us/gone-stock', sku: 'SO-1', addedCents: 5000 }), line({ ref: 'us/vanished', sku: 'X' })])
+    setPlan([line({}), line({ ref: 'us/vanished', sku: 'X' }), line({ ref: 'us/gone-stock', sku: 'SO-1', addedCents: 5000 })])
     renderRoute('/plan')
-    const totals = await screen.findByLabelText('Totals')
-    await waitFor(() => expect(within(totals).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Sold Out Thing', 'us/vanished']))
-    expect(totals).toHaveTextContent('Not in stock:')
-    expect(totals).not.toHaveTextContent('Sold Out Thing, us/vanished')
+    const intro = await screen.findByText(/The following items aren't in stock:/)
+    const items = within(intro.closest('li')!).getAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    expect(items[0]).toHaveTextContent('Sold Out Thing') // priced, so ahead of the one with no price
+    expect(items[0]).toHaveTextContent('Sold out')
+    expect(items[0]).toHaveTextContent('$50')
+    expect(items[1]).toHaveTextContent('us/vanished')
+    expect(items[1]).toHaveTextContent('No longer tracked')
   })
 
   it('changes a quantity and a variant, and removes a line', async () => {
@@ -370,11 +377,11 @@ describe('PlanPage', () => {
     catalog()
     setPlan([line({}), line({ ref: 'us/vanished', sku: 'X' })])
     renderRoute('/plan')
-    await screen.findByText('No longer tracked')
+    await screen.findAllByText('No longer tracked')
     const totals = screen.getByLabelText('Totals')
     expect(totals).toHaveTextContent('Total $200')
     expect(totals).toHaveTextContent('1 line has no price and isn\'t counted.')
-    expect(totals).toHaveTextContent('Not in stock: us/vanished.')
+    expect(screen.getByLabelText('Checks')).toHaveTextContent("The following items aren't in stock:")
   })
 
   it('works out whether the PoE devices fit, from the derived specs', async () => {

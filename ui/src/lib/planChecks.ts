@@ -82,6 +82,8 @@ export interface PlanCheck {
   net?: NetStats
   /** On the layout check: how the placement came out, for comparing switches. */
   stats?: PoeStats
+  /** On the stock check: the lines that can't be bought now, dearest first, and what that leaves the plan without. */
+  stock?: { items: LineView[]; note?: string }
 }
 
 export interface PoeStats {
@@ -857,7 +859,34 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
     walk(0, injectors, new Map())
   }
   const run = best === first && !trace ? best : layout(lines, powering, best.pins, trace)
-  return [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  const all = [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  // The PoE and NVR checks each notice a switch or NVR that can't be bought, and say what a replacement could fix. That is reported once, with the rest of the plan's stock.
+  const inStock = (c: PlanCheck) => c.id !== 'poe-stock' && c.id !== 'nvr-stock'
+  return [...stockCheck(lines, all.filter((c) => !inStock(c))), ...all.filter(inStock)]
+}
+
+/**
+ * Whether everything in the plan can be bought now. That it can is a note, not a pass: it says nothing about whether the plan adds up,
+ * so it doesn't count towards the answer. What can't be bought is listed dearest line first (the costliest are the biggest decisions: wait, or find
+ * another), and carries the shortfalls of a switch or NVR that can't, so that the finders still offer a replacement.
+ */
+function stockCheck(lines: DerivedLine[], unavailable: PlanCheck[]): PlanCheck[] {
+  if (lines.length === 0) return []
+  const out = lines.map((l) => l.view).filter((v) => v.state !== 'in')
+  if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'info', text: 'Everything in the plan is in stock.' }]
+  const poe = unavailable.some((c) => c.shortfall)
+  const nvr = unavailable.some((c) => c.nvrShortfall)
+  const effects = [poe && "The PoE power and ports a switch gives can't be had now.", nvr && "The camera capacity an NVR gives can't be had now."].filter(Boolean)
+  const items = out.map((v, i) => ({ v, i })).sort((a, b) => (b.v.totalCents ?? -1) - (a.v.totalCents ?? -1) || a.i - b.i).map((x) => x.v)
+  return [{
+    id: 'stock',
+    label: 'Stock',
+    verdict: 'warn',
+    ...(poe ? { shortfall: true } : {}),
+    ...(nvr ? { nvrShortfall: true } : {}),
+    text: "The following items aren't in stock:",
+    stock: { items, ...(effects.length > 0 ? { note: effects.join(' ') } : {}) },
+  }]
 }
 
 /** The most ways of dividing devices between switches and injectors that are tried. */
@@ -895,6 +924,27 @@ function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Tr
   const stats = net.find((c) => c.id === 'net-ports')?.net
   const score = [outcome.stranded + (stats?.unplaced ?? 0), outcome.crawling, outcome.lostMbps, stats?.onGateways ?? 0, [...pins.values()].reduce((a, b) => a + b, 0)]
   return { poe, net, score, pins }
+}
+
+/** The sections the checks are shown in, in order. */
+export const CHECK_SECTIONS = ['In Stock', 'Controllers', 'Network', 'Physical Space', 'Power'] as const
+export type CheckSection = (typeof CHECK_SECTIONS)[number]
+
+/** Which section a check belongs in, or null for one that is about the plan as a whole (the missing tech specs). */
+export function sectionOf(c: PlanCheck): CheckSection | null {
+  if (c.id === 'stock') return 'In Stock'
+  if (c.id === 'role-gateway' || c.id.startsWith('role-gateway-')) return 'Network'
+  if (c.id.startsWith('role-') || c.id.startsWith('nvr')) return 'Controllers'
+  if (c.id === 'rack') return 'Physical Space'
+  if (c.id === 'poe-power' || c.id === 'poe-ports' || c.id === 'poe-layout' || c.id === 'power-adapter' || c.id === 'outlets') return 'Power'
+  if (c.id.startsWith('poe-') || c.id.startsWith('net-')) return 'Network'
+  return null
+}
+
+/** The checks under their section headings, in section order and each section's checks in their own order; checks with no section come first, with no heading. Empty sections are left out. */
+export function groupChecks(checks: PlanCheck[]): { title: CheckSection | null; checks: PlanCheck[] }[] {
+  const groups = [null, ...CHECK_SECTIONS].map((title) => ({ title, checks: checks.filter((c) => sectionOf(c) === title) }))
+  return groups.filter((g) => g.checks.length > 0)
 }
 
 export interface Answer {

@@ -13,7 +13,7 @@ import { specsGapOf } from '../lib/specsGaps'
 import { decodePlan, DEFAULT_PLAN_NAME, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
 import { buildTopology, type TopoNode } from '../lib/topology'
-import { overall, planChecks, type CheckVerdict, type DerivedLine, type TreeNode } from '../lib/planChecks'
+import { groupChecks, overall, planChecks, type CheckVerdict, type DerivedLine, type TreeNode } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { MAX_PLANS, nameTaken, uniqueName } from '../lib/planStore'
@@ -652,23 +652,7 @@ export default function PlanPage() {
                 </div>
               ))}
               {totals.unpriced > 0 && <div className="text-sm text-muted">{totals.unpriced === 1 ? '1 line has' : `${totals.unpriced} lines have`} no price and isn't counted.</div>}
-              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-sm">
-                {shared ? <span /> : clearControl}
-                {totals.notInStock.length === 0 ? (
-                  <span className="text-ok">Everything is in stock.</span>
-                ) : totals.notInStock.length === 1 ? (
-                  <span className="text-bad">Not in stock: {totals.notInStock[0]!.product?.title ?? totals.notInStock[0]!.line.ref}.</span>
-                ) : (
-                  <div className="text-bad">
-                    Not in stock:
-                    <ul className="list-disc pl-5">
-                      {totals.notInStock.map((v) => (
-                        <li key={v.line.ref + v.line.sku}>{v.product?.title ?? v.line.ref}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+              {!shared && <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-sm">{clearControl}</div>}
             </div>
           </Card>
           )
@@ -680,79 +664,103 @@ export default function PlanPage() {
                   {answer.word} <span aria-hidden>{answer.emoji}</span>
                 </p>
               )}
-              <ul className="divide-y divide-line text-sm">
-                {checks.map((c) => (
-                  <li key={c.id} className={`flex gap-2 py-1.5 ${hotNode?.checks.includes(c.id) ? 'bg-accent/10' : ''}`} onMouseEnter={() => setHotCheck(c.id)} onMouseLeave={() => setHotCheck(null)} onFocus={() => setHotCheck(c.id)} onBlur={() => setHotCheck(null)}>
-                    <span aria-hidden className={`w-4 shrink-0 text-center font-bold ${VERDICT[c.verdict].tone}`}>
-                      {VERDICT[c.verdict].mark}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      {c.detail ? (
-                        <details>
-                          <summary className="cursor-pointer">
-                            <span className="font-medium">{c.label}: </span>
-                            {c.text}
-                          </summary>
-                          <div className="mt-1 space-y-2 pl-5 text-muted">
-                            {c.detail.map((blk) => (
-                              <div key={blk.title}>
-                                <div className="font-medium text-ink">{blk.title}</div>
-                                <ul className="list-disc pl-5">
-                                  {blk.rows.map((r) => (
-                                    <li key={typeof r === 'string' ? r : r.text}>
-                                      {typeof r === 'string' ? r : r.text}
-                                      {typeof r !== 'string' && (
-                                        <ul className="list-disc pl-5">
-                                          {r.items.map((i) => (
-                                            <li key={i}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                    </li>
-                                  ))}
-                                </ul>
+              {groupChecks(checks).map((g) => (
+                <section key={g.title ?? 'general'} className="mt-3 first:mt-0" aria-label={g.title ?? undefined}>
+                  {g.title && <h3 className="mt-3 mb-1 text-sm font-semibold uppercase tracking-wide text-muted">{g.title}</h3>}
+                  <ul className="divide-y divide-line text-sm">
+                    {g.checks.map((c) => (
+                      <li key={c.id} className={`flex gap-2 py-1.5 ${hotNode?.checks.includes(c.id) ? 'bg-accent/10' : ''}`} onMouseEnter={() => setHotCheck(c.id)} onMouseLeave={() => setHotCheck(null)} onFocus={() => setHotCheck(c.id)} onBlur={() => setHotCheck(null)}>
+                        <span aria-hidden className={`w-4 shrink-0 text-center font-bold ${VERDICT[c.verdict].tone}`}>
+                          {VERDICT[c.verdict].mark}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          {c.detail ? (
+                            <details>
+                              <summary className="cursor-pointer">
+                                <span className="font-medium">{c.label}: </span>
+                                {c.text}
+                              </summary>
+                              <div className="mt-1 space-y-2 pl-5 text-muted">
+                                {c.detail.map((blk) => (
+                                  <div key={blk.title}>
+                                    <div className="font-medium text-ink">{blk.title}</div>
+                                    <ul className="list-disc pl-5">
+                                      {blk.rows.map((r) => (
+                                        <li key={typeof r === 'string' ? r : r.text}>
+                                          {typeof r === 'string' ? r : r.text}
+                                          {typeof r !== 'string' && (
+                                            <ul className="list-disc pl-5">
+                                              {r.items.map((i) => (
+                                                <li key={i}>{i}</li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        </details>
-                      ) : c.tree ? (
-                        <>
-                          {c.tree.note && <p className="mb-1 text-muted">{c.tree.note}</p>}
-                          {c.tree.sections.map((sec) => (
-                            <div key={sec.heading} className="mb-2 last:mb-0">
-                              <span className="font-medium">{sec.heading}:</span>
-                              <TreeList nodes={sec.nodes} root />
-                            </div>
-                          ))}
-                        </>
-                      ) : c.groups ? (
-                        <>
-                          <span className="font-medium">{c.label}:</span>
-                          <ul className="mt-1 list-disc space-y-1 pl-5">
-                            {c.groups.map((g) => (
-                              <li key={g.text}>
-                                {g.text}
-                                {g.items && g.items.length > 0 && (
-                                  <ListTag ordered={g.ordered}>
-                                    {g.items.map((i, n) => (
-                                      <li key={`${n}:${i}`}>{i}</li>
-                                    ))}
-                                  </ListTag>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      ) : (
+                            </details>
+                          ) : c.tree ? (
+                            <>
+                              {c.tree.note && <p className="mb-1 text-muted">{c.tree.note}</p>}
+                              {c.tree.sections.map((sec) => (
+                                <div key={sec.heading} className="mb-2 last:mb-0">
+                                  <span className="font-medium">{sec.heading}:</span>
+                                  <TreeList nodes={sec.nodes} root />
+                                </div>
+                              ))}
+                            </>
+                          ) : c.stock ? (
                         <>
                           <span className="font-medium">{c.label}: </span>
                           {c.text}
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            {c.stock.items.map((v) => (
+                              <li key={lineKey(v.line)}>
+                                {v.line.qty > 1 && `${v.line.qty} × `}
+                                {v.product?.title ?? v.line.ref}
+                                <Badge tone={STATE[v.state].tone} className="ml-1.5">
+                                  {STATE[v.state].label}
+                                </Badge>
+                                {v.variant?.restock_eta && <span className="ml-1.5 text-xs text-muted">restock {v.variant.restock_eta}</span>}
+                                {v.totalCents !== null && <span className="ml-1.5 text-muted">{formatPrice(v.totalCents, v.currency)}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                          {c.stock.note && <p className="mt-1 text-muted">{c.stock.note}</p>}
                         </>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                      ) : c.groups ? (
+                            <>
+                              <span className="font-medium">{c.label}:</span>
+                              <ul className="mt-1 list-disc space-y-1 pl-5">
+                                {c.groups.map((g) => (
+                                  <li key={g.text}>
+                                    {g.text}
+                                    {g.items && g.items.length > 0 && (
+                                      <ListTag ordered={g.ordered}>
+                                        {g.items.map((i, n) => (
+                                          <li key={`${n}:${i}`}>{i}</li>
+                                        ))}
+                                      </ListTag>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium">{c.label}: </span>
+                              {c.text}
+                            </>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
               <p className="mt-2 text-xs text-muted">Based on published specifications and any corrections/additions. Unknown stats are labeled as such, not guessed.</p>
               {!shared && ((shortfall && !finding) || (injectorShortfall && !findingInjector) || (nvrShortfall && !findingNvr) || (roleShortfall && !findingRoles)) && (
                 <div className="mt-3 flex flex-wrap gap-2">

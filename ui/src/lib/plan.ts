@@ -356,8 +356,6 @@ export interface PlanTotals {
   /** Lines with no price to add up. */
   unpriced: number
   items: number
-  /** Lines that can't be bought right now. */
-  notInStock: LineView[]
 }
 
 export function planTotals(views: LineView[]): PlanTotals {
@@ -367,6 +365,5 @@ export function planTotals(views: LineView[]): PlanTotals {
     sums: [...sums].map(([currency, cents]) => ({ currency, cents })),
     unpriced: views.filter((v) => v.totalCents === null).length,
     items: views.reduce((n, v) => n + v.line.qty, 0),
-    notInStock: views.filter((v) => v.state !== 'in'),
   }
 }
