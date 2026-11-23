@@ -33,6 +33,8 @@ Every configured region is asked about every category any region has, so each re
 
 A region's `poll_every` (e.g. `1h`) rolls it: instead of reading the whole region each cycle, each cycle reads the share that has waited longest (with a 5-minute `poll_interval` and `poll_every: 1h`, a twelfth of its category pages). Left out, a region is read every cycle. After a restart a rolling region simply starts over from its least-recently-read pages.
 
+The plan page's "Add to UniFi cart" fills your cart at the store from the plan, with a bookmarklet you drag to your bookmarks bar once and click on a store page; see [DESIGN.md](DESIGN.md).
+
 The web UI can filter by any of the store's product tags (`black-friday`, `feature:color-black`, ...). Choosing several shows products that have all of them.
 
 ## Container

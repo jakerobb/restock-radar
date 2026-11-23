@@ -24,6 +24,7 @@ import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
 import { InjectorFinder } from './InjectorFinder'
 import { PlanSearch } from './PlanSearch'
+import { AddToStoreCart } from './AddToStoreCart'
 import { ConvertPlan } from './ConvertPlan'
 import { ImportUnifi } from './ImportUnifi'
 import { NamePlanDialog } from './NamePlanDialog'
@@ -560,6 +561,7 @@ export default function PlanPage() {
             regions={productData.regions}
             suggested={lines.some((l) => !l.ref.startsWith(`${region}/`)) ? region : (productData.regions.find((r) => r !== region) ?? region)}
           />
+          <AddToStoreCart name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name} views={views} region={region} />
           <ShareLink name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name} lines={lines} products={productData.products} hosting={hosting} powering={powering} />
         </div>
       )}
