@@ -194,6 +194,12 @@ describe('planChecks', () => {
       expect(byId([racked('sw', 1), desk('xg8')]).rack).toMatchObject({ verdict: 'info', text: '1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: xg8.' })
     })
 
+    it('puts the PDU HD in the rack at 0U, since it mounts on the side of a rail', () => {
+      const hd = real('usp-pdu-hd', 'PDU HD', 'Integrations', 'integrations-power-tech', deskDevice)
+      expect(byId([racked('sw', 1), hd]).rack?.text).toBe('1U of rack space (sw 1U, PDU HD 0U).')
+      expect(byId([racked('sw', 1), hd]).rack?.groups?.[0]).toEqual({ text: '1U of rack space', ordered: true, items: ['sw 1U'] })
+    })
+
     it('names the Instant and the CloudKey+, recorders and consoles filed with the cameras, as needing a shelf', () => {
       const instant = real('unvr-instant', 'UNVR Instant', 'Cameras & Security', 'physical-security-nvr', deskDevice)
       const key = real('uck-g2-ssd', 'CloudKey+', 'Cameras & Security', 'physical-security-nvr', deskDevice)
