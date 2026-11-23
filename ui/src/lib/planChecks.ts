@@ -903,9 +903,10 @@ export type CheckSection = (typeof CHECK_SECTIONS)[number]
 
 /** Which section a check belongs in, or null for one that is about the plan as a whole (the missing tech specs). */
 export function sectionOf(c: PlanCheck): CheckSection | null {
+  if (c.id === 'role-gateway' || c.id.startsWith('role-gateway-')) return 'Network'
   if (c.id.startsWith('role-') || c.id.startsWith('nvr')) return 'Controllers'
   if (c.id === 'rack') return 'Physical Space'
-  if (c.id === 'poe-power' || c.id === 'power-adapter' || c.id === 'outlets') return 'Power'
+  if (c.id === 'poe-power' || c.id === 'poe-ports' || c.id === 'poe-layout' || c.id === 'power-adapter' || c.id === 'outlets') return 'Power'
   if (c.id.startsWith('poe-') || c.id.startsWith('net-')) return 'Network'
   return null
 }

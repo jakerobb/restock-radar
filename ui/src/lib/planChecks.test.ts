@@ -648,10 +648,10 @@ describe('groupChecks', () => {
     const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'poe-stock', 'net-sfp', 'nvr-stock']
     const groups = groupChecks(ids.map(check))
     expect(groups.map((g) => [g.title, g.checks.map((c) => c.id)])).toEqual([
-      ['Controllers', ['role-gateway', 'nvr', 'role-network-capacity', 'nvr-stock']],
-      ['Network', ['net-ports', 'poe-layout', 'poe-speed', 'poe-stock', 'net-sfp']],
+      ['Controllers', ['nvr', 'role-network-capacity', 'nvr-stock']],
+      ['Network', ['net-ports', 'role-gateway', 'poe-speed', 'poe-stock', 'net-sfp']],
       ['Physical Space', ['rack']],
-      ['Power', ['outlets', 'poe-power', 'power-adapter']],
+      ['Power', ['outlets', 'poe-power', 'poe-layout', 'power-adapter']],
     ])
     expect(groupChecks([check('rack')]).map((g) => g.title)).toEqual(['Physical Space'])
   })
