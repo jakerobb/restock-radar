@@ -46,11 +46,11 @@ function OverrideRow({ o, canEdit }: { o: SpecOverride; canEdit: boolean }) {
           )}
         </div>
         {canEdit && (
-          <div className="flex items-start gap-2 text-sm">
+          <div className="flex items-baseline gap-3 text-sm">
             <button type="button" className="cursor-pointer text-accent underline-offset-2 hover:underline" aria-label={`Edit the override of ${o.label}`} onClick={() => setEditing(!editing)}>
               Edit
             </button>
-            <RemoveOverrideButton region={o.region} slug={o.slug} id={o.id} label={o.label} />
+            <RemoveOverrideButton region={o.region} slug={o.slug} id={o.id} label={o.label} className="text-sm" />
           </div>
         )}
       </div>
