@@ -759,3 +759,99 @@ func TestLinkedChoicesKeepTheLabelsTheProductPageGave(t *testing.T) {
 		t.Fatalf("links = %+v, none = %v, err = %v", links, none, err)
 	}
 }
+
+// relistHistory lists v1, has the store take it off, then lists it again with the given state, and
+// returns v1's history over the whole period.
+func relistHistory(t *testing.T, t0 time.Time, status string, price int64) VariantHistory {
+	t.Helper()
+	ctx := context.Background()
+	s := openTest(t)
+	apply := func(p *unistore.Product, at time.Time) {
+		t.Helper()
+		if _, err := s.Apply(ctx, "us", p, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(product("Available", 10900), t0)
+	apply(product("Available", 10900), t0.Add(24*time.Hour))
+	other := product("Available", 10900)
+	other.Variants[0].ID = "v9"
+	apply(other, t0.Add(48*time.Hour)) // v1 is gone from here until it returns
+	apply(product(status, price), t0.Add(5*24*time.Hour))
+
+	all, err := s.History(ctx, t0.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range all {
+		if h.VariantID == "v1" {
+			return h
+		}
+	}
+	t.Fatalf("no history for v1 in %+v", all)
+	return VariantHistory{}
+}
+
+func TestHistoryBreaksWhereAVariantWasNotListed(t *testing.T) {
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	h := relistHistory(t, t0, "Available", 10900)
+	pts := h.Points
+	// It was last seen a day in, and its state is restored when it is listed again.
+	if len(pts) != 3 || pts[0].Status != "Available" ||
+		!pts[1].Time.Equal(t0.Add(24*time.Hour)) || pts[1].Status != "" || pts[1].PriceCents != nil || pts[1].PriceWithSurchargesCents != nil ||
+		!pts[2].Time.Equal(t0.Add(5*24*time.Hour)) || pts[2].Status != "Available" || *pts[2].PriceCents != 10900 {
+		t.Fatalf("unexpected points: %+v", pts)
+	}
+	if !h.Until.Equal(t0.Add(5 * 24 * time.Hour)) {
+		t.Fatalf("until = %v", h.Until)
+	}
+}
+
+func TestHistoryShowsAChangeMadeWhileNotListedWhenItReturns(t *testing.T) {
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	h := relistHistory(t, t0, "SoldOut", 9900)
+	pts := h.Points
+	back := pts[len(pts)-1]
+	if len(pts) < 3 || pts[1].Status != "" || back.Status != "SoldOut" || *back.PriceCents != 9900 || !back.Time.Equal(t0.Add(5*24*time.Hour)) {
+		t.Fatalf("unexpected points: %+v", pts)
+	}
+	for _, p := range pts[2:] {
+		if p.Time.Before(t0.Add(5 * 24 * time.Hour)) {
+			t.Fatalf("a point inside the gap: %+v", pts)
+		}
+	}
+}
+
+func TestHistoryWindowStartingInAGapOpensBlank(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	t0 := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	other := product("Available", 10900)
+	other.Variants[0].ID = "v9"
+	for _, step := range []struct {
+		p  *unistore.Product
+		at time.Time
+	}{
+		{product("Available", 10900), t0},
+		{other, t0.Add(24 * time.Hour)},
+		{product("Available", 10900), t0.Add(5 * 24 * time.Hour)},
+	} {
+		if _, err := s.Apply(ctx, "us", step.p, step.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := s.History(ctx, t0.Add(3*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range all {
+		if h.VariantID != "v1" {
+			continue
+		}
+		if len(h.Points) != 2 || h.Points[0].Status != "" || h.Points[0].PriceCents != nil || h.Points[1].Status != "Available" {
+			t.Fatalf("unexpected points: %+v", h.Points)
+		}
+		return
+	}
+	t.Fatal("no history for v1")
+}

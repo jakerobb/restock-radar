@@ -16,6 +16,12 @@ export function HistoryLegend({ days }: { days: number }) {
           {statusInfo(status).label}
         </li>
       ))}
+      <li className="flex items-center gap-1">
+        <svg width="10" height="10" aria-hidden="true">
+          <rect width="10" height="10" className="fill-chart-empty stroke-line" />
+        </svg>
+        Not listed
+      </li>
     </ul>
   )
 }
