@@ -13,7 +13,7 @@ import { specsGapOf } from '../lib/specsGaps'
 import { decodePlan, DEFAULT_PLAN_NAME, defaultVariant, encodePlan, lineKey, MAX_QTY, planTotals, viewLine, type LineState, type LineView, type PlanLine } from '../lib/plan'
 import { budgetOf, includedScenario, powerOptions, withSiblings, type PowerOption, type Powering } from '../lib/powering'
 import { buildTopology, type TopoNode } from '../lib/topology'
-import { overall, planChecks, type CheckVerdict, type DerivedLine } from '../lib/planChecks'
+import { overall, planChecks, type CheckVerdict, type DerivedLine, type TreeNode } from '../lib/planChecks'
 import { APP_NAME, HOSTED_ROLES, type HostedRole, type Hosting } from '../lib/roles'
 import { statusInfo } from '../lib/status'
 import { MAX_PLANS, nameTaken, uniqueName } from '../lib/planStore'
@@ -56,6 +56,21 @@ const VERDICT: Record<CheckVerdict, { mark: string; tone: string }> = {
 
 /** A quantity box you can clear and retype in: only a whole number from 1 to 99 changes the plan, and leaving the box shows the real quantity. */
 /** A numbered list when the order is the point (what goes in the rack, top to bottom), else bullets. */
+/** A nested list of points, each with what is under it. */
+function TreeList({ nodes, root }: { nodes: TreeNode[]; root?: boolean }) {
+  if (nodes.length === 0) return null
+  return (
+    <ul className={root ? 'mt-1 list-disc space-y-1 pl-5' : 'list-disc pl-5'}>
+      {nodes.map((n, i) => (
+        <li key={`${i}:${n.text}`}>
+          {n.text}
+          {n.children && <TreeList nodes={n.children} />}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function ListTag({ ordered, children }: { ordered?: boolean; children: React.ReactNode }) {
   return ordered ? <ol className="list-decimal pl-5 text-muted">{children}</ol> : <ul className="list-disc pl-5 text-muted">{children}</ul>
 }
@@ -700,6 +715,12 @@ export default function PlanPage() {
                             ))}
                           </div>
                         </details>
+                      ) : c.tree ? (
+                        <>
+                          {c.tree.note && <p className="mb-1 text-muted">{c.tree.note}</p>}
+                          <span className="font-medium">{c.tree.heading}:</span>
+                          <TreeList nodes={c.tree.nodes} root />
+                        </>
                       ) : c.groups ? (
                         <>
                           <span className="font-medium">{c.label}:</span>
