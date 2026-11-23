@@ -20,7 +20,7 @@ export function HistoryLegend({ days }: { days: number }) {
         <svg width="10" height="10" aria-hidden="true">
           <rect width="10" height="10" className="fill-chart-empty stroke-line" />
         </svg>
-        Not listed
+        Not listed or not tracked
       </li>
     </ul>
   )
