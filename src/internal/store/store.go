@@ -333,6 +333,15 @@ var migrations = []string{
 	// What the store called the size the dimensions were read from ("Device",
 	// "Without mount"); empty when it gave one, unlabelled.
 	`ALTER TABLE product_derived ADD COLUMN dim_label TEXT NOT NULL DEFAULT '';`,
+	// The stretches in which a variant was not listed and then came back, for the history charts. A
+	// variant that never comes back needs no row: its timeline already ends at its last check.
+	`CREATE TABLE variant_gaps (
+		region     TEXT NOT NULL,
+		variant_id TEXT NOT NULL,
+		from_ts    TEXT NOT NULL,
+		to_ts      TEXT NOT NULL,
+		PRIMARY KEY (region, variant_id, from_ts)
+	);`,
 }
 
 type Store struct {
@@ -644,11 +653,11 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		newPrice, newRegular, cur := cents(v.Price), cents(v.RegularPrice), currency(v)
 		newTotal := cents(v.PriceWithSurcharges)
 
-		var oldStatus string
+		var oldStatus, oldChecked, oldDelisted string
 		var oldPrice, oldRegular, oldTotal *int64
 		err := tx.QueryRowContext(ctx,
-			`SELECT status, price_cents, regular_price_cents, surcharge_price_cents FROM variants WHERE region = ? AND id = ?`,
-			region, v.ID).Scan(&oldStatus, &oldPrice, &oldRegular, &oldTotal)
+			`SELECT status, price_cents, regular_price_cents, surcharge_price_cents, last_checked, delisted_at FROM variants WHERE region = ? AND id = ?`,
+			region, v.ID).Scan(&oldStatus, &oldPrice, &oldRegular, &oldTotal, &oldChecked, &oldDelisted)
 
 		if err == sql.ErrNoRows {
 			_, err = tx.ExecContext(ctx, `
@@ -667,6 +676,14 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reading variant: %w", err)
+		}
+
+		// The store has listed it again: it wasn't there from when we last saw it until now.
+		if oldDelisted != "" {
+			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO variant_gaps (region, variant_id, from_ts, to_ts) VALUES (?, ?, ?, ?)`,
+				region, v.ID, oldChecked, ts(now)); err != nil {
+				return nil, fmt.Errorf("recording gap: %w", err)
+			}
 		}
 
 		changed := false

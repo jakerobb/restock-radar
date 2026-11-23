@@ -26,7 +26,9 @@ type VariantHistory struct {
 	Until     time.Time `json:"until"`
 	// Points are in time order. The first is the state in effect at the start
 	// of the window (timestamped at its true start, which may precede the
-	// window); the rest are changes inside it.
+	// window); the rest are changes inside it. A point with no status and no
+	// price starts a stretch in which the store didn't list the variant; the
+	// next point is its return.
 	Points []HistoryPoint `json:"points"`
 }
 
@@ -100,6 +102,28 @@ func (s *Store) History(ctx context.Context, since time.Time) ([]VariantHistory,
 		return nil, err
 	}
 
+	type gap struct{ from, to time.Time }
+	grows, err := s.db.QueryContext(ctx, `SELECT region, variant_id, from_ts, to_ts FROM variant_gaps ORDER BY from_ts`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = grows.Close() }()
+	gaps := map[variantKey][]gap{}
+	for grows.Next() {
+		var k variantKey
+		var from, to string
+		if err := grows.Scan(&k.region, &k.id, &from, &to); err != nil {
+			return nil, err
+		}
+		g := gap{}
+		g.from, _ = time.Parse(time.RFC3339, from)
+		g.to, _ = time.Parse(time.RFC3339, to)
+		gaps[k] = append(gaps[k], g)
+	}
+	if err := grows.Err(); err != nil {
+		return nil, err
+	}
+
 	out := make([]VariantHistory, 0, len(order))
 	for _, k := range order {
 		t := byKey[k]
@@ -129,6 +153,34 @@ func (s *Store) History(ctx context.Context, since time.Time) ([]VariantHistory,
 			current.Time = e.when
 			points = append(points, current)
 		}
+		// Blank out the stretches in which the variant wasn't listed. Whatever it was just before is
+		// held until it comes back, when the state is whatever events at that moment left it.
+		for _, g := range gaps[k] {
+			var back HistoryPoint
+			for _, p := range points {
+				if !p.Time.After(g.to) {
+					back = p
+				}
+			}
+			back.Time = g.to
+			spliced := make([]HistoryPoint, 0, len(points)+2)
+			for _, p := range points {
+				if p.Time.Before(g.from) {
+					spliced = append(spliced, p)
+				}
+			}
+			spliced = append(spliced, HistoryPoint{Time: g.from})
+			if !hasPointAt(points, g.to) {
+				spliced = append(spliced, back)
+			}
+			for _, p := range points {
+				if !p.Time.Before(g.to) {
+					spliced = append(spliced, p)
+				}
+			}
+			points = spliced
+		}
+
 		start := 0
 		for i, p := range points {
 			if p.Time.Before(since) {
@@ -140,4 +192,13 @@ func (s *Store) History(ctx context.Context, since time.Time) ([]VariantHistory,
 		out = append(out, t.VariantHistory)
 	}
 	return out, nil
+}
+
+func hasPointAt(points []HistoryPoint, at time.Time) bool {
+	for _, p := range points {
+		if p.Time.Equal(at) {
+			return true
+		}
+	}
+	return false
 }
