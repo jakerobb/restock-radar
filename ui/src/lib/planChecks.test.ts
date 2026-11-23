@@ -332,24 +332,29 @@ describe('planChecks', () => {
       gone.view = { ...gone.view, state: 'out' }
       const c = byId([ap(2), gone])
       expect(c['poe-stock']).toBeUndefined()
-      expect(c.stock).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
+      expect(c.stock).toMatchObject({ verdict: 'warn', shortfall: true, text: "The following items aren't in stock:", stock: { note: expect.stringContaining('PoE power and ports') } })
+      expect(c.stock!.stock!.items.map((v) => v.line.ref)).toEqual(['us/gone'])
     })
   })
 
   describe('stock', () => {
-    it('says so when everything in the plan is in stock, and says nothing for an empty plan', () => {
-      expect(byId([ap(2), sw(1, 100)]).stock).toMatchObject({ verdict: 'ok', text: 'Everything in the plan is in stock.' })
+    it('notes that everything in the plan is in stock, without it counting towards the answer, and says nothing for an empty plan', () => {
+      expect(byId([ap(2), sw(1, 100)]).stock).toMatchObject({ verdict: 'info', text: 'Everything in the plan is in stock.' })
       expect(planChecks([]).map((c) => c.id)).toEqual([])
+      expect(overall(planChecks([item('plain', 1, { power: [src('ac')] })]))).toBeNull()
     })
-    it('names every item that is not in stock, whatever it is, in one check, without calling for a switch', () => {
-      const a = item('lamp', 1, { power: [src('ac')] })
-      a.view = { ...a.view, state: 'out' }
-      const b = item('gong', 2, { power: [src('ac')] })
-      b.view = { ...b.view, state: 'soon' }
-      const checks = planChecks([a, b, ap(2), sw(1, 100)])
+    it('lists every item that is not in stock, whatever it is, in one check, dearest line first and unpriced ones last, without calling for a switch', () => {
+      const out = (slug: string, qty: number, cents: number | null, state: 'out' | 'soon' | 'unlisted' = 'out') => {
+        const l = item(slug, qty, { power: [src('ac')] })
+        l.view = { ...l.view, state, totalCents: cents }
+        return l
+      }
+      const checks = planChecks([out('cheap', 1, 1000), out('gone', 1, null, 'unlisted'), out('dear', 2, 90000, 'soon'), out('mid', 1, 5000), ap(2), sw(1, 100)])
       expect(checks.filter((c) => c.id === 'stock')).toHaveLength(1)
-      expect(checks.find((c) => c.id === 'stock')).toMatchObject({ verdict: 'warn', text: "lamp, gong aren't in stock." })
-      expect(checks.some((c) => c.shortfall)).toBe(false)
+      const c = checks.find((x) => x.id === 'stock')!
+      expect(c).toMatchObject({ verdict: 'warn', text: "The following items aren't in stock:" })
+      expect(c.stock!.items.map((v) => v.line.ref)).toEqual(['us/dear', 'us/mid', 'us/cheap', 'us/gone'])
+      expect(checks.some((x) => x.shortfall)).toBe(false)
     })
   })
 

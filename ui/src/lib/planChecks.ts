@@ -82,6 +82,8 @@ export interface PlanCheck {
   net?: NetStats
   /** On the layout check: how the placement came out, for comparing switches. */
   stats?: PoeStats
+  /** On the stock check: the lines that can't be bought now, dearest first, and what that leaves the plan without. */
+  stock?: { items: LineView[]; note?: string }
 }
 
 export interface PoeStats {
@@ -863,21 +865,27 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
   return [...stockCheck(lines, all.filter((c) => !inStock(c))), ...all.filter(inStock)]
 }
 
-/** Whether everything in the plan can be bought now. Carries the shortfalls of a switch or NVR that can't, so that the finders still offer a replacement. */
+/**
+ * Whether everything in the plan can be bought now. That it can is a note, not a pass: it says nothing about whether the plan adds up,
+ * so it doesn't count towards the answer. What can't be bought is listed dearest line first (the costliest are the biggest decisions: wait, or find
+ * another), and carries the shortfalls of a switch or NVR that can't, so that the finders still offer a replacement.
+ */
 function stockCheck(lines: DerivedLine[], unavailable: PlanCheck[]): PlanCheck[] {
   if (lines.length === 0) return []
-  const out = lines.filter((l) => l.view.state !== 'in')
-  if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'ok', text: 'Everything in the plan is in stock.' }]
+  const out = lines.map((l) => l.view).filter((v) => v.state !== 'in')
+  if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'info', text: 'Everything in the plan is in stock.' }]
   const poe = unavailable.some((c) => c.shortfall)
   const nvr = unavailable.some((c) => c.nvrShortfall)
-  const effects = [poe && "the PoE power and ports a switch gives can't be had now", nvr && "the camera capacity an NVR gives can't be had now"].filter(Boolean)
+  const effects = [poe && "The PoE power and ports a switch gives can't be had now.", nvr && "The camera capacity an NVR gives can't be had now."].filter(Boolean)
+  const items = out.map((v, i) => ({ v, i })).sort((a, b) => (b.v.totalCents ?? -1) - (a.v.totalCents ?? -1) || a.i - b.i).map((x) => x.v)
   return [{
     id: 'stock',
     label: 'Stock',
     verdict: 'warn',
     ...(poe ? { shortfall: true } : {}),
     ...(nvr ? { nvrShortfall: true } : {}),
-    text: `${list(out)} ${out.length === 1 && out[0]!.view.line.qty === 1 ? "isn't" : "aren't"} in stock${effects.length > 0 ? `, so ${effects.join(' and ')}` : ''}.`,
+    text: "The following items aren't in stock:",
+    stock: { items, ...(effects.length > 0 ? { note: effects.join(' ') } : {}) },
   }]
 }
 

@@ -221,11 +221,10 @@ describe('pricing a plan against the catalogue', () => {
     expect(viewLine(line({ ref: 'us/other' }), products)).toMatchObject({ state: 'untracked', unitCents: null })
   })
 
-  it('totals what is priced, per currency, and reports what isn’t or can’t be bought', () => {
+  it('totals what is priced, per currency, and reports what isn’t', () => {
     const eu = new Map([...products, ['eu/widget', product({ region: 'eu', variants: [variant({ sku: 'SKU-1', currency: 'EUR', price_cents: 1000 })] })]])
     const t = planTotals([line({ qty: 2 }), line({ sku: 'SKU-2' }), line({ sku: 'SKU-3' }), line({ ref: 'eu/widget' })].map((l) => viewLine(l, eu)))
     expect(t.sums).toEqual([{ currency: 'USD', cents: 25000 + 8000 }, { currency: 'EUR', cents: 1000 }])
     expect(t).toMatchObject({ unpriced: 1, items: 5 })
-    expect(t.notInStock.map((v) => v.line.sku)).toEqual(['SKU-2', 'SKU-3'])
   })
 })

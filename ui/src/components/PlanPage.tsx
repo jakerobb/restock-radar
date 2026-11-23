@@ -652,23 +652,7 @@ export default function PlanPage() {
                 </div>
               ))}
               {totals.unpriced > 0 && <div className="text-sm text-muted">{totals.unpriced === 1 ? '1 line has' : `${totals.unpriced} lines have`} no price and isn't counted.</div>}
-              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-sm">
-                {shared ? <span /> : clearControl}
-                {totals.notInStock.length === 0 ? (
-                  <span className="text-ok">Everything is in stock.</span>
-                ) : totals.notInStock.length === 1 ? (
-                  <span className="text-bad">Not in stock: {totals.notInStock[0]!.product?.title ?? totals.notInStock[0]!.line.ref}.</span>
-                ) : (
-                  <div className="text-bad">
-                    Not in stock:
-                    <ul className="list-disc pl-5">
-                      {totals.notInStock.map((v) => (
-                        <li key={v.line.ref + v.line.sku}>{v.product?.title ?? v.line.ref}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+              {!shared && <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-sm">{clearControl}</div>}
             </div>
           </Card>
           )
@@ -728,7 +712,26 @@ export default function PlanPage() {
                                 </div>
                               ))}
                             </>
-                          ) : c.groups ? (
+                          ) : c.stock ? (
+                        <>
+                          <span className="font-medium">{c.label}: </span>
+                          {c.text}
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            {c.stock.items.map((v) => (
+                              <li key={lineKey(v.line)}>
+                                {v.line.qty > 1 && `${v.line.qty} × `}
+                                {v.product?.title ?? v.line.ref}
+                                <Badge tone={STATE[v.state].tone} className="ml-1.5">
+                                  {STATE[v.state].label}
+                                </Badge>
+                                {v.variant?.restock_eta && <span className="ml-1.5 text-xs text-muted">restock {v.variant.restock_eta}</span>}
+                                {v.totalCents !== null && <span className="ml-1.5 text-muted">{formatPrice(v.totalCents, v.currency)}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                          {c.stock.note && <p className="mt-1 text-muted">{c.stock.note}</p>}
+                        </>
+                      ) : c.groups ? (
                             <>
                               <span className="font-medium">{c.label}:</span>
                               <ul className="mt-1 list-disc space-y-1 pl-5">
