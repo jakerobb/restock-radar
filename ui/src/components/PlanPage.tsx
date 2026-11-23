@@ -718,8 +718,12 @@ export default function PlanPage() {
                       ) : c.tree ? (
                         <>
                           {c.tree.note && <p className="mb-1 text-muted">{c.tree.note}</p>}
-                          <span className="font-medium">{c.tree.heading}:</span>
-                          <TreeList nodes={c.tree.nodes} root />
+                          {c.tree.sections.map((sec) => (
+                            <div key={sec.heading} className="mb-2 last:mb-0">
+                              <span className="font-medium">{sec.heading}:</span>
+                              <TreeList nodes={sec.nodes} root />
+                            </div>
+                          ))}
                         </>
                       ) : c.groups ? (
                         <>

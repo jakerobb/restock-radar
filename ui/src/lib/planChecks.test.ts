@@ -132,34 +132,43 @@ describe('planChecks', () => {
   })
 
   it('plugs devices into PDU and UPS sockets, and counts only the wall outlets left', () => {
-    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')] })
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
     // UPS -> PDU -> everything: the UPS takes the one wall outlet.
-    expect(byId([item('ups-tower-us', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets).toMatchObject({
-      text: '1 AC outlet (ups-tower-us). 3 of 16 PDU sockets used, 1 of 8 UPS sockets used.',
+    expect(byId([item('ups-2u-us', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets).toMatchObject({
+      text: '1 AC outlet (ups-2u-us). 3 of 16 PDU sockets used, 1 of 8 UPS sockets used.',
     })
     // A PDU alone takes a wall outlet; what it can't hold goes to the wall too.
     expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.text).toBe('2 AC outlets (usp-pdu-pro, gw). 16 of 16 PDU sockets used.')
     // Overflow from the PDU goes to the UPS, after the PDU has taken its own socket.
     expect(byId([item('ups-2u', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 20)]).outlets?.text).toBe('1 AC outlet (ups-2u). 16 of 16 PDU sockets used, 5 of 8 UPS sockets used.')
     // A UPS with no PDU powers devices directly.
-    expect(byId([item('ups-tower', 1, null), mains('gw', 2)]).outlets?.text).toBe('1 AC outlet (ups-tower). 2 of 8 UPS sockets used.')
+    expect(byId([item('ups-tower', 1, null), item('gw', 2, { power: [src('ac')] })]).outlets?.text).toBe('1 AC outlet (ups-tower). 2 of 8 UPS sockets used.')
   })
 
   it('lays the outlets out as a tree: each UPS and PDU with what is plugged into it, then what is left for the wall', () => {
-    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')] })
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
     const tree = byId([item('ups-2u', 1, null), item('ups-tower', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets?.tree
-    expect(tree).toEqual({
-      heading: 'Requires 2 AC outlets',
-      nodes: [
-        { text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (3 of 16 outlets used)', children: [{ text: 'gw' }, { text: '2 × nvr' }] }] },
-        { text: 'ups-tower' },
-      ],
-    })
+    expect(tree?.sections).toEqual([
+      { heading: 'The rack requires 1 AC outlet', nodes: [{ text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (3 of 16 outlets used)', children: [{ text: 'gw' }, { text: '2 × nvr' }] }] }] },
+      { heading: 'Other items require 1 AC outlet', nodes: [{ text: 'ups-tower' }] },
+    ])
     // What fits nowhere is listed last, after the PDUs on the wall.
-    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.tree?.nodes).toEqual([
+    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.tree?.sections[0]?.nodes).toEqual([
       { text: 'usp-pdu-pro (16 of 16 outlets used)', children: [{ text: '16 × gw' }] },
       { text: 'gw' },
     ])
+  })
+
+  it('plugs the rack into the rack’s PDUs and UPSes, and the rest into the others', () => {
+    const racked = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
+    const desk = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: false, units: 0, full_depth: false } })
+    const lines = [racked('ups-2u', 1), item('ups-tower', 1, null), item('usp-pdu-pro', 1, null), racked('hd', 1), racked('nvr', 1), desk('cgf', 1), desk('xg8', 1)]
+    expect(byId(lines).outlets?.tree?.sections).toEqual([
+      { heading: 'The rack requires 1 AC outlet', nodes: [{ text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (2 of 16 outlets used)', children: [{ text: 'hd' }, { text: 'nvr' }] }] }] },
+      { heading: 'Other items require 1 AC outlet', nodes: [{ text: 'ups-tower (2 of 8 outlets used)', children: [{ text: 'cgf' }, { text: 'xg8' }] }] },
+    ])
+    // The rack alone says "The rack requires".
+    expect(byId([racked('ups-2u', 1), racked('gw', 1)]).outlets?.tree?.sections.map((x) => x.heading)).toEqual(['The rack requires 1 AC outlet'])
   })
 
   it('adds up rack space, and says when a height is missing', () => {
