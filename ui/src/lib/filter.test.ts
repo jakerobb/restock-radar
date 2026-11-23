@@ -1,4 +1,4 @@
-import { filterProducts, groupTags, isInStock, prefixCounts, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
+import { filterProducts, matchesVariantQuery, groupTags, isInStock, prefixCounts, tagPrefix, matchesQuery, tagCounts, typeCounts } from './filter'
 import { product, variant } from '../test/fixtures'
 
 const camera = product({ id: 'a', title: 'Camera G6 180', type: 'Cameras & Security', variants: [variant({ title: 'Black' }), variant({ title: 'White' })] })
@@ -42,6 +42,22 @@ describe('filterProducts', () => {
     expect(filterProducts(all, '', 'Gateways')).toEqual([gateway])
     expect(filterProducts(all, '', 'Other')).toEqual([mystery])
     expect(filterProducts(all, 'box', 'Gateways')).toEqual([])
+  })
+})
+
+describe('variant-level search', () => {
+  const sw = variant({ id: 'sw', title: '12U Rack Cabinet', sku: 'UACC-Rack-12U-Wall-SW-G' })
+  const other = variant({ id: 'o', title: '12U Rack Cabinet', sku: 'UACC-Rack-12U-Wall-450-G' })
+  const rack = product({ id: 'r', title: '12U Rack Cabinet', variants: [other, sw] })
+  it('matches a variant by its own SKU or name and its product\'s name', () => {
+    expect(matchesVariantQuery(rack, sw, 'wall-sw-g')).toBe(true)
+    expect(matchesVariantQuery(rack, other, 'wall-sw-g')).toBe(false)
+    expect(matchesVariantQuery(rack, other, 'rack cabinet 450')).toBe(true)
+  })
+  it('keeps only the matching variants of a product', () => {
+    expect(filterProducts([rack], 'UACC-Rack-12U-Wall-SW-G', '')).toEqual([{ ...rack, variants: [sw] }])
+    expect(filterProducts([rack], 'rack cabinet', '')).toEqual([rack])
+    expect(filterProducts([rack], 'nope', '')).toEqual([])
   })
 })
 
