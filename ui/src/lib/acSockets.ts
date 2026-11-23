@@ -8,14 +8,16 @@ import { baseSlug } from './convertPlan'
 export interface AcSockets {
   kind: 'pdu' | 'ups'
   sockets: number
+  /** Whether it goes in a rack, which the store doesn't always say. */
+  rack: boolean
 }
 
 export const AC_SOCKETS: Record<string, AcSockets> = {
-  'usp-pdu-pro': { kind: 'pdu', sockets: 16 },
-  'usp-pdu-hd': { kind: 'pdu', sockets: 24 },
-  'ups-tower': { kind: 'ups', sockets: 8 },
-  'ups-2u': { kind: 'ups', sockets: 8 },
-  'ups-2u-pro': { kind: 'ups', sockets: 8 },
+  'usp-pdu-pro': { kind: 'pdu', sockets: 16, rack: true },
+  'usp-pdu-hd': { kind: 'pdu', sockets: 24, rack: true },
+  'ups-tower': { kind: 'ups', sockets: 8, rack: false },
+  'ups-2u': { kind: 'ups', sockets: 8, rack: true },
+  'ups-2u-pro': { kind: 'ups', sockets: 8, rack: true },
 }
 
 /** The AC sockets a product with this slug provides; undefined for one that isn't a PDU or UPS. */
