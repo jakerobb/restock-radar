@@ -111,13 +111,22 @@ export function tagPrefix(tag: string): string | null {
   return i > 0 && i < tag.length - 1 ? tag.slice(0, i) : null
 }
 
-/** Splits tags into plain ones and `prefix:` groups (alphabetical by prefix); each keeps its incoming order. */
-export function groupTags(tags: TagCount[]): { plain: TagCount[]; groups: TagGroupCounts[] } {
+/**
+ * Splits tags into plain ones and `prefix:` groups (alphabetical by prefix); each keeps its incoming order.
+ * A prefix with only one value (compare:hide) isn't worth a popup, so it stays a plain tag.
+ * Pass `all` when `tags` is a narrowed list (a search), so a group isn't dissolved just because one option matched.
+ */
+export function groupTags(tags: TagCount[], all: TagCount[] = tags): { plain: TagCount[]; groups: TagGroupCounts[] } {
+  const valuesPerPrefix = new Map<string, number>()
+  for (const t of all) {
+    const prefix = tagPrefix(t.tag)
+    if (prefix !== null) valuesPerPrefix.set(prefix, (valuesPerPrefix.get(prefix) ?? 0) + 1)
+  }
   const plain: TagCount[] = []
   const byPrefix = new Map<string, TagCount[]>()
   for (const t of tags) {
     const prefix = tagPrefix(t.tag)
-    if (prefix === null) plain.push(t)
+    if (prefix === null || valuesPerPrefix.get(prefix) === 1) plain.push(t)
     else byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), t])
   }
   const groups = [...byPrefix]
