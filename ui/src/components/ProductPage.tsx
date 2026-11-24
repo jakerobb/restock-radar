@@ -1,15 +1,19 @@
-import { Link, useParams } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCan, useHistory, useProductSpecs, useProducts } from '../api/queries'
 import type { Derived, Port, Product, SpecEntry, SpecOverride } from '../api/types'
+import { counterpart } from '../lib/convertPlan'
 import { formatRelative } from '../lib/format'
 import { indexHistory } from '../lib/history'
 import { powerLabel } from '../lib/power'
+import { regionName } from '../lib/region'
 import { FLAG_METRICS, formatSpeed, metricInfo } from '../lib/requirements'
 import { useHistoryDays } from '../hooks/useHistoryDays'
+import { useRegion } from '../hooks/useRegion'
 import { ProductCard } from './ProductCard'
 import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
 import { PageNav } from './PageNav'
+import { Flag } from './RegionPicker'
 import { RefreshButton } from './RefreshButton'
 import { SpecsExpectation } from './SpecsExpectation'
 import { HistoryRangePicker } from './HistoryRangePicker'
@@ -192,12 +196,67 @@ export default function ProductPage() {
   const index = useMemo(() => (history.data ? indexHistory(history.data) : undefined), [history.data])
   const canEdit = useCan('overrides:write')
   const canRefresh = useCan('products:refresh')
+  const { region: chosen, setRegion } = useRegion()
+  const navigate = useNavigate()
+  const lastChosen = useRef<string | undefined>(undefined)
+  const [missing, setMissing] = useState<{ page: string; region: string }>()
+
+  // Changing the store region jumps to the same product there, or says it isn't sold there.
+  useEffect(() => {
+    if (!productData) return
+    const before = lastChosen.current
+    lastChosen.current = chosen
+    if (before === undefined || before === chosen) return
+    const here = productData.products.find((p) => p.region === region && p.slug === slug)
+    const there = here ? counterpart(here, chosen, productData.products) : productData.products.find((p) => p.region === chosen && p.slug === slug)
+    // Reacting to the region store changing (an external system), so setting state here is the point.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (chosen === region) setMissing(undefined)
+    else if (there) void navigate({ to: '/p/$region/$slug', params: { region: chosen, slug: there.slug } })
+    else setMissing({ page: `${region}/${slug}`, region: chosen })
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [chosen, productData, region, slug, navigate])
 
   if (isPending || (specs.isPending && !product)) {
     return (
       <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
         <PageNav title="Product" />
         <p className="py-8 text-center text-muted">Loading…</p>
+      </main>
+    )
+  }
+  if (product && missing?.page === `${region}/${slug}` && missing.region === chosen) {
+    const available = productData!.regions.flatMap((r) => {
+      const p = r === region ? product : counterpart(product, r, productData!.products)
+      return p && r !== chosen ? [{ region: r, slug: p.slug }] : []
+    })
+    return (
+      <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
+        <PageNav title={product.title} />
+        <Notice tone="bad" className="mt-4">
+          <p>
+            {product.title} is not available in {regionName(chosen)}. It is available in the following regions:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {available.map((a) => (
+              <li key={a.region}>
+                <Link
+                  to="/p/$region/$slug"
+                  params={a}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                    e.preventDefault()
+                    setRegion(a.region)
+                  }}
+                  className="inline-flex items-center gap-2 underline"
+                >
+                  <Flag region={a.region} />
+                  {regionName(a.region)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Notice>
       </main>
     )
   }

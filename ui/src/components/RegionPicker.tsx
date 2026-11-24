@@ -4,7 +4,7 @@ import { cn } from '../lib/cn'
 import { FLAG_URLS } from '../lib/flags'
 import { REGIONS, regionName } from '../lib/region'
 
-function Flag({ region }: { region: string }) {
+export function Flag({ region }: { region: string }) {
   const src = FLAG_URLS[REGIONS[region]?.flag ?? '']
   if (!src) return <span aria-hidden className="inline-block h-3.5 w-[1.1667rem] rounded-[2px] bg-line" />
   return <img src={src} alt="" aria-hidden className="h-3.5 w-[1.1667rem] rounded-[2px] border border-line object-cover" />
