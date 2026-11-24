@@ -27,15 +27,13 @@ export function ProductCard({ product, showRegion, history, onPage = false }: Pr
     <Card aria-label={product.title}>
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <h2 className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1 text-lg font-semibold">
-          {/* Where there's no details page to go to, the title goes to the store instead. */}
+          {/* With no details page to go to, the title is plain text: the Store link is right there. */}
           {detailsHref ? (
             <a className="text-accent underline-offset-2 hover:underline" href={detailsHref}>
               {product.title}
             </a>
           ) : (
-            <a className="text-accent underline-offset-2 hover:underline" href={product.url} target="_blank" rel="noopener noreferrer">
-              {product.title}
-            </a>
+            product.title
           )}
           {/* With one variant its row says the same. */}
           {product.variants.length > 1 && <Badge tone={tone}>{label}</Badge>}
