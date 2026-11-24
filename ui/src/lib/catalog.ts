@@ -1,4 +1,4 @@
-import type { Derived, Port, Product } from '../api/types'
+import type { Derived, Port, Product, Variant } from '../api/types'
 import { formatMoney, totalCents } from './format'
 import { powerSummary } from './power'
 import { METRICS, metricInfo } from './requirements'
@@ -13,6 +13,8 @@ export interface PriceSummary {
   stock: StockState
   /** True when `cents` is the price of a variant that can be bought now. */
   buyable: boolean
+  /** The variant `cents` is the price of; null when no variant has a price. */
+  variant: Variant | null
   inStock: number
   variants: number
 }
@@ -36,6 +38,7 @@ export function summarizePrice(p: Product): PriceSummary {
     currency: pick?.v.currency ?? p.variants[0]?.currency ?? 'USD',
     stock,
     buyable: available.length > 0,
+    variant: pick?.v ?? null,
     inStock,
     variants: p.variants.length,
   }

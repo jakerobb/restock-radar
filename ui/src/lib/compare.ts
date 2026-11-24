@@ -1,6 +1,6 @@
-import type { Product } from '../api/types'
+import type { Product, Radio } from '../api/types'
 import { columnById, type CatalogRow, type Column } from './catalog'
-import { formatPrice } from './format'
+import { formatPrice, formatRelative, onSale } from './format'
 
 /** How many products fit side by side. */
 export const MAX_COMPARE = 4
@@ -69,11 +69,48 @@ const portLines = (r: CatalogRow): string[] | null => {
   return lines.length > 0 ? lines : ['none']
 }
 
+/** The Wi-Fi bands compared one by one; any other radio (Bluetooth, 60 GHz, SuperLink) goes in the summary. */
+const WIFI_BANDS = ['2.4 GHz', '5 GHz', '6 GHz']
+
+const isBandRadio = (x: Radio): boolean => x.tech === 'wifi' && WIFI_BANDS.includes(x.band)
+
+/** A product's biggest value for a band's radios (a band can be listed twice, as in a dual-5 GHz AP); null when unknown. */
+const bandNumber = (r: CatalogRow, band: string, pick: (x: Radio) => number | null): number | null => {
+  const values = (r.derived?.radios ?? []).filter((x) => x.band === band).map(pick).filter((n): n is number => n !== null && n > 0)
+  return values.length > 0 ? Math.max(...values) : null
+}
+
+const mbps = (v: number): string => (v >= 1000 ? `${Number((v / 1000).toFixed(2))} Gbps` : `${v} Mbps`)
+
+/** The per-band lines (TX power, gain, data rate, streams) for each Wi-Fi band at least one product has. */
+function bandLines(rows: CatalogRow[]): CompareLine[] {
+  const measures: { id: string; label: string; pick: (x: Radio) => number | null; show: (n: number) => string }[] = [
+    { id: 'tx', label: 'TX power', pick: (x) => x.tx_power_dbm, show: (n) => `${n} dBm` },
+    { id: 'gain', label: 'antenna gain', pick: (x) => x.antenna_gain_dbi, show: (n) => `${n} dBi` },
+    { id: 'rate', label: 'max data rate', pick: (x) => x.max_rate_mbps, show: mbps },
+    { id: 'streams', label: 'streams', pick: (x) => x.streams, show: String },
+  ]
+  return WIFI_BANDS.flatMap((band) => {
+    if (!rows.some((r) => r.derived?.radios.some((x) => x.band === band))) return []
+    return measures.flatMap((m) => {
+      const numbers = rows.map((r) => bandNumber(r, band, m.pick))
+      const cells = rows.map((r, i) => {
+        if (numbers[i] !== null) return [m.show(numbers[i]!)]
+        if (!r.derived?.known.radios) return null
+        // Known to have no such radio, or the radio is there but the store doesn't say.
+        return r.derived.radios.some((x) => x.band === band) ? null : ['none']
+      })
+      return cells.every((c) => c === null) ? [] : [line(`${band}_${m.id}`, `${band} ${m.label}`, cells, numbers)]
+    })
+  })
+}
+
 const radioLines = (r: CatalogRow): string[] | null => {
   const d = r.derived
   if (!d?.known.radios) return null
-  if (d.radios.length === 0) return ['none']
-  return d.radios.map(
+  const others = d.radios.filter((x) => !isBandRadio(x))
+  if (others.length === 0) return ['none']
+  return others.map(
     (x) => [x.band, x.streams !== null && `${x.streams} streams`, x.tx_power_dbm !== null && `${x.tx_power_dbm} dBm TX`, x.antenna_gain_dbi !== null && `${x.antenna_gain_dbi} dBi`].filter(Boolean).join(' · '),
   )
 }
@@ -95,20 +132,44 @@ const stockText = (r: CatalogRow): string => {
   return stock === 'soon' ? 'Coming soon' : 'Sold out'
 }
 
+/** The sale on the variant behind the price: "20% off, was $349"; "none" when it isn't on sale. */
+const saleLines = (r: CatalogRow): string[] | null => {
+  const v = r.price.variant
+  if (!v) return null
+  if (!onSale(v)) return ['none']
+  const off = Math.round(((v.regular_price_cents! - v.price_cents!) / v.regular_price_cents!) * 100)
+  return [`${off}% off, was ${formatPrice(v.regular_price_cents, v.currency)}`]
+}
+
+/** The store's own words for a change to the price or its surcharges; a stock change says nothing about price. */
+const isPriceChange = (what: string): boolean => /^price|surcharge/i.test(what)
+
+const NO_RECENT_CHANGE = 'no recent change'
+
+/** What the price last did, and when, if the variant's latest change was to its price. */
+const priceChangeLines = (r: CatalogRow): string[] | null => {
+  const v = r.price.variant
+  if (!v) return null
+  if (!v.last_change || !isPriceChange(v.last_change)) return [NO_RECENT_CHANGE]
+  return [`${v.last_change} ${formatRelative(v.last_changed)}`]
+}
+
 /** Leaves out a line nobody has anything to say about (a row of nothing but "none"). */
-const informative = (l: CompareLine | null): l is CompareLine => l !== null && l.cells.some((c) => c !== null && !(c.length === 1 && c[0] === 'none'))
+const informative = (l: CompareLine | null): l is CompareLine => l !== null && l.cells.some((c) => c !== null && !(c.length === 1 && (c[0] === 'none' || c[0] === NO_RECENT_CHANGE)))
 
 /**
  * Lines up the products' prices, derived numbers, ports, radios and size for a side-by-side view. A line
  * appears only when at least one product has something for it, so a switch comparison has no radios.
  */
 export function buildComparison(rows: CatalogRow[]): CompareSection[] {
-  const prices = rows.map((r) => r.price.cents)
+  // A price nobody can pay now (last seen) isn't one to beat.
+  const prices = rows.map((r) => (r.price.buyable ? r.price.cents : null))
   const sections: CompareSection[] = [
     {
       title: 'Price and stock',
       lines: [
         line('price', 'Price', rows.map((r) => (r.price.cents === null ? null : [formatPrice(r.price.cents, r.price.currency) + (r.price.buyable ? '' : ' (last seen)')])), prices, true),
+        ...[line('sale', 'Sale', rows.map(saleLines)), line('price_change', 'Latest price change', rows.map(priceChangeLines))].filter(informative),
         line('stock', 'Stock', rows.map((r) => [stockText(r)])),
       ],
     },
@@ -120,7 +181,7 @@ export function buildComparison(rows: CatalogRow[]): CompareSection[] {
     },
     {
       title: 'Wireless',
-      lines: [...columns(['wifi_generation', 'coverage_sqft', 'coverage_m2', 'range_m', 'tx_6ghz', 'max_gain'], rows), line('radios', 'Radios', rows.map(radioLines))].filter(informative),
+      lines: [...columns(['wifi_generation', 'coverage_sqft', 'coverage_m2', 'range_m'], rows), ...bandLines(rows), line('radios', 'Other radios', rows.map(radioLines))].filter(informative),
     },
     {
       title: 'Physical',
