@@ -164,11 +164,13 @@ describe('changing the region on a product page', () => {
             product({ id: 'c', region: 'eu', slug: 'gadget-eu', title: 'Gadget' }),
             product({ id: 'd', region: 'us', slug: 'gadget-us', title: 'Gadget' }),
             product({ id: 'e', region: 'jp', slug: 'gadget', title: 'Gadget' }),
+            product({ id: 'f', region: 'eu', slug: 'exclusive', title: 'Exclusive' }),
           ],
         }),
       },
       'GET /v1/products/us/widget/specs': { body: specsResponse() },
       'GET /v1/products/eu/widget/specs': { body: specsResponse({ region: 'eu' }) },
+      'GET /v1/products/eu/exclusive/specs': { body: specsResponse({ region: 'eu', slug: 'exclusive', title: 'Exclusive' }) },
       'GET /v1/products/us/only-us/specs': { body: specsResponse({ slug: 'only-us', title: 'Only Us' }) },
       'GET /v1/history?days=90': { body: historyResponse() },
     })
@@ -204,5 +206,21 @@ describe('changing the region on a product page', () => {
     const { router } = renderRoute('/p/eu/widget')
     await screen.findByRole('heading', { level: 1, name: 'Widget' })
     expect(router.state.location.pathname).toBe('/p/eu/widget')
+  })
+
+  it('says when the page is another store\'s listing than the picked one, and links to the picked store\'s when there is one', async () => {
+    serve()
+    renderRoute('/p/eu/widget')
+    const banner = await screen.findByRole('status')
+    expect(banner).toHaveTextContent("This is the Europe store's listing, but your region is set to United States.")
+    expect(within(banner).getByRole('link', { name: 'View in United States' })).toHaveAttribute('href', '/p/us/widget')
+  })
+
+  it('says when the picked store does not have it at all', async () => {
+    serve()
+    renderRoute('/p/eu/exclusive')
+    const banner = await screen.findByRole('status')
+    expect(banner).toHaveTextContent('It is not available in United States.')
+    expect(within(banner).queryByRole('link')).not.toBeInTheDocument()
   })
 })

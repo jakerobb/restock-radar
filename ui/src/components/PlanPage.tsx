@@ -5,7 +5,8 @@ import type { Derived, Product } from '../api/types'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlan } from '../hooks/usePlan'
 import { useRegion } from '../hooks/useRegion'
-import { inRegion } from '../lib/region'
+import { inRegion, regionName } from '../lib/region'
+import { planRegionState } from '../lib/regionMismatch'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
@@ -24,6 +25,7 @@ import { RoleFinder } from './RoleFinder'
 import { NvrFinder } from './NvrFinder'
 import { InjectorFinder } from './InjectorFinder'
 import { PlanSearch } from './PlanSearch'
+import { RegionBanner } from './RegionBanner'
 import { AddToStoreCart } from './AddToStoreCart'
 import { ConvertPlan } from './ConvertPlan'
 import { ImportUnifi } from './ImportUnifi'
@@ -513,6 +515,7 @@ export default function PlanPage() {
   const products = useMemo(() => new Map((productData?.products ?? []).map((p) => [`${p.region}/${p.slug}`, p])), [productData?.products])
   const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
   const totals = useMemo(() => planTotals(views), [views])
+  const regionState = useMemo(() => planRegionState(lines.map((l) => l.ref), region), [lines, region])
   const derivedLines = useMemo(() => {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
     return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null, gap: specsGapOf(view.product, gaps) }))
@@ -591,6 +594,26 @@ export default function PlanPage() {
           <AddToStoreCart name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name} views={views} region={region} />
           <ShareLink name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name} lines={lines} products={productData.products} hosting={hosting} powering={powering} />
         </div>
+      )}
+      {productData && regionState.kind !== 'none' && regionState.kind !== 'match' && (
+        <RegionBanner
+          actions={
+            <ConvertPlan
+              cta
+              name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name}
+              lines={lines}
+              hosting={hosting}
+              powering={powering}
+              products={productData.products}
+              regions={productData.regions}
+              suggested={region}
+            />
+          }
+        >
+          {regionState.kind === 'elsewhere'
+            ? `This plan is made of ${regionName(regionState.region)} store products, but your region is set to ${regionName(region)}.`
+            : `This plan mixes stores: ${regionState.counts.map((c) => `${c.count} ${c.count === 1 ? 'line' : 'lines'} from ${regionName(c.region)}`).join(', ')}. Each store has its own prices, currency and cart.`}
+        </RegionBanner>
       )}
       {searching && productData && (
         <PlanSearch products={offered} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
