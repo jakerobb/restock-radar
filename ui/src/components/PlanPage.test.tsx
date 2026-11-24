@@ -694,3 +694,38 @@ describe('Converting to another region', () => {
     expect(stored('lines')).toHaveLength(2)
   })
 })
+
+describe('A plan from another region than the picked one', () => {
+  const eu = (over: Parameters<typeof product>[0]) => product({ region: 'eu', ...over })
+  const all = () => [
+    product({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'a', num: 1, sku: 'SW-8', price_cents: 20000 })] }),
+    eu({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'e', num: 11, sku: 'SW-8-EU', currency: 'EUR', price_cents: 18000 })] }),
+    eu({ id: '2', slug: 'ap', title: 'Access Point', variants: [variant({ id: 'f', num: 12, sku: 'AP-1-EU', currency: 'EUR', price_cents: 15000 })] }),
+  ]
+  const serve = () => stubFetch({ 'GET /v1/products': { body: productsResponse({ regions: ['us', 'eu'], products: all() }) }, 'GET /v1/derived': { body: [] } })
+
+  it('says so, and offers to convert it to the picked region as the call to action', async () => {
+    serve()
+    setPlan([line({ ref: 'eu/switch', sku: 'SW-8-EU', qty: 1, addedCents: null })])
+    renderRoute('/plan')
+
+    expect(await screen.findByText('This plan is made of Europe store products, but your region is set to United States.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Convert to United States' }))
+    expect(within(screen.getByRole('dialog', { name: 'Convert this plan' })).getByRole('combobox')).toHaveValue('us')
+  })
+
+  it('says nothing when the plan is in the picked region', async () => {
+    serve()
+    setPlan([line({ qty: 1 })])
+    renderRoute('/plan')
+    await screen.findByText('PoE Switch')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('says when it mixes stores, whichever is picked', async () => {
+    serve()
+    setPlan([line({ qty: 1 }), line({ ref: 'eu/ap', sku: 'AP-1-EU', qty: 1, addedCents: null })])
+    renderRoute('/plan')
+    expect(await screen.findByText(/This plan mixes stores: 1 line from United States, 1 line from Europe\./)).toBeInTheDocument()
+  })
+})

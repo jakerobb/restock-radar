@@ -3,7 +3,7 @@ import { cn } from '../../lib/cn'
 import { toneClasses } from './tone'
 
 interface NoticeProps {
-  tone: 'ok' | 'bad'
+  tone: 'ok' | 'bad' | 'warn'
   children: ReactNode
   className?: string
 }

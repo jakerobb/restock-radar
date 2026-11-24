@@ -30,10 +30,12 @@ interface ConvertPlanProps {
   regions: string[]
   /** The region to offer first. */
   suggested: string
+  /** Draws the button as the call to action, and says where to, as it is the fix for a warning. */
+  cta?: boolean
 }
 
 /** Offers to make the plan again from another store's products, opened as a new plan (in a new tab) so the two can be compared. */
-export function ConvertPlan({ name, lines, hosting, powering, products, regions, suggested }: ConvertPlanProps) {
+export function ConvertPlan({ name, lines, hosting, powering, products, regions, suggested, cta = false }: ConvertPlanProps) {
   const [open, setOpen] = useState(false)
   const [target, setTarget] = useState(suggested)
   const conversion = useMemo(() => (open ? convertPlan(lines, powering, products, target) : null), [open, lines, powering, products, target])
@@ -44,14 +46,14 @@ export function ConvertPlan({ name, lines, hosting, powering, products, regions,
   return (
     <>
       <Button
-        variant="secondary"
+        variant={cta ? 'primary' : 'secondary'}
         className="py-1 text-sm"
         onClick={() => {
           setTarget(suggested)
           setOpen(true)
         }}
       >
-        Convert to another region
+        {cta ? `Convert to ${regionName(suggested)}` : 'Convert to another region'}
       </Button>
       {open && conversion && (
         <Dialog title="Convert this plan" size="wide" onClose={() => setOpen(false)}>

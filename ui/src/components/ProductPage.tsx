@@ -14,6 +14,7 @@ import { ProductCard } from './ProductCard'
 import { AddFact, EntryEditor, OverrideHistory, RemoveOverrideButton } from './OverrideEditor'
 import { PageNav } from './PageNav'
 import { Flag } from './RegionPicker'
+import { RegionBanner } from './RegionBanner'
 import { RefreshButton } from './RefreshButton'
 import { SpecsExpectation } from './SpecsExpectation'
 import { HistoryRangePicker } from './HistoryRangePicker'
@@ -185,6 +186,25 @@ function SpecTable({ specs, region, slug, overrides, canEdit }: { specs: SpecEnt
   )
 }
 
+/** Says the product shown is from another store than the one picked, and links to the picked store's version when there is one. */
+function ProductRegionBanner({ product, chosen, products }: { product: Product; chosen: string; products: Product[] }) {
+  const there = counterpart(product, chosen, products)
+  return (
+    <RegionBanner
+      actions={
+        there && (
+          <Link to="/p/$region/$slug" params={{ region: there.region, slug: there.slug }} className="inline-flex items-center rounded-lg bg-accent px-3 py-1 text-sm font-medium text-on-accent hover:opacity-90">
+            View in {regionName(chosen)}
+          </Link>
+        )
+      }
+    >
+      This is the {regionName(product.region)} store's listing, but your region is set to {regionName(chosen)}.
+      {!there && ` It is not available in ${regionName(chosen)}.`}
+    </RegionBanner>
+  )
+}
+
 export default function ProductPage() {
   const { region, slug } = useParams({ strict: false }) as { region: string; slug: string }
   const { data: productData, isPending } = useProducts()
@@ -275,6 +295,7 @@ export default function ProductPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 pt-6 pb-12">
       <PageNav title={title} />
+      {product && productData && chosen !== region && <ProductRegionBanner product={product} chosen={chosen} products={productData.products} />}
       <div className="mt-4 space-y-5">
         {product && (
           <div>
