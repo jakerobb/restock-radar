@@ -120,175 +120,186 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
+  // The owned selector gets a row of its own under the prices, which it spans, so the product, stock and remove cells reach down beside it.
+  const owned = editable || !!line.owned
+  const span = owned ? 2 : 1
   return (
-    <tr className="border-b border-line align-top last:border-0">
-      <td className="px-2 py-2">
-        {product ? (
-          <Link to="/p/$region/$slug" params={{ region: product.region, slug: product.slug }} className="font-medium text-accent underline-offset-2 hover:underline">
-            {product.title}
-          </Link>
-        ) : (
-          <span className="font-medium">{line.ref}</span>
-        )}
-        {product && editable && product.variants.length > 1 ? (
-          <Select
-            className="mt-1 block max-w-64 py-1 text-sm"
-            aria-label={`Variant of ${product.title}`}
-            value={variant?.sku ?? ''}
-            onChange={(e) => {
-              const next = product.variants.find((v) => v.sku === e.target.value)
-              if (next) switchVariant(key, next)
-            }}
-          >
-            {!variant && <option value="">{line.sku} (no longer listed)</option>}
-            {product.variants.map((v) => (
-              <option key={v.sku} value={v.sku}>
-                {v.title || v.sku}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <div className="text-xs text-muted">{variant?.title || line.sku}</div>
-        )}
-        {product && editable && power && (
-          <Select
-            className="mt-1 block max-w-64 py-1 text-sm"
-            aria-label={`Power for ${product.title}`}
-            value={power.chosen?.code ?? ''}
-            onChange={(e) => {
-              const o = power.options.find((x) => x.code === Number(e.target.value))
-              const to = o?.swapSlug ? power.sibling(o.swapSlug) : null
-              if (o && to) swapProduct(key, to, line.qty)
-              else if (o) choosePower(key, o.code, o.adapter ? power.adapterProduct(o.adapter.slug) : null, line.qty)
-            }}
-          >
-            {!power.chosen && (
-              <option value="" disabled>
-                Choose how it is powered
-              </option>
-            )}
-            {power.options.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.poeInputs && o.poeInputs.length > 1
-                  ? `PoE: ${o.poeInputs[0]!.watts}–${o.scenario.watts} W, by the port it is on`
-                  : `${o.scenario.name.replace(/ input$/i, '')}: ${o.scenario.watts} W`}
-                {o.scenario.name === power.included && ' (included)'}
-                {o.adapter && ' (adapter added)'}
-                {o.swapSlug && ` (as ${power.sibling(o.swapSlug)?.title ?? o.swapSlug})`}
-              </option>
-            ))}
-          </Select>
-        )}
-        {product && editable && drives && (() => {
-          const all = drives.options.map((o) => o.product)
-          const inPlan = drives.options.filter((o) => lines.some((x) => x.ref === productRef(o.product)))
-          const chosen = inPlan[0] ?? null
-          const total = chosen ? (lines.find((x) => x.ref === productRef(chosen.product))?.qty ?? 0) : 0
-          const count = Math.min(drives.bays, Math.max(1, Math.ceil(total / line.qty)))
-          const set = (p: Product | null, n: number) => addOn(all, p, n * line.qty)
-          return (
-            <div className="mt-1 flex max-w-64 items-center gap-1">
-              <Select
-                className="block min-w-0 flex-1 py-1 text-sm"
-                aria-label={`Drives for ${product.title}`}
-                value={chosen?.product.slug ?? ''}
-                onChange={(e) => set(drives.options.find((o) => o.product.slug === e.target.value)?.product ?? null, chosen ? count : drives.bays)}
-              >
-                <option value="">No drives</option>
-                {drives.options.map(({ product: p, tb }) => {
-                  const v = defaultVariant(p)
-                  const cents = v ? totalCents(v) : null
-                  return (
-                    <option key={p.slug} value={p.slug}>
-                      {tb} TB drives
-                      {cents !== null && ` (+${formatPrice(cents, v!.currency)} each)`}
-                      {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
-                    </option>
-                  )
-                })}
-              </Select>
-              {chosen && (
-                <>
-                  <span className="text-sm text-muted">×</span>
-                  <Select className="block w-16 py-1 text-sm" aria-label={`Number of drives for ${product.title}`} value={count} onChange={(e) => set(chosen.product, Number(e.target.value))}>
-                    {Array.from({ length: drives.bays }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </Select>
-                </>
-              )}
-            </div>
-          )
-        })()}
-        {product && editable && linked.length > 0 && (
-          <Select
-            className="mt-1 block max-w-64 py-1 text-sm"
-            aria-label={`Sold with ${product.title}`}
-            value={linked.find((l) => lines.some((x) => x.ref === productRef(l.product)))?.product.slug ?? ''}
-            onChange={(e) =>
-              addOn(
-                linked.map((l) => l.product),
-                linked.find((l) => l.product.slug === e.target.value)?.product ?? null,
-                line.qty,
-              )
-            }
-          >
-            <option value="">{product.linked_none ?? 'Nothing sold with it'}</option>
-            {[...linked].sort((a, b) => (a.label ?? a.product.title).localeCompare(b.label ?? b.product.title)).map(({ product: p, label }) => {
-              const v = defaultVariant(p)
-              const cents = v ? totalCents(v) : null
-              return (
-                <option key={p.slug} value={p.slug}>
-                  {label ?? p.title}
-                  {cents !== null && ` (+${formatPrice(cents, v!.currency)})`}
-                  {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
+    <>
+      <tr className={owned ? 'align-top' : 'border-b border-line align-top last:border-0'}>
+        <td rowSpan={span} className="px-2 py-2">
+          {product ? (
+            <Link to="/p/$region/$slug" params={{ region: product.region, slug: product.slug }} className="font-medium text-accent underline-offset-2 hover:underline">
+              {product.title}
+            </Link>
+          ) : (
+            <span className="font-medium">{line.ref}</span>
+          )}
+          {product && editable && product.variants.length > 1 ? (
+            <Select
+              className="mt-1 block max-w-64 py-1 text-sm"
+              aria-label={`Variant of ${product.title}`}
+              value={variant?.sku ?? ''}
+              onChange={(e) => {
+                const next = product.variants.find((v) => v.sku === e.target.value)
+                if (next) switchVariant(key, next)
+              }}
+            >
+              {!variant && <option value="">{line.sku} (no longer listed)</option>}
+              {product.variants.map((v) => (
+                <option key={v.sku} value={v.sku}>
+                  {v.title || v.sku}
                 </option>
-              )
-            })}
-          </Select>
-        )}
-      </td>
-      <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
-        {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
-        {view.wasCents !== null && <div className="ml-auto max-w-24 text-xs whitespace-normal text-muted">was {formatPrice(view.wasCents, view.currency)} when added</div>}
-      </td>
-      <td className="px-2 py-2 text-right">
-        {editable ? (
-          <QtyInput qty={line.qty} label={`Quantity of ${product?.title ?? line.ref}`} onChange={(n) => changeQty(key, n)} />
-        ) : (
-          <span className="tabular-nums">{line.qty}</span>
-        )}
-        {editable ? (
-          <Select
-            className="mt-1 ml-auto block w-28 py-1 text-sm"
-            aria-label={`How many of ${product?.title ?? line.ref} you already own`}
-            value={line.owned ?? 0}
-            onChange={(e) => changeOwned(key, Number(e.target.value))}
-          >
-            {Array.from({ length: line.qty + 1 }, (_, n) => (
-              <option key={n} value={n}>
-                {n === 0 ? 'None owned' : n === line.qty ? (line.qty === 1 ? 'Owned' : 'All owned') : `${n} owned`}
-              </option>
-            ))}
-          </Select>
-        ) : line.owned ? (
-          <div className="text-xs text-muted">{line.owned >= line.qty ? 'Owned' : `${line.owned} owned`}</div>
-        ) : null}
-      </td>
-      <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{view.totalCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.totalCents, view.currency)}</td>
-      <td className="px-2 py-2 whitespace-nowrap">
-        {view.buy === 0 ? <Badge tone="neutral">Owned</Badge> : <Badge tone={state.tone}>{state.label}</Badge>}
-      </td>
-      {editable && (
-        <td className="px-2 py-2 text-right">
-          <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" aria-label={`Remove ${product?.title ?? line.ref} from the plan`} onClick={() => remove(key)}>
-            Remove
-          </button>
+              ))}
+            </Select>
+          ) : (
+            <div className="text-xs text-muted">{variant?.title || line.sku}</div>
+          )}
+          {product && editable && power && (
+            <Select
+              className="mt-1 block max-w-64 py-1 text-sm"
+              aria-label={`Power for ${product.title}`}
+              value={power.chosen?.code ?? ''}
+              onChange={(e) => {
+                const o = power.options.find((x) => x.code === Number(e.target.value))
+                const to = o?.swapSlug ? power.sibling(o.swapSlug) : null
+                if (o && to) swapProduct(key, to, line.qty)
+                else if (o) choosePower(key, o.code, o.adapter ? power.adapterProduct(o.adapter.slug) : null, line.qty)
+              }}
+            >
+              {!power.chosen && (
+                <option value="" disabled>
+                  Choose how it is powered
+                </option>
+              )}
+              {power.options.map((o) => (
+                <option key={o.code} value={o.code}>
+                  {o.poeInputs && o.poeInputs.length > 1
+                    ? `PoE: ${o.poeInputs[0]!.watts}–${o.scenario.watts} W, by the port it is on`
+                    : `${o.scenario.name.replace(/ input$/i, '')}: ${o.scenario.watts} W`}
+                  {o.scenario.name === power.included && ' (included)'}
+                  {o.adapter && ' (adapter added)'}
+                  {o.swapSlug && ` (as ${power.sibling(o.swapSlug)?.title ?? o.swapSlug})`}
+                </option>
+              ))}
+            </Select>
+          )}
+          {product && editable && drives && (() => {
+            const all = drives.options.map((o) => o.product)
+            const inPlan = drives.options.filter((o) => lines.some((x) => x.ref === productRef(o.product)))
+            const chosen = inPlan[0] ?? null
+            const total = chosen ? (lines.find((x) => x.ref === productRef(chosen.product))?.qty ?? 0) : 0
+            const count = Math.min(drives.bays, Math.max(1, Math.ceil(total / line.qty)))
+            const set = (p: Product | null, n: number) => addOn(all, p, n * line.qty)
+            return (
+              <div className="mt-1 flex max-w-64 items-center gap-1">
+                <Select
+                  className="block min-w-0 flex-1 py-1 text-sm"
+                  aria-label={`Drives for ${product.title}`}
+                  value={chosen?.product.slug ?? ''}
+                  onChange={(e) => set(drives.options.find((o) => o.product.slug === e.target.value)?.product ?? null, chosen ? count : drives.bays)}
+                >
+                  <option value="">No drives</option>
+                  {drives.options.map(({ product: p, tb }) => {
+                    const v = defaultVariant(p)
+                    const cents = v ? totalCents(v) : null
+                    return (
+                      <option key={p.slug} value={p.slug}>
+                        {tb} TB drives
+                        {cents !== null && ` (+${formatPrice(cents, v!.currency)} each)`}
+                        {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
+                      </option>
+                    )
+                  })}
+                </Select>
+                {chosen && (
+                  <>
+                    <span className="text-sm text-muted">×</span>
+                    <Select className="block w-16 py-1 text-sm" aria-label={`Number of drives for ${product.title}`} value={count} onChange={(e) => set(chosen.product, Number(e.target.value))}>
+                      {Array.from({ length: drives.bays }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </Select>
+                  </>
+                )}
+              </div>
+            )
+          })()}
+          {product && editable && linked.length > 0 && (
+            <Select
+              className="mt-1 block max-w-64 py-1 text-sm"
+              aria-label={`Sold with ${product.title}`}
+              value={linked.find((l) => lines.some((x) => x.ref === productRef(l.product)))?.product.slug ?? ''}
+              onChange={(e) =>
+                addOn(
+                  linked.map((l) => l.product),
+                  linked.find((l) => l.product.slug === e.target.value)?.product ?? null,
+                  line.qty,
+                )
+              }
+            >
+              <option value="">{product.linked_none ?? 'Nothing sold with it'}</option>
+              {[...linked].sort((a, b) => (a.label ?? a.product.title).localeCompare(b.label ?? b.product.title)).map(({ product: p, label }) => {
+                const v = defaultVariant(p)
+                const cents = v ? totalCents(v) : null
+                return (
+                  <option key={p.slug} value={p.slug}>
+                    {label ?? p.title}
+                    {cents !== null && ` (+${formatPrice(cents, v!.currency)})`}
+                    {v && v.status !== 'Available' && ` — ${statusInfo(v.status).label.toLowerCase()}`}
+                  </option>
+                )
+              })}
+            </Select>
+          )}
         </td>
+        <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
+          {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
+          {view.wasCents !== null && <div className="ml-auto max-w-24 text-xs whitespace-normal text-muted">was {formatPrice(view.wasCents, view.currency)} when added</div>}
+        </td>
+        <td className="px-2 py-2 text-right">
+          {editable ? (
+            <QtyInput qty={line.qty} label={`Quantity of ${product?.title ?? line.ref}`} onChange={(n) => changeQty(key, n)} />
+          ) : (
+            <span className="tabular-nums">{line.qty}</span>
+          )}
+        </td>
+        <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{view.totalCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.totalCents, view.currency)}</td>
+        <td rowSpan={span} className="px-2 py-2 whitespace-nowrap">
+          {view.buy === 0 ? <Badge tone="neutral">Owned</Badge> : <Badge tone={state.tone}>{state.label}</Badge>}
+        </td>
+        {editable && (
+          <td rowSpan={span} className="px-2 py-2 text-right">
+            <button type="button" className="cursor-pointer text-sm text-muted underline underline-offset-2 hover:text-ink" aria-label={`Remove ${product?.title ?? line.ref} from the plan`} onClick={() => remove(key)}>
+              Remove
+            </button>
+          </td>
+        )}
+      </tr>
+      {owned && (
+        <tr className="border-b border-line align-top last:border-0">
+          <td colSpan={3} className="px-2 pb-2 text-right">
+            {editable ? (
+              <Select
+                className="ml-auto block w-full max-w-56 py-1 text-sm"
+                aria-label={`How many of ${product?.title ?? line.ref} you already own`}
+                value={line.owned ?? 0}
+                onChange={(e) => changeOwned(key, Number(e.target.value))}
+              >
+                {Array.from({ length: line.qty + 1 }, (_, n) => (
+                  <option key={n} value={n}>
+                    {n === 0 ? 'None owned' : n === line.qty ? (line.qty === 1 ? 'Owned' : 'All owned') : `${n} owned`}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <span className="text-xs text-muted">{line.owned! >= line.qty ? 'Owned' : `${line.owned} owned`}</span>
+            )}
+          </td>
+        </tr>
       )}
-    </tr>
+    </>
   )
 }
 
