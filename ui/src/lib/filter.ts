@@ -34,14 +34,31 @@ export function matchesQuery(p: Product, query: string): boolean {
   return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
 }
 
+/** The words `query` asks for, each with the aliases that also satisfy it. */
+function queryWords(query: string): string[] {
+  return query.toLowerCase().split(/\s+/).filter(Boolean)
+}
+
+/**
+ * True when every word of `query` (or one of its aliases) appears in this one variant's name or SKU
+ * or in its product's name or store category: the variant-level counterpart of `matchesQuery`.
+ */
+export function matchesVariantQuery(p: Product, v: Product['variants'][number], query: string): boolean {
+  const words = queryWords(query)
+  if (words.length === 0) return true
+  const haystack = [p.title, p.category.replaceAll('-', ' '), v.title, v.sku].join('\n').toLowerCase()
+  return words.every((w) => haystack.includes(w) || (ALIASES[w] ?? []).some((a) => haystack.includes(a)))
+}
+
 /** True when at least one variant of the product is available. */
 export function isInStock(p: Product): boolean {
   return p.variants.some((v) => v.status === 'Available')
 }
 
 /**
- * Products matching the search text and the chosen type (when non-empty), cut down to the variants that
+ * Products of the chosen type (when non-empty), cut down to the variants that match the search text,
  * carry every chosen tag and (optionally) are in stock; products left with no variant are dropped.
+ * Every search and filter applies to variants, so a product never shows variants that don't match.
  */
 export function filterProducts(
   products: Product[],
@@ -52,13 +69,12 @@ export function filterProducts(
 ): Product[] {
   const out: Product[] = []
   for (const p of products) {
-    if (!matchesQuery(p, query) || (type && typeOf(p) !== type)) continue
-    if (tags.length === 0 && !inStockOnly) {
-      out.push(p)
-      continue
-    }
+    if (type && typeOf(p) !== type) continue
     const variants = p.variants.filter(
-      (v) => (!inStockOnly || v.status === 'Available') && tags.every((t) => (v.tags ?? p.tags).includes(t)),
+      (v) =>
+        matchesVariantQuery(p, v, query) &&
+        (!inStockOnly || v.status === 'Available') &&
+        tags.every((t) => (v.tags ?? p.tags).includes(t)),
     )
     if (variants.length === 0) continue
     if (variants.length === p.variants.length) out.push(p)

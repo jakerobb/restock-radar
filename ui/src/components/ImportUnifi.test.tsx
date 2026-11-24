@@ -34,7 +34,7 @@ describe('ImportUnifi', () => {
     expect(screen.getByText(/isn’t one this store lists/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Create a plan of 2 devices' }))
-    expect(getPlan()).toEqual([{ ref: 'us/u7-pro-xgs', sku: 'U7-Pro-XGS', qty: 2, addedCents: 19900 }])
+    expect(getPlan()).toEqual([{ ref: 'us/u7-pro-xgs', sku: 'U7-Pro-XGS', qty: 2, addedCents: 19900, owned: 2 }])
     expect(getPlans().map((p) => p.name)).toContain('UniFi import')
 
     // Nothing of the file went anywhere: the only request is the public list, with no body.

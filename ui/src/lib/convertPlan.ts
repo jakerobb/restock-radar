@@ -109,7 +109,7 @@ export function convertPlan(lines: PlanLine[], powering: Powering, products: Pro
       outcomes.push({ line, title, result: 'left', why: 'no-variant' })
       continue
     }
-    const to: PlanLine = { ref: productRef(target), sku: variant.sku, qty: line.qty, addedCents: null }
+    const to: PlanLine = { ref: productRef(target), sku: variant.sku, qty: line.qty, addedCents: null, ...(line.owned ? { owned: line.owned } : {}) }
     out = addLine(out, to)
     rekey.set(lineKey(line), lineKey(to))
     outcomes.push({ line, title, to, result: variant.sku === line.sku ? 'same' : 'counterpart' })

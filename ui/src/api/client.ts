@@ -55,6 +55,9 @@ export const putOverride = (req: OverrideRequest) =>
     body: JSON.stringify(req),
   })
 
+/** Every override in the database. */
+export const getOverrides = () => request<SpecOverride[]>('/v1/overrides')
+
 export const deleteOverride = (id: number) => request<null>(`/v1/overrides/${id}`, { method: 'DELETE' })
 
 export const getOverrideHistory = (region: string, slug: string) =>

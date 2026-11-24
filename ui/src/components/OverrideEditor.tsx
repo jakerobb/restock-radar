@@ -44,7 +44,7 @@ interface FormProps {
 }
 
 /** Edits, hides or reverts one entry of a product's specification, as an override. */
-function EntryForm({ region, slug, target, initial, published, revert, canHide, onDone }: FormProps) {
+export function EntryForm({ region, slug, target, initial, published, revert, canHide, onDone }: FormProps) {
   const save = useSaveOverride(region, slug)
   const remove = useDeleteOverride(region, slug)
   const [kind, setKind] = useState(initial?.kind === 'flag' ? 'flag' : 'text')
@@ -270,16 +270,16 @@ function overrideSummary(o: Pick<SpecOverride, 'action' | 'label' | 'value'>): s
 }
 
 /** Removes an override. */
-export function RemoveOverrideButton({ region, slug, id, label }: { region: string; slug: string; id: number; label: string }) {
+export function RemoveOverrideButton({ region, slug, id, label, className = 'ml-2 text-xs' }: { region: string; slug: string; id: number; label: string; className?: string }) {
   const remove = useDeleteOverride(region, slug)
   return (
-    <span className="ml-2 inline-flex items-center gap-2">
+    <span className={`inline-flex items-center gap-2 ${className}`}>
       <button
         type="button"
         disabled={remove.isPending}
         onClick={() => remove.mutate(id)}
         aria-label={`Remove the correction to ${label}`}
-        className="cursor-pointer text-xs text-accent underline-offset-2 hover:underline disabled:opacity-50"
+        className={`cursor-pointer text-accent underline-offset-2 hover:underline disabled:opacity-50`}
       >
         {remove.isPending ? 'Removing…' : 'Remove'}
       </button>

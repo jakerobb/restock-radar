@@ -69,7 +69,8 @@ export function ImportUnifi({ products, region }: ImportUnifiProps) {
   const full = plans.length >= MAX_PLANS
 
   const make = () => {
-    const lines = chosen.flatMap((r) => (r.line ? [r.line] : []))
+    // What a console has adopted is owned already, so none of it is to be bought.
+    const lines = chosen.flatMap((r) => (r.line ? [{ ...r.line, owned: r.line.qty }] : []))
     if (lines.length === 0) return
     if (create(uniqueName(plans, 'UniFi import'), lines) === null) {
       setError(`You already have ${MAX_PLANS} plans; delete one first.`)

@@ -68,7 +68,7 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
   const poeOf = new Map(trace.poe?.map((p) => [unitKey(p.unit), { usedW: p.usedW, budgetW: p.budgetW, sparePorts: p.sparePorts }]))
   const sfpMissed = new Set(trace.sfpMisses?.map(unitKey))
   const rackOf = new Map(trace.rack?.map((r) => [lineKey(r.line.view.line), r.units]))
-  const outletLines = new Set(trace.outlets?.map((l) => lineKey(l.view.line)))
+  const outletsOf = new Map(trace.outlets?.map((o) => [lineKey(o.line.view.line), o.n]))
   const children = new Map<string, TopoNode[]>()
   const add = (host: UnitRef, node: TopoNode) => children.set(unitKey(host), [...(children.get(unitKey(host)) ?? []), node])
 
@@ -80,9 +80,9 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
     const u = rackOf.get(k)
     return {
       ...(rackOf.has(k) ? { rack: u === null || u === undefined ? ('desktop' as const) : u * count } : {}),
-      ...(outletLines.has(k) ? { outlets: count } : {}),
+      ...(outletsOf.has(k) ? { outlets: Math.min(count, outletsOf.get(k)!) } : {}),
       ...(state === 'out' || state === 'soon' ? { stock: state } : {}),
-      checks: [...(rackOf.has(k) ? ['rack'] : []), ...(outletLines.has(k) ? ['outlets'] : [])],
+      checks: [...(state === 'out' || state === 'soon' ? ['stock'] : []), ...(rackOf.has(k) ? ['rack'] : []), ...(outletsOf.has(k) ? ['outlets'] : [])],
     }
   }
 
@@ -111,7 +111,6 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
     const k = unitKey(u.ref)
     const { checks, ...rest } = extras(u.ref.line, 1)
     const poe = poeOf.get(k)
-    const stock = rest.stock
     return {
       key: k,
       title: title(u.ref),
@@ -120,7 +119,7 @@ export function buildTopology(lines: DerivedLine[], hosting: Hosting = {}, power
       ...(u.kind === 'switch' ? { uplink: linkOf.get(k), spare: spareOf.get(k) } : {}),
       ...(poe ? { poe } : {}),
       ...rest,
-      checks: ['net-ports', ...(poe ? [...POE_CHECKS, ...(stock ? ['poe-stock'] : [])] : []), ...(sfpMissed.has(k) ? ['net-sfp'] : []), ...checks],
+      checks: ['net-ports', ...(poe ? POE_CHECKS : []), ...(sfpMissed.has(k) ? ['net-sfp'] : []), ...checks],
       children: [],
     }
   }

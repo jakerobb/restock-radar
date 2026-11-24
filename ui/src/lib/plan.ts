@@ -13,9 +13,17 @@ export interface PlanLine {
   qty: number
   /** What one cost, out the door, when the line was added; null if no price was shown then. */
   addedCents: number | null
+  /**
+   * How many of `qty` the owner already has (absent: none). They still count in every check of the plan, but aren't priced, checked
+   * for stock or put in the store's cart: only `qty - owned` is bought.
+   */
+  owned?: number
 }
 
 export const MAX_QTY = 99
+
+/** How many of a line are to be bought: what isn't already owned. */
+export const buyQty = (l: Pick<PlanLine, 'qty' | 'owned'>): number => l.qty - Math.min(l.qty, l.owned ?? 0)
 /** What a plan is called until it is named. */
 export const DEFAULT_PLAN_NAME = 'My Plan'
 /** The longest a plan's name can be, in characters; it travels in the share link. */
@@ -32,15 +40,15 @@ export const MAX_LINES = 100
 
 export const lineKey = (l: Pick<PlanLine, 'ref' | 'sku'>): string => `${l.ref}:${encodeURIComponent(l.sku)}`
 
-/** A line as text, for the URL and for storage: "us/usw-pro:USW-PRO-24:2:19900". */
-export const serializeLine = (l: PlanLine): string => `${lineKey(l)}:${l.qty}:${l.addedCents ?? ''}`
+/** A line as text, for the URL and for storage: "us/usw-pro:USW-PRO-24:2:19900", with ":1" after it when one of the two is owned. */
+export const serializeLine = (l: PlanLine): string => `${lineKey(l)}:${l.qty}:${l.addedCents ?? ''}${l.owned ? `:${Math.min(l.owned, l.qty)}` : ''}`
 
 /** The inverse; null for anything malformed. */
 export function parseLine(text: unknown): PlanLine | null {
   if (typeof text !== 'string') return null
   const parts = text.split(':')
-  if (parts.length !== 4) return null
-  const [ref, rawSku, rawQty, rawAdded] = parts as [string, string, string, string]
+  if (parts.length !== 4 && parts.length !== 5) return null
+  const [ref, rawSku, rawQty, rawAdded, rawOwned] = parts as [string, string, string, string, string | undefined]
   if (cleanRefs([ref]).length !== 1) return null
   let sku: string
   try {
@@ -52,7 +60,9 @@ export function parseLine(text: unknown): PlanLine | null {
   const qty = Number(rawQty)
   if (qty < 1 || qty > MAX_QTY) return null
   if (rawAdded !== '' && !/^\d{1,9}$/.test(rawAdded)) return null
-  return { ref, sku, qty, addedCents: rawAdded === '' ? null : Number(rawAdded) }
+  if (rawOwned !== undefined && !/^\d{1,2}$/.test(rawOwned)) return null
+  const owned = Math.min(qty, Number(rawOwned ?? 0))
+  return { ref, sku, qty, addedCents: rawAdded === '' ? null : Number(rawAdded), ...(owned > 0 ? { owned } : {}) }
 }
 
 /** The lines in a list of texts, skipping the malformed and repeated ones. */
@@ -107,10 +117,12 @@ function readVarint(bytes: number[], at: number): { value: number; next: number 
  * A slug is a sequence of integers, each in its own range so they can be told apart:
  *   - variant numbers, below POWER_BASE;
  *   - POWER_BASE + a variant's number, followed by the code of how that switch is powered;
+ *   - OWNED_BASE + a variant's number, followed by how many of the line are already owned;
  *   - HOSTING_BASE + a role's position in HOSTED_ROLES, followed by 1, for each controller run on your own machine;
  *   - NAME_BASE + the length in bytes of the plan's name, first, followed by those bytes of UTF-8 (MAX_NAME characters of up to four bytes each at most).
  */
 const POWER_BASE = 2 ** 29
+const OWNED_BASE = POWER_BASE + 2 ** 28
 const HOSTING_BASE = 2 ** 30
 const NAME_BASE = 2 ** 31
 const MAX_NAME_BYTES = MAX_NAME * 4
@@ -156,6 +168,13 @@ export function encodePlan(lines: PlanLine[], products: Iterable<Product>, hosti
     writeVarint(bytes, POWER_BASE + num)
     writeVarint(bytes, code)
   }
+  for (const l of lines) {
+    const num = numByKey.get(lineKey(l))
+    const owned = Math.min(l.owned ?? 0, l.qty)
+    if (num === undefined || owned < 1) continue
+    writeVarint(bytes, OWNED_BASE + num)
+    writeVarint(bytes, owned)
+  }
   for (const role of HOSTED_ROLES) {
     if (!hosting[role]) continue
     writeVarint(bytes, hostingNumber(role))
@@ -192,6 +211,7 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
   const lines: PlanLine[] = []
   const hosting: Hosting = {}
   const powerEntries: [number, number][] = []
+  const ownedEntries: [number, number][] = []
   let unknown = 0
   let name = ''
   for (let at = 0; at < bytes.length; ) {
@@ -208,7 +228,14 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
       continue
     }
     const qty = num && readVarint(bytes, num.next)
-    if (num && qty && num.value >= POWER_BASE && num.value < HOSTING_BASE) {
+    if (num && qty && num.value >= OWNED_BASE && num.value < HOSTING_BASE) {
+      // How many of a line are owned: the count stands where the quantity does, and the variant may come later, as with powering.
+      if (qty.value < 1 || qty.value > MAX_QTY) return null
+      ownedEntries.push([num.value - OWNED_BASE, qty.value])
+      at = qty.next
+      continue
+    }
+    if (num && qty && num.value >= POWER_BASE && num.value < OWNED_BASE) {
       // How a switch is powered: the code stands where the quantity does. The variant may come later in the slug, so it is resolved after.
       if (qty.value < 1 || qty.value > 0xffff) return null
       powerEntries.push([num.value - POWER_BASE, qty.value])
@@ -238,13 +265,22 @@ export function decodePlan(slug: string, products: Iterable<Product>): DecodedPl
     const target = byNum.get(vnum)
     if (target && seen.has(lineKey(target))) powering[lineKey(target)] = code
   }
+  for (const [vnum, count] of ownedEntries) {
+    const target = byNum.get(vnum)
+    const i = target ? lines.findIndex((l) => lineKey(l) === lineKey(target)) : -1
+    if (i >= 0) lines[i] = { ...lines[i]!, owned: Math.min(count, lines[i]!.qty) }
+  }
   return { name: name || DEFAULT_PLAN_NAME, lines, unknown, hosting, powering }
 }
 
 /** Adds a line, or raises the quantity of the one already there. */
 export function addLine(plan: PlanLine[], line: PlanLine): PlanLine[] {
   const same = plan.find((l) => lineKey(l) === lineKey(line))
-  if (same) return plan.map((l) => (l === same ? { ...l, qty: Math.min(MAX_QTY, l.qty + line.qty) } : l))
+  if (same) {
+    const qty = Math.min(MAX_QTY, same.qty + line.qty)
+    const owned = Math.min(qty, (same.owned ?? 0) + (line.owned ?? 0))
+    return plan.map((l) => (l === same ? { ...l, qty, ...(owned > 0 ? { owned } : { owned: undefined }) } : l))
+  }
   return plan.length >= MAX_LINES ? plan : [...plan, line]
 }
 
@@ -252,7 +288,21 @@ export const removeLine = (plan: PlanLine[], key: string): PlanLine[] => plan.fi
 
 /** Sets a quantity, clamped to 1..MAX_QTY. */
 export const setQty = (plan: PlanLine[], key: string, qty: number): PlanLine[] =>
-  plan.map((l) => (lineKey(l) === key ? { ...l, qty: Math.min(MAX_QTY, Math.max(1, Math.round(qty) || 1)) } : l))
+  plan.map((l) => {
+    if (lineKey(l) !== key) return l
+    const n = Math.min(MAX_QTY, Math.max(1, Math.round(qty) || 1))
+    return { ...l, qty: n, ...(l.owned ? { owned: Math.min(l.owned, n) } : {}) }
+  })
+
+/** Sets how many of a line are already owned, from none to all of it. */
+export const setOwned = (plan: PlanLine[], key: string, owned: number): PlanLine[] =>
+  plan.map((l) => {
+    if (lineKey(l) !== key) return l
+    const n = Math.min(l.qty, Math.max(0, Math.round(owned) || 0))
+    const rest = { ...l }
+    delete rest.owned
+    return n > 0 ? { ...rest, owned: n } : rest
+  })
 
 /** Switches a line to another variant of the same product, merging with a line that already has it. */
 export function changeVariant(plan: PlanLine[], key: string, variant: Variant): PlanLine[] {
@@ -314,7 +364,10 @@ export interface LineView {
   variant?: Variant
   /** One's out-the-door price now; null when none is shown. */
   unitCents: number | null
+  /** What the units still to be bought cost; the owned ones aren't counted. */
   totalCents: number | null
+  /** How many of the line are still to be bought (its quantity less the owned). */
+  buy: number
   currency: string
   /** 'unlisted': the product is tracked but no longer has this variant. 'untracked': the product isn't tracked. */
   state: LineState
@@ -326,16 +379,18 @@ export function viewLine(line: PlanLine, products: Map<string, Product>): LineVi
   const product = products.get(line.ref)
   const variant = product?.variants.find((v) => v.sku === line.sku)
   const unitCents = variant ? totalCents(variant) : null
-  const state: LineState = !product ? 'untracked' : !variant ? 'unlisted' : variant.status === 'Available' ? 'in' : variant.status === 'ComingSoon' ? 'soon' : 'out'
+  // What is owned needs no stock, so a line with nothing left to buy is as good as in stock (to the checks and finders alike) whatever the store says.
+  const state: LineState = buyQty(line) === 0 ? 'in' : !product ? 'untracked' : !variant ? 'unlisted' : variant.status === 'Available' ? 'in' : variant.status === 'ComingSoon' ? 'soon' : 'out'
   return {
     line,
     product,
     variant,
     unitCents,
-    totalCents: unitCents === null ? null : unitCents * line.qty,
+    totalCents: unitCents === null ? null : unitCents * buyQty(line),
+    buy: buyQty(line),
     currency: variant?.currency ?? 'USD',
     state,
-    wasCents: line.addedCents !== null && unitCents !== null && line.addedCents !== unitCents ? line.addedCents : null,
+    wasCents: !buyQty(line) ? null : line.addedCents !== null && unitCents !== null && line.addedCents !== unitCents ? line.addedCents : null,
   }
 }
 
@@ -345,8 +400,6 @@ export interface PlanTotals {
   /** Lines with no price to add up. */
   unpriced: number
   items: number
-  /** Lines that can't be bought right now. */
-  notInStock: LineView[]
 }
 
 export function planTotals(views: LineView[]): PlanTotals {
@@ -356,6 +409,5 @@ export function planTotals(views: LineView[]): PlanTotals {
     sums: [...sums].map(([currency, cents]) => ({ currency, cents })),
     unpriced: views.filter((v) => v.totalCents === null).length,
     items: views.reduce((n, v) => n + v.line.qty, 0),
-    notInStock: views.filter((v) => v.state !== 'in'),
   }
 }

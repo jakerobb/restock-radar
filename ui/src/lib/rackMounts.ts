@@ -22,6 +22,8 @@ export const NEEDS_RACK_MOUNT: ReadonlySet<string> = new Set(Object.values(RACK_
 /** Rack equipment whose height the store doesn't state (it has no form factor), by slug. */
 export const RACK_UNITS: Record<string, number> = {
   'usp-pdu-pro': 2,
+  // Mounts vertically on the side of a rack rail, so it is in the rack but takes no rack units.
+  'usp-pdu-hd': 0,
   'uacc-rack-panel-patch-blank-24': 1,
 }
 

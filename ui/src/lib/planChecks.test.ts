@@ -1,6 +1,6 @@
 import { scenarioCode } from './powering'
 import { lineKey } from './plan'
-import { overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
+import { groupChecks, overall, planChecks, type DerivedLine, type PlanCheck, type Trace } from './planChecks'
 import { viewLine, type PlanLine } from './plan'
 import { derived, port, product, variant } from '../test/fixtures'
 
@@ -118,8 +118,8 @@ describe('planChecks', () => {
   })
 
   it('ignores products whose ports aren’t known, and says nothing when nothing applies', () => {
-    // Only the note about the product with no specs at all; nothing from the PoE or port checks.
-    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['specs'])
+    // Only the note about the product with no specs at all (and that everything is in stock); nothing from the PoE or port checks.
+    expect(planChecks([item('mystery', 1, { known: { ...known, ports: false }, ports: [poeIn] }), item('nodata', 1, null)]).map((c) => c.id)).toEqual(['stock', 'specs'])
   })
 
   it('counts the AC outlets: mains-powered devices that aren’t on PoE', () => {
@@ -129,6 +129,46 @@ describe('planChecks', () => {
     // PoE-powered devices need none, and nothing is said when no device is on the mains.
     expect(byId([ap(3), sw(1, 100)]).outlets).toBeUndefined()
     expect(byId([item('cam', 1, { power: [src('ac'), src('poe', 'PoE')], ports: [poeIn] })]).outlets).toBeUndefined()
+  })
+
+  it('plugs devices into PDU and UPS sockets, and counts only the wall outlets left', () => {
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
+    // UPS -> PDU -> everything: the UPS takes the one wall outlet.
+    expect(byId([item('ups-2u-us', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets).toMatchObject({
+      text: '1 AC outlet (ups-2u-us). 3 of 16 PDU sockets used, 1 of 8 UPS sockets used.',
+    })
+    // A PDU alone takes a wall outlet; what it can't hold goes to the wall too.
+    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.text).toBe('2 AC outlets (usp-pdu-pro, gw). 16 of 16 PDU sockets used.')
+    // Overflow from the PDU goes to the UPS, after the PDU has taken its own socket.
+    expect(byId([item('ups-2u', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 20)]).outlets?.text).toBe('1 AC outlet (ups-2u). 16 of 16 PDU sockets used, 5 of 8 UPS sockets used.')
+    // A UPS with no PDU powers devices directly.
+    expect(byId([item('ups-tower', 1, null), item('gw', 2, { power: [src('ac')] })]).outlets?.text).toBe('1 AC outlet (ups-tower). 2 of 8 UPS sockets used.')
+  })
+
+  it('lays the outlets out as a tree: each UPS and PDU with what is plugged into it, then what is left for the wall', () => {
+    const mains = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
+    const tree = byId([item('ups-2u', 1, null), item('ups-tower', 1, null), item('usp-pdu-pro', 1, null), mains('gw', 1), mains('nvr', 2)]).outlets?.tree
+    expect(tree?.sections).toEqual([
+      { heading: 'The rack requires 1 AC outlet', nodes: [{ text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (3 of 16 outlets used)', children: [{ text: 'gw' }, { text: '2 × nvr' }] }] }] },
+      { heading: 'Other items require 1 AC outlet', nodes: [{ text: 'ups-tower' }] },
+    ])
+    // What fits nowhere is listed last, after the PDUs on the wall.
+    expect(byId([item('usp-pdu-pro', 1, null), mains('gw', 17)]).outlets?.tree?.sections[0]?.nodes).toEqual([
+      { text: 'usp-pdu-pro (16 of 16 outlets used)', children: [{ text: '16 × gw' }] },
+      { text: 'gw' },
+    ])
+  })
+
+  it('plugs the rack into the rack’s PDUs and UPSes, and the rest into the others', () => {
+    const racked = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: true, units: 1, full_depth: false } })
+    const desk = (slug: string, qty: number) => item(slug, qty, { power: [src('ac')], rack: { mountable: false, units: 0, full_depth: false } })
+    const lines = [racked('ups-2u', 1), item('ups-tower', 1, null), item('usp-pdu-pro', 1, null), racked('hd', 1), racked('nvr', 1), desk('cgf', 1), desk('xg8', 1)]
+    expect(byId(lines).outlets?.tree?.sections).toEqual([
+      { heading: 'The rack requires 1 AC outlet', nodes: [{ text: 'ups-2u (1 of 8 outlets used)', children: [{ text: 'usp-pdu-pro (2 of 16 outlets used)', children: [{ text: 'hd' }, { text: 'nvr' }] }] }] },
+      { heading: 'Other items require 1 AC outlet', nodes: [{ text: 'ups-tower (2 of 8 outlets used)', children: [{ text: 'cgf' }, { text: 'xg8' }] }] },
+    ])
+    // The rack alone says "The rack requires".
+    expect(byId([racked('ups-2u', 1), racked('gw', 1)]).outlets?.tree?.sections.map((x) => x.heading)).toEqual(['The rack requires 1 AC outlet'])
   })
 
   it('adds up rack space, and says when a height is missing', () => {
@@ -152,6 +192,12 @@ describe('planChecks', () => {
 
     it('says which equipment is not rack-mount, and needs a shelf', () => {
       expect(byId([racked('sw', 1), desk('xg8')]).rack).toMatchObject({ verdict: 'info', text: '1U of rack space (sw 1U). Not rack-mount, so it needs a shelf or desk space: xg8.' })
+    })
+
+    it('puts the PDU HD in the rack at 0U, since it mounts on the side of a rail', () => {
+      const hd = real('usp-pdu-hd', 'PDU HD', 'Integrations', 'integrations-power-tech', deskDevice)
+      expect(byId([racked('sw', 1), hd]).rack?.text).toBe('1U of rack space (sw 1U, PDU HD 0U).')
+      expect(byId([racked('sw', 1), hd]).rack?.groups?.[0]).toEqual({ text: '1U of rack space', ordered: true, items: ['sw 1U'] })
     })
 
     it('names the Instant and the CloudKey+, recorders and consoles filed with the cameras, as needing a shelf', () => {
@@ -285,7 +331,30 @@ describe('planChecks', () => {
       const gone = item('gone', 1, { ports: [poeOut(8)], metrics: [metric('poe_budget_w', 100)] })
       gone.view = { ...gone.view, state: 'out' }
       const c = byId([ap(2), gone])
-      expect(c['poe-stock']).toMatchObject({ verdict: 'warn', shortfall: true, text: expect.stringContaining("gone isn't in stock") })
+      expect(c['poe-stock']).toBeUndefined()
+      expect(c.stock).toMatchObject({ verdict: 'warn', shortfall: true, text: "The following items aren't in stock:", stock: { note: expect.stringContaining('PoE power and ports') } })
+      expect(c.stock!.stock!.items.map((v) => v.line.ref)).toEqual(['us/gone'])
+    })
+  })
+
+  describe('stock', () => {
+    it('notes that everything in the plan is in stock, without it counting towards the answer, and says nothing for an empty plan', () => {
+      expect(byId([ap(2), sw(1, 100)]).stock).toMatchObject({ verdict: 'info', text: 'Everything in the plan is in stock.' })
+      expect(planChecks([]).map((c) => c.id)).toEqual([])
+      expect(overall(planChecks([item('plain', 1, { power: [src('ac')] })]))).toBeNull()
+    })
+    it('lists every item that is not in stock, whatever it is, in one check, dearest line first and unpriced ones last, without calling for a switch', () => {
+      const out = (slug: string, qty: number, cents: number | null, state: 'out' | 'soon' | 'unlisted' = 'out') => {
+        const l = item(slug, qty, { power: [src('ac')] })
+        l.view = { ...l.view, state, totalCents: cents }
+        return l
+      }
+      const checks = planChecks([out('cheap', 1, 1000), out('gone', 1, null, 'unlisted'), out('dear', 2, 90000, 'soon'), out('mid', 1, 5000), ap(2), sw(1, 100)])
+      expect(checks.filter((c) => c.id === 'stock')).toHaveLength(1)
+      const c = checks.find((x) => x.id === 'stock')!
+      expect(c).toMatchObject({ verdict: 'warn', text: "The following items aren't in stock:" })
+      expect(c.stock!.items.map((v) => v.line.ref)).toEqual(['us/dear', 'us/mid', 'us/cheap', 'us/gone'])
+      expect(checks.some((x) => x.shortfall)).toBe(false)
     })
   })
 
@@ -593,5 +662,28 @@ describe('spare ports and where PoE devices go, with a gateway and two switches'
   it('still uses the gateway’s PoE port when no switch can power the device', () => {
     const t = run([gateway(), modem()])
     expect(t.poeHosts?.find((h) => h.line.view.line.ref === 'us/modem')?.host.line.view.line.ref).toBe('us/gw')
+  })
+})
+
+describe('groupChecks', () => {
+  const check = (id: string): PlanCheck => ({ id, label: id, verdict: 'ok', text: id })
+  it('puts the checks in sections in order, each keeping its own order, and leaves out empty sections', () => {
+    const ids = ['outlets', 'rack', 'net-ports', 'poe-power', 'role-gateway', 'nvr', 'poe-layout', 'role-network-capacity', 'power-adapter', 'poe-speed', 'stock', 'net-sfp']
+    const groups = groupChecks(ids.map(check))
+    expect(groups.map((g) => [g.title, g.checks.map((c) => c.id)])).toEqual([
+      ['In Stock', ['stock']],
+      ['Controllers', ['nvr', 'role-network-capacity']],
+      ['Network', ['net-ports', 'role-gateway', 'poe-speed', 'net-sfp']],
+      ['Physical Space', ['rack']],
+      ['Power', ['outlets', 'poe-power', 'poe-layout', 'power-adapter']],
+    ])
+    expect(groupChecks([check('rack')]).map((g) => g.title)).toEqual(['Physical Space'])
+  })
+  it('shows a check about the plan as a whole first, with no heading', () => {
+    expect(groupChecks([check('rack'), check('specs')]).map((g) => g.title)).toEqual([null, 'Physical Space'])
+  })
+  it('keeps every check', () => {
+    const ids = ['specs', 'poe-ports', 'stock', 'role-access', 'nvr', 'outlets']
+    expect(groupChecks(ids.map(check)).flatMap((g) => g.checks).length).toBe(ids.length)
   })
 })

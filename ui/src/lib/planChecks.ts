@@ -3,6 +3,7 @@ import type { LineView } from './plan'
 import { netPortCheck, unitDepths, type NetStats, type PoeHost } from './netPorts'
 import { nvrCheck, type NvrStats } from './nvrChecks'
 import { panelUnits, RACK_MOUNTS, RACK_PANELS, RACK_UNITS, NEEDS_RACK_MOUNT } from './rackMounts'
+import { acSocketsOf } from './acSockets'
 import { budgetOf, poeBudgetAt, powerOptions, type Powering } from './powering'
 import { isGatewayProduct, roleCheck, type Hosting, type Role } from './roles'
 import { formatSpeed, POE_CLASSES } from './requirements'
@@ -48,8 +49,8 @@ export interface Trace {
   poe?: { unit: UnitRef; usedW: number; budgetW: number | null; sparePorts: number }[]
   /** Rack height of each line that goes in a rack, per unit of the line; null for one that sits on a shelf or desk. */
   rack?: { line: DerivedLine; units: number | null }[]
-  /** The lines that each take a wall outlet, per unit of the line. */
-  outlets?: DerivedLine[]
+  /** The lines that take wall outlets, and how many of their units do: those a PDU or UPS has no socket for. */
+  outlets?: { line: DerivedLine; n: number }[]
   /** Devices that got no port. */
   portLost?: DerivedLine[]
 }
@@ -61,6 +62,8 @@ export interface PlanCheck {
   text: string
   /** The same, laid out as a list of points, each with a list under it (`text` is those run together). */
   groups?: { text: string; ordered?: boolean; items?: string[] }[]
+  /** The same, laid out as a nested list under a heading, with an optional note before it. */
+  tree?: { note?: string; sections: { heading: string; nodes: TreeNode[] }[] }
   /** A breakdown to show on request, as blocks of lines (one block per switch, say). */
   detail?: { title: string; rows: DetailRow[] }[]
   /** True when the plan doesn't have the PoE power or ports its devices need, which more switch could fix. */
@@ -79,6 +82,8 @@ export interface PlanCheck {
   net?: NetStats
   /** On the layout check: how the placement came out, for comparing switches. */
   stats?: PoeStats
+  /** On the stock check: the lines that can't be bought now, dearest first, and what that leaves the plan without. */
+  stock?: { items: LineView[]; note?: string }
 }
 
 export interface PoeStats {
@@ -566,10 +571,9 @@ const RACKABLE_TYPES = new Set(['Switches', 'Gateways', 'Storage'])
 /** Store categories that could too: the recorders and consoles filed with the cameras (the Instant and the CloudKey+ are desktop). */
 const RACKABLE_CATEGORIES = new Set(['physical-security-nvr'])
 
-function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
+/** Rack-mount accessories in the plan, and how many of each device that needs one have none (so are loose, on a shelf). */
+function rackMounting(lines: DerivedLine[]): { mounts: DerivedLine[]; loose: Map<DerivedLine, number> } {
   const slugOf = (l: DerivedLine) => l.view.product?.slug ?? ''
-  const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '') || RACKABLE_CATEGORIES.has(l.view.product?.category ?? '') || NEEDS_RACK_MOUNT.has(slugOf(l))
-
   // Rack-mount accessories take rack space themselves, and hold the devices that fit them: those are no longer loose.
   const mounts = lines.filter((l) => RACK_MOUNTS[slugOf(l)])
   const room = mounts.map((l) => ({ mount: RACK_MOUNTS[slugOf(l)]!, left: RACK_MOUNTS[slugOf(l)]!.capacity * l.view.line.qty }))
@@ -583,6 +587,28 @@ function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
     }
     loose.set(l, need)
   }
+  return { mounts, loose }
+}
+
+/** How many units of each line go in a rack: rack-mount equipment, and what is held by a rack-mount accessory in the plan. */
+function rackedUnits(lines: DerivedLine[]): Map<DerivedLine, number> {
+  const slugOf = (l: DerivedLine) => l.view.product?.slug ?? ''
+  const { loose } = rackMounting(lines)
+  const out = new Map<DerivedLine, number>()
+  for (const l of lines) {
+    const stated = RACK_UNITS[slugOf(l)] !== undefined || (RACK_PANELS.has(slugOf(l)) && panelUnits(l.view.line.sku) !== null)
+    const mounted = !!l.derived?.known.rack && l.derived.rack.mountable && !NEEDS_RACK_MOUNT.has(slugOf(l))
+    if (stated || mounted) out.set(l, l.view.line.qty)
+    else if (NEEDS_RACK_MOUNT.has(slugOf(l))) out.set(l, l.view.line.qty - (loose.get(l) ?? l.view.line.qty))
+  }
+  return out
+}
+
+function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
+  const slugOf = (l: DerivedLine) => l.view.product?.slug ?? ''
+  const rackable = (l: DerivedLine) => RACKABLE_TYPES.has(l.view.product?.type ?? '') || RACKABLE_CATEGORIES.has(l.view.product?.category ?? '') || NEEDS_RACK_MOUNT.has(slugOf(l))
+
+  const { mounts, loose } = rackMounting(lines)
 
   // Rack equipment the store doesn't describe as such (a PDU, a patch panel), of a height known here.
   const statedUnits = (l: DerivedLine) => RACK_UNITS[slugOf(l)] ?? (RACK_PANELS.has(slugOf(l)) ? panelUnits(l.view.line.sku) : null) ?? undefined
@@ -625,34 +651,123 @@ function rackCheck(lines: DerivedLine[], trace?: Trace): PlanCheck[] {
   return [{ id: 'rack', label: 'Rack space', verdict: unsure ? 'unknown' : 'info', text: flat.join(' '), groups }]
 }
 
+/** A point in a nested list: a device, with what is plugged into it under it. */
+export interface TreeNode {
+  text: string
+  children?: TreeNode[]
+}
+
+/** A PDU or UPS in the plan (one unit of it), and what is plugged into its sockets. */
+interface SocketHost {
+  line: DerivedLine
+  sockets: number
+  pdus: SocketHost[]
+  devices: Map<DerivedLine, number>
+}
+
+const hostUsed = (h: SocketHost) => h.pdus.length + [...h.devices.values()].reduce((a, b) => a + b, 0)
+
+/** Where everything in one place (the rack, or outside it) is plugged in: the tree of it, and what is left for the wall. */
+function plugIn(pdus: SocketHost[], upses: SocketHost[], leaf: { l: DerivedLine; n: number }[]): { nodes: TreeNode[]; wall: Map<DerivedLine, number> } {
+  // PDUs first, into the first UPS socket free.
+  const wallPdus: SocketHost[] = []
+  for (const p of pdus) {
+    const ups = upses.find((u) => hostUsed(u) < u.sockets)
+    if (ups) ups.pdus.push(p)
+    else wallPdus.push(p)
+  }
+  // Then the devices: PDU sockets, then UPS sockets, then the wall.
+  const loose = new Map<DerivedLine, number>()
+  for (const { l, n } of leaf) {
+    let left = n
+    for (const h of [...pdus, ...upses]) {
+      const take = Math.min(left, h.sockets - hostUsed(h))
+      if (take > 0) h.devices.set(l, (h.devices.get(l) ?? 0) + take)
+      left -= Math.max(take, 0)
+    }
+    if (left > 0) loose.set(l, left)
+  }
+  const wall = new Map<DerivedLine, number>()
+  for (const h of [...upses, ...wallPdus]) wall.set(h.line, (wall.get(h.line) ?? 0) + 1)
+  for (const [l, n] of loose) wall.set(l, (wall.get(l) ?? 0) + n)
+
+  const deviceNode = (l: DerivedLine, n: number): TreeNode => ({ text: `${n > 1 ? `${n} × ` : ''}${name(l)}` })
+  const hostNode = (h: SocketHost): TreeNode => {
+    const u = hostUsed(h)
+    const children = [...h.pdus.map(hostNode), ...[...h.devices].map(([l, n]) => deviceNode(l, n))]
+    return { text: `${name(h.line)}${u > 0 ? ` (${u} of ${h.sockets} outlets used)` : ''}`, ...(children.length > 0 ? { children } : {}) }
+  }
+  return { nodes: [...upses.map(hostNode), ...wallPdus.map(hostNode), ...[...loose].map(([l, n]) => deviceNode(l, n))], wall }
+}
+
 /**
- * The wall outlets the plan needs: a device that runs on mains power (its own cord or an adapter) and isn't powered over PoE
- * takes one, each. A switch that can run either way counts by the input chosen for it; until that's chosen it can't be told.
+ * The wall outlets the plan needs. A device that runs on mains power (its own cord or an adapter) and isn't powered over
+ * PoE has a plug to place. A UPS is plugged into the wall. PDUs are plugged in next: into a UPS socket if there is one,
+ * else the wall. Then each other device takes a PDU socket, failing that a UPS socket, failing that a wall outlet. Only
+ * what is left for the wall is counted. What is in the rack is plugged in among the rack's PDUs and UPSes, and what
+ * is outside it among the others. A switch that can run either way counts by the input chosen for it; until that's
+ * chosen it can't be told.
  */
 function outletCheck(lines: DerivedLine[], powering: Powering, trace?: Trace): PlanCheck[] {
-  const counted: { l: DerivedLine; n: number }[] = []
+  const socketsOf = (l: DerivedLine) => acSocketsOf(l.view.product?.slug ?? '')
+  const racked = rackedUnits(lines)
+  const inRack = (l: DerivedLine) => (socketsOf(l)?.rack ? l.view.line.qty : (racked.get(l) ?? 0))
+  const leaf: { l: DerivedLine; n: number }[] = []
   const undecided: DerivedLine[] = []
   for (const l of lines) {
     const d = l.derived
-    if (!d || !d.power.some((p) => p.kind === 'ac') || isPoePowered(l, powering)) continue
+    if (socketsOf(l) || !d || !d.power.some((p) => p.kind === 'ac') || isPoePowered(l, powering)) continue
     const b = budgetOf(l, powering)
     if (b.choose) undecided.push(l)
-    else if (!b.option || b.option.poeClass === null) counted.push({ l, n: l.view.line.qty })
+    else if (!b.option || b.option.poeClass === null) leaf.push({ l, n: l.view.line.qty })
   }
-  if (counted.length === 0 && undecided.length === 0) return []
-  if (trace) trace.outlets = counted.map((x) => x.l)
-  const total = counted.reduce((n, x) => n + x.n, 0)
-  const heading = `${total} AC ${total === 1 ? 'outlet' : 'outlets'}`
-  const items = counted.map((x) => `${x.n > 1 ? `${x.n} × ` : ''}${name(x.l)}`)
+  // The units of each PDU and UPS, the first of each line's that are in the rack going there.
+  const hosts = (kind: 'pdu' | 'ups'): { inside: SocketHost[]; outside: SocketHost[] } => {
+    const out = { inside: [] as SocketHost[], outside: [] as SocketHost[] }
+    for (const l of lines.filter((x) => socketsOf(x)?.kind === kind)) {
+      for (let i = 0; i < l.view.line.qty; i++) (i < inRack(l) ? out.inside : out.outside).push({ line: l, sockets: socketsOf(l)!.sockets, pdus: [], devices: new Map() })
+    }
+    return out
+  }
+  const pdus = hosts('pdu')
+  const upses = hosts('ups')
+  if (leaf.length === 0 && undecided.length === 0 && pdus.inside.length + pdus.outside.length + upses.inside.length + upses.outside.length === 0) return []
+
+  const inside = plugIn(pdus.inside, upses.inside, leaf.map(({ l, n }) => ({ l, n: Math.min(n, inRack(l)) })).filter((x) => x.n > 0))
+  const outside = plugIn(pdus.outside, upses.outside, leaf.map(({ l, n }) => ({ l, n: n - Math.min(n, inRack(l)) })).filter((x) => x.n > 0))
+  const count = (m: Map<DerivedLine, number>) => [...m.values()].reduce((a, b) => a + b, 0)
+  const outlets = (n: number) => `${n} AC ${n === 1 ? 'outlet' : 'outlets'}`
+  const wall = new Map<DerivedLine, number>()
+  for (const m of [inside.wall, outside.wall]) for (const [l, n] of m) wall.set(l, (wall.get(l) ?? 0) + n)
+  if (trace) trace.outlets = [...wall].map(([line, n]) => ({ line, n }))
+
+  const total = count(wall)
   const unsure = undecided.length > 0 ? `Can't tell how ${list(undecided)} will be powered, so ${undecided.length === 1 ? 'it is' : 'they are'} not counted.` : ''
-  const label = undecided.length > 0 ? `${heading} so far` : heading
+  const so = undecided.length > 0 ? ' so far' : ''
+  const items = [...wall].map(([l, n]) => `${n > 1 ? `${n} × ` : ''}${name(l)}`)
+  const used = (hs: SocketHost[]) => hs.reduce((n, h) => n + hostUsed(h), 0)
+  const cap = (hs: SocketHost[]) => hs.reduce((n, h) => n + h.sockets, 0)
+  const allPdus = [...pdus.inside, ...pdus.outside]
+  const allUpses = [...upses.inside, ...upses.outside]
+  const sockets = [
+    allPdus.length > 0 && `${used(allPdus)} of ${cap(allPdus)} PDU ${cap(allPdus) === 1 ? 'socket' : 'sockets'} used`,
+    allUpses.length > 0 && `${used(allUpses)} of ${cap(allUpses)} UPS ${cap(allUpses) === 1 ? 'socket' : 'sockets'} used`,
+  ].filter((x): x is string => !!x)
+  const socketText = sockets.length > 0 ? `${sockets.join(', ')}.` : ''
+
+  // The rack's and the rest's get a heading each, unless there is only one.
+  const placed = [
+    { who: 'The rack requires', p: inside },
+    { who: 'Other items require', p: outside },
+  ].filter((x) => x.p.nodes.length > 0)
+  const sections = placed.map(({ who, p }) => ({ heading: placed.length === 1 && inside.nodes.length === 0 ? `Requires ${outlets(count(p.wall))}${so}` : `${who} ${outlets(count(p.wall))}${so}`, nodes: p.nodes }))
   return [
     {
       id: 'outlets',
       label: 'AC outlets',
       verdict: undecided.length > 0 ? 'unknown' : 'info',
-      text: [`${label}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, unsure].filter(Boolean).join(' '),
-      groups: [...(unsure ? [{ text: unsure }] : []), { text: label, items }],
+      text: [`${outlets(total)}${so}${items.length > 0 ? ` (${items.join(', ')})` : ''}.`, socketText, unsure].filter(Boolean).join(' '),
+      tree: { ...(unsure ? { note: unsure } : {}), sections: sections.length > 0 ? sections : [{ heading: `Requires ${outlets(total)}${so}`, nodes: [] }] },
     },
   ]
 }
@@ -744,7 +859,35 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
     walk(0, injectors, new Map())
   }
   const run = best === first && !trace ? best : layout(lines, powering, best.pins, trace)
-  return [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  const all = [...specsCheck(lines), ...run.poe, ...powerInputCheck(lines, powering), ...run.net, ...nvrCheck(lines), ...roleCheck(lines, hosting), ...rackCheck(lines, trace), ...outletCheck(lines, powering, trace)]
+  // The PoE and NVR checks each notice a switch or NVR that can't be bought, and say what a replacement could fix. That is reported once, with the rest of the plan's stock.
+  const inStock = (c: PlanCheck) => c.id !== 'poe-stock' && c.id !== 'nvr-stock'
+  return [...stockCheck(lines, all.filter((c) => !inStock(c))), ...all.filter(inStock)]
+}
+
+/**
+ * Whether everything in the plan can be bought now. That it can is a note, not a pass: it says nothing about whether the plan adds up,
+ * so it doesn't count towards the answer. What can't be bought is listed dearest line first (the costliest are the biggest decisions: wait, or find
+ * another), and carries the shortfalls of a switch or NVR that can't, so that the finders still offer a replacement.
+ */
+function stockCheck(lines: DerivedLine[], unavailable: PlanCheck[]): PlanCheck[] {
+  if (lines.length === 0) return []
+  // A line that is all owned counts as in stock (see viewLine), so only what is still to be bought is listed.
+  const out = lines.map((l) => l.view).filter((v) => v.state !== 'in')
+  if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'info', text: 'Everything in the plan is in stock.' }]
+  const poe = unavailable.some((c) => c.shortfall)
+  const nvr = unavailable.some((c) => c.nvrShortfall)
+  const effects = [poe && "The PoE power and ports a switch gives can't be had now.", nvr && "The camera capacity an NVR gives can't be had now."].filter(Boolean)
+  const items = out.map((v, i) => ({ v, i })).sort((a, b) => (b.v.totalCents ?? -1) - (a.v.totalCents ?? -1) || a.i - b.i).map((x) => x.v)
+  return [{
+    id: 'stock',
+    label: 'Stock',
+    verdict: 'warn',
+    ...(poe ? { shortfall: true } : {}),
+    ...(nvr ? { nvrShortfall: true } : {}),
+    text: "The following items aren't in stock:",
+    stock: { items, ...(effects.length > 0 ? { note: effects.join(' ') } : {}) },
+  }]
 }
 
 /** The most ways of dividing devices between switches and injectors that are tried. */
@@ -782,6 +925,27 @@ function layout(lines: DerivedLine[], powering: Powering, pins: Pins, trace?: Tr
   const stats = net.find((c) => c.id === 'net-ports')?.net
   const score = [outcome.stranded + (stats?.unplaced ?? 0), outcome.crawling, outcome.lostMbps, stats?.onGateways ?? 0, [...pins.values()].reduce((a, b) => a + b, 0)]
   return { poe, net, score, pins }
+}
+
+/** The sections the checks are shown in, in order. */
+export const CHECK_SECTIONS = ['In Stock', 'Controllers', 'Network', 'Physical Space', 'Power'] as const
+export type CheckSection = (typeof CHECK_SECTIONS)[number]
+
+/** Which section a check belongs in, or null for one that is about the plan as a whole (the missing tech specs). */
+export function sectionOf(c: PlanCheck): CheckSection | null {
+  if (c.id === 'stock') return 'In Stock'
+  if (c.id === 'role-gateway' || c.id.startsWith('role-gateway-')) return 'Network'
+  if (c.id.startsWith('role-') || c.id.startsWith('nvr')) return 'Controllers'
+  if (c.id === 'rack') return 'Physical Space'
+  if (c.id === 'poe-power' || c.id === 'poe-ports' || c.id === 'poe-layout' || c.id === 'power-adapter' || c.id === 'outlets') return 'Power'
+  if (c.id.startsWith('poe-') || c.id.startsWith('net-')) return 'Network'
+  return null
+}
+
+/** The checks under their section headings, in section order and each section's checks in their own order; checks with no section come first, with no heading. Empty sections are left out. */
+export function groupChecks(checks: PlanCheck[]): { title: CheckSection | null; checks: PlanCheck[] }[] {
+  const groups = [null, ...CHECK_SECTIONS].map((title) => ({ title, checks: checks.filter((c) => sectionOf(c) === title) }))
+  return groups.filter((g) => g.checks.length > 0)
 }
 
 export interface Answer {
