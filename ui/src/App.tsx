@@ -82,6 +82,9 @@ export default function App() {
           <a href="/status" className="text-sm text-muted underline">
             Status
           </a>
+          <a href="/about" className="text-sm text-muted underline">
+            About
+          </a>
           <Button
             type="button"
             variant="secondary"
