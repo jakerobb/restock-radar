@@ -1,8 +1,20 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { historyResponse, product, productsResponse, variant } from './test/fixtures'
 import { renderWithClient, stubFetch } from './test/render'
+
+/** jsdom has no matchMedia; stub one that reports every min-width query as matching (a desktop) or not (a phone). */
+function stubViewport(desktop: boolean) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: desktop,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+}
+
+beforeEach(() => stubViewport(true))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -95,8 +107,8 @@ describe('App', () => {
       'GET /v1/products': {
         body: productsResponse({
           products: [
-            product({ id: 'p1', title: 'AI Port', tags: ['black-friday', 'feature:color-black'] }),
-            product({ id: 'p2', title: 'Dome Camera', tags: ['feature:color-black'] }),
+            product({ id: 'p1', title: 'AI Port', tags: ['black-friday', 'feature:color-black', 'feature:poe'] }),
+            product({ id: 'p2', title: 'Dome Camera', tags: ['feature:color-black', 'feature:poe'] }),
             product({ id: 'p3', title: 'Plain Switch', tags: [] }),
             product({ id: 'p4', title: 'Sale Hub', tags: ['black-friday'] }),
           ],
@@ -152,6 +164,54 @@ describe('App', () => {
 
     await user.click(toggle) // collapse again: the chosen tag stays
     expect(screen.getByRole('button', { name: /^black-friday/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('tag filter on a phone', () => {
+  it('starts collapsed and expands on demand', async () => {
+    stubViewport(false)
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': { body: productsResponse({ products: [product({ id: 'p1', title: 'AI Port', tags: ['shared'] }), product({ id: 'p2', title: 'Dome Camera', tags: ['shared'] })] }) },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /AI Port/ })
+    const toggle = screen.getByRole('button', { name: /Tags/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: /^shared/ })).not.toBeInTheDocument()
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: /^shared/ })).toBeInTheDocument()
+  })
+})
+
+describe('tag order', () => {
+  it('lists groups first, then plain tags, with empty chips last', async () => {
+    stubFetch({
+      'GET /v1/history?days=90': { body: historyResponse() },
+      'GET /v1/products': {
+        body: productsResponse({
+          products: [
+            product({ id: 'p1', title: 'Gadget', tags: ['zeta', 'alpha', 'type:a', 'type:b'] }),
+            product({ id: 'p2', title: 'Gizmo', tags: ['zeta', 'alpha', 'type:a', 'type:b'] }),
+            product({ id: 'p3', title: 'Widget', tags: ['gone', 'color:x', 'color:y'] }),
+            product({ id: 'p4', title: 'Widgy', tags: ['gone', 'color:x', 'color:y'] }),
+          ],
+        }),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<App />)
+    await screen.findByRole('heading', { name: /Gadget/ })
+    const names = () =>
+      within(screen.getByRole('group', { name: 'Filter by tag' }))
+        .getAllByRole('button')
+        .map((b) => b.textContent ?? '')
+        .filter((t) => /^(color|type|alpha|zeta|gone)/.test(t))
+        .map((t) => /^[a-z]+/.exec(t)?.[0])
+    expect(names()).toEqual(['color', 'type', 'alpha', 'gone', 'zeta'])
+    await user.type(screen.getByRole('searchbox', { name: 'Search products and variants' }), 'Gizmo')
+    expect(names()).toEqual(['type', 'alpha', 'zeta', 'color', 'gone'])
   })
 })
 

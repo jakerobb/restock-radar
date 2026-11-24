@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import { cn } from '../lib/cn'
 import { groupTags, type TagCount, type TagGroupCounts } from '../lib/filter'
 import { TagGroup } from './TagGroup'
@@ -27,21 +28,25 @@ type Entry = { key: string; name: string; tag?: TagCount; group?: TagGroupCounts
  * The list can be long, so it scrolls, can be collapsed (chosen tags stay visible) and can be searched.
  */
 export function TagFilter({ tags, groupTotals, selected, onToggle, onClear }: TagFilterProps) {
-  const [open, setOpen] = useState(true)
+  // Starts collapsed below Tailwind's lg breakpoint, where the list would push the products off-screen.
+  const desktop = useMediaQuery('(min-width: 64rem)')
+  const [open, setOpen] = useState(desktop)
   const [search, setSearch] = useState('')
   if (tags.length === 0) return null
 
   const needle = search.trim().toLowerCase()
   const matching = open ? tags.filter((t) => !needle || t.tag.toLowerCase().includes(needle)) : tags
-  const { plain, groups } = groupTags(matching)
+  const { plain, groups } = groupTags(matching, tags)
   // Collapsed, only what's chosen stays visible: plain chips, and the groups holding a chosen option.
   const visible = open ? plain : plain.filter((t) => selected.includes(t.tag))
   const visibleGroups = open ? groups : groups.filter((g) => g.options.some((o) => selected.includes(o.tag)))
-  // Plain chips and group chips share one alphabetical order (a group sorts by its prefix).
-  const entries: Entry[] = [
-    ...visible.map((t) => ({ key: t.tag, name: t.tag, tag: t })),
-    ...visibleGroups.map((g) => ({ key: `${g.prefix}:`, name: g.prefix, group: g })),
-  ].sort((a, b) => a.name.localeCompare(b.name))
+  // Groups come first, then plain tags, each alphabetical (a group sorts by its prefix).
+  // Chips with nothing to show sink to the bottom, alphabetical regardless of kind.
+  const empty = (e: Entry) => (e.group ? (groupTotals.get(e.group.prefix) ?? 0) === 0 && !e.group.options.some((o) => selected.includes(o.tag)) : e.tag?.count === 0 && !selected.includes(e.name))
+  const entries = [
+    ...visible.map((t): Entry => ({ key: t.tag, name: t.tag, tag: t })),
+    ...visibleGroups.map((g): Entry => ({ key: `${g.prefix}:`, name: g.prefix, group: g })),
+  ].sort((a, b) => Number(empty(a)) - Number(empty(b)) || (empty(a) ? 0 : Number(!!b.group) - Number(!!a.group)) || a.name.localeCompare(b.name))
 
   return (
     <div className="mb-4 flex flex-col lg:min-h-0 lg:flex-1" role="group" aria-label="Filter by tag">

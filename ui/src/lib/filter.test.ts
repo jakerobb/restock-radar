@@ -138,11 +138,17 @@ describe('groupTags', () => {
     expect(tagPrefix('odd:')).toBeNull()
     const t = (tag: string, count = 1) => ({ tag, count })
     expect(groupTags([t('sale', 3), t('feature:poe', 2), t('color:red'), t('feature:4k')])).toEqual({
-      plain: [t('sale', 3)],
-      groups: [
-        { prefix: 'color', options: [t('color:red')] },
-        { prefix: 'feature', options: [t('feature:poe', 2), t('feature:4k')] },
-      ],
+      plain: [t('sale', 3), t('color:red')],
+      groups: [{ prefix: 'feature', options: [t('feature:poe', 2), t('feature:4k')] }],
+    })
+  })
+
+  it('keeps a group when a search narrows it to one option, but not when it only ever had one', () => {
+    const t = (tag: string) => ({ tag, count: 1 })
+    const all = [t('feature:poe'), t('feature:4k'), t('compare:hide')]
+    expect(groupTags([t('feature:4k'), t('compare:hide')], all)).toEqual({
+      plain: [t('compare:hide')],
+      groups: [{ prefix: 'feature', options: [t('feature:4k')] }],
     })
   })
 })
