@@ -475,7 +475,9 @@ type VariantState struct {
 	RestockETA     string    `json:"restock_eta,omitempty"`
 	LastChecked    time.Time `json:"last_checked"`
 	LastChanged    time.Time `json:"last_changed"`
-	FirstSeen      time.Time `json:"first_seen"`
+	// LastChange says what happened at LastChanged ("Back in stock", "Price increased"); empty when unknown.
+	LastChange string    `json:"last_change,omitempty"`
+	FirstSeen  time.Time `json:"first_seen"`
 }
 
 func cents(m *unistore.Money) *int64 {
@@ -954,7 +956,39 @@ func (s *Store) Variants(ctx context.Context, region string) ([]VariantState, er
 		v.FirstSeen, _ = time.Parse(time.RFC3339, first)
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.describeLastChanges(ctx, region, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// describeLastChanges fills in LastChange from the events recorded when each variant last changed. A variant with
+// none, whose last change is its first sighting, was just first tracked.
+func (s *Store) describeLastChanges(ctx context.Context, region string, vs []VariantState) error {
+	rows, err := s.db.QueryContext(ctx, eventSelect+`
+		WHERE e.ts = v.last_changed AND (? = '' OR e.region = ?) ORDER BY e.id`, region, region)
+	if err != nil {
+		return err
+	}
+	events, err := scanEvents(rows)
+	if err != nil {
+		return err
+	}
+	type key struct{ region, variant string }
+	byVariant := map[key][]Event{}
+	for _, e := range events {
+		byVariant[key{e.Region, e.VariantID}] = append(byVariant[key{e.Region, e.VariantID}], e)
+	}
+	for i := range vs {
+		v := &vs[i]
+		if v.LastChange = DescribeChange(byVariant[key{v.Region, v.VariantID}]); v.LastChange == "" && v.LastChanged.Equal(v.FirstSeen) {
+			v.LastChange = "First tracked"
+		}
+	}
+	return nil
 }
 
 const (

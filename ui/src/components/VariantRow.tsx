@@ -32,6 +32,7 @@ export function VariantRow({ variant, chart, named = true }: VariantRowProps) {
           <PriceTag variant={variant} />
         </td>
         <td className="hidden py-1.5 pl-2 text-right text-muted sm:table-cell">
+          {variant.last_change && `${variant.last_change} `}
           <RelativeTime iso={variant.last_changed} />
         </td>
       </tr>

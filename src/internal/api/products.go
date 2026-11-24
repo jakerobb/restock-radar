@@ -36,7 +36,9 @@ type variantJSON struct {
 	RestockETA     string    `json:"restock_eta,omitempty"`
 	LastChecked    time.Time `json:"last_checked"`
 	LastChanged    time.Time `json:"last_changed"`
-	FirstSeen      time.Time `json:"first_seen"`
+	// LastChange says what happened at LastChanged ("Back in stock", "Price increased"); empty when unknown.
+	LastChange string    `json:"last_change,omitempty"`
+	FirstSeen  time.Time `json:"first_seen"`
 }
 
 // retiredJSON is a variant the store has taken off a product, kept so that old plan links to it still resolve.
@@ -139,7 +141,7 @@ func (srv *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 			ID: v.VariantID, Num: v.Num, SKU: v.SKU, Title: v.VariantTitle, Status: v.Status,
 			PriceCents: v.PriceCents, RegularPriceCents: v.RegularPriceCents,
 			PriceWithSurchargesCents: v.PriceWithSurchargesCents, SurchargeTypes: v.SurchargeTypes, Currency: v.Currency,
-			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, FirstSeen: v.FirstSeen,
+			RestockETA: v.RestockETA, LastChecked: v.LastChecked, LastChanged: v.LastChanged, LastChange: v.LastChange, FirstSeen: v.FirstSeen,
 		})
 	}
 	linked, none, err := srv.store.Linked(r.Context())
