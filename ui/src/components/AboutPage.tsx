@@ -61,6 +61,11 @@ export default function AboutPage() {
               </a>. Or, if you love what I&apos;m doing and want to talk about integrating it into your own
               offerings. Whatever &mdash; I&apos;m happy to discuss.
             </p>
+            <h3 className="font-semibold">Is this why the site doesn't have any product images?</h3>
+            <p className="mt-2">
+              Yep, exactly! I don't want to step on any copyright land mines. If you want photos, click on the Store
+              link and check them out there.
+            </p>
           </Card>
 
           <Card aria-label="Is it vibe-coded?">
