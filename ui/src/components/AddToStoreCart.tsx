@@ -134,7 +134,7 @@ export function AddToStoreCart({ name, views, region }: { name: string; views: L
           )}
           {chosen && <CartSection key={chosen.region} cart={chosen} name={name} />}
           <p className="mt-4 text-xs text-muted">
-            The store changes without warning and this follows its pages by hand. If the bookmark says something went wrong, it may need an update here, after which you drag the link again.
+            The store changes without warning, so this functionality might stop working at any time. If that happens, please accept my apologies! I’ll try to get it working again soon.
           </p>
         </Dialog>
       )}
