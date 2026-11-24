@@ -249,22 +249,6 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
             })}
           </Select>
         )}
-        {editable ? (
-          <Select
-            className="mt-1 block max-w-64 py-1 text-sm"
-            aria-label={`How many of ${product?.title ?? line.ref} you already own`}
-            value={line.owned ?? 0}
-            onChange={(e) => changeOwned(key, Number(e.target.value))}
-          >
-            {Array.from({ length: line.qty + 1 }, (_, n) => (
-              <option key={n} value={n}>
-                {n === 0 ? 'None owned yet' : n === line.qty ? (line.qty === 1 ? 'Already owned' : `All ${n} already owned`) : `${n} of ${line.qty} already owned`}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          line.owned ? <div className="text-xs text-muted">{line.owned >= line.qty ? 'Already owned' : `${line.owned} of ${line.qty} already owned`}</div> : null
-        )}
       </td>
       <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
         {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
@@ -276,6 +260,22 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
         ) : (
           <span className="tabular-nums">{line.qty}</span>
         )}
+        {editable ? (
+          <Select
+            className="mt-1 ml-auto block w-28 py-1 text-sm"
+            aria-label={`How many of ${product?.title ?? line.ref} you already own`}
+            value={line.owned ?? 0}
+            onChange={(e) => changeOwned(key, Number(e.target.value))}
+          >
+            {Array.from({ length: line.qty + 1 }, (_, n) => (
+              <option key={n} value={n}>
+                {n === 0 ? 'None owned' : n === line.qty ? (line.qty === 1 ? 'Owned' : 'All owned') : `${n} owned`}
+              </option>
+            ))}
+          </Select>
+        ) : line.owned ? (
+          <div className="text-xs text-muted">{line.owned >= line.qty ? 'Owned' : `${line.owned} owned`}</div>
+        ) : null}
       </td>
       <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{view.totalCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.totalCents, view.currency)}</td>
       <td className="px-2 py-2 whitespace-nowrap">
