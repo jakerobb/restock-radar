@@ -14,6 +14,7 @@ import { DEFAULT_POWER_METHODS, findFits, MAX_SWITCHES, pickOptions, POWER_METHO
 import { FinderFilterBar, HotSwapBox } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { PlanRegionNotice } from './PlanRegionNotice'
 import { Card } from './ui/Card'
 
 function facts(o: ListedSwitch): string {
@@ -94,6 +95,7 @@ export function SwitchFinder({ plan, products, derived, powering, onAdd, onClose
           Close
         </button>
       </div>
+      <PlanRegionNotice refs={plan.map((l) => l.view.line.ref)} />
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, with its own PoE budget and ports counted, so a switch you have already chosen still helps.</p>
       <FinderFilterBar filters={filters} onChange={setFilters} hideHotSwap />
       <fieldset className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

@@ -13,6 +13,7 @@ import { APP_NAME, appsRun, gatewayLabel, hostedNote, isGatewayProduct, managedO
 import { FinderFilterBar } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { PlanRegionNotice } from './PlanRegionNotice'
 import { Card } from './ui/Card'
 
 const APP_LABEL: Record<string, string> = { network: 'Network', protect: 'Protect', access: 'Access', talk: 'Talk' }
@@ -99,6 +100,7 @@ export function RoleFinder({ plan, products, derived, hosting, onAdd, onHost, on
           Close
         </button>
       </div>
+      <PlanRegionNotice refs={plan.map((l) => l.view.line.ref)} />
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan.</p>
       <FinderFilterBar filters={filters} onChange={setFilters} gatewayRows={found.missing.includes('gateway') ? rows : undefined} />
       {found.hostable.length > 0 && (

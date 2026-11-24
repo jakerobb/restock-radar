@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { addLine, changeVariant, ensureQty, lineFor, removeLine, replaceLine, setAddOn, setOwned, setQty, type PlanLine } from '../lib/plan'
+import { addLine, changeVariant, ensureQty, lineFor, lineKey, removeLine, replaceLine, setAddOn, setOwned, setQty, type PlanLine } from '../lib/plan'
 import { createPlan, deletePlan, getActiveId, getHosting, getPlan, getPlanName, getPlans, getPowering, renamePlan, selectPlan, setHosting, setPlan, setPowering, subscribePlan } from '../lib/planStore'
 import type { Powering } from '../lib/powering'
 import type { Hosting, HostedRole, HostedWhere } from '../lib/roles'
@@ -30,6 +30,17 @@ export function usePlan() {
     const line = lineFor(p, qty)
     if (line) setPlan(replaceLine(getPlan(), key, line))
   }, [])
+  /** Makes a line another (as from converting it to another region), keeping how it is powered. */
+  const moveLine = useCallback((key: string, to: PlanLine) => {
+    setPlan(replaceLine(getPlan(), key, to))
+    const powered = { ...getPowering() }
+    const code = powered[key]
+    if (code !== undefined) {
+      delete powered[key]
+      if (powered[lineKey(to)] === undefined) powered[lineKey(to)] = code
+      setPowering(powered)
+    }
+  }, [])
   /** Replaces the plan, and where its controllers run (nowhere else, unless said). */
   const replace = useCallback((next: PlanLine[], hosted: Hosting = {}, powered: Powering = {}) => {
     setPlan(next)
@@ -43,5 +54,5 @@ export function usePlan() {
     else delete next[role]
     setHosting(next)
   }, [])
-  return { name, plans, activeId, rename: renamePlan, select: selectPlan, create: createPlan, destroy: deletePlan, lines, hosting, powering, power, swapProduct, add, remove, changeQty, changeOwned, switchVariant, addOn, replace, host }
+  return { name, plans, activeId, rename: renamePlan, select: selectPlan, create: createPlan, destroy: deletePlan, lines, hosting, powering, power, swapProduct, moveLine, add, remove, changeQty, changeOwned, switchVariant, addOn, replace, host }
 }

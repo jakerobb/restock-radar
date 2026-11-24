@@ -729,3 +729,61 @@ describe('A plan from another region than the picked one', () => {
     expect(await screen.findByText(/This plan mixes stores: 1 line from United States, 1 line from Europe\./)).toBeInTheDocument()
   })
 })
+
+describe('Adding to a plan from another region than the picked one', () => {
+  const eu = (over: Parameters<typeof product>[0]) => product({ region: 'eu', ...over })
+  const all = () => [
+    product({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'a', num: 1, sku: 'SW-8', price_cents: 20000 })] }),
+    product({ id: '2', slug: 'ap', title: 'Access Point', variants: [variant({ id: 'c', num: 3, sku: 'AP-1', price_cents: 15000 })] }),
+    eu({ id: '1', slug: 'switch', title: 'PoE Switch', variants: [variant({ id: 'e', num: 11, sku: 'SW-8-EU', currency: 'EUR', price_cents: 18000 })] }),
+    eu({ id: '2', slug: 'ap', title: 'Access Point', variants: [variant({ id: 'f', num: 12, sku: 'AP-1-EU', currency: 'EUR', price_cents: 15000 })] }),
+  ]
+  const serve = () => stubFetch({ 'GET /v1/products': { body: productsResponse({ regions: ['us', 'eu'], products: all() }) }, 'GET /v1/derived': { body: [] } })
+
+  it('warns in the add dialog, and switches to the plan\'s region on request', async () => {
+    serve()
+    setPlan([line({ ref: 'eu/switch', sku: 'SW-8-EU', addedCents: null })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add a product' })
+    expect(within(dialog).getByText(/Your region is set to United States, so what you add here comes from its store\. Most of this plan is from Europe\./)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Switch to Europe' }))
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Add a product' })).queryByText(/Your region is set to/)).not.toBeInTheDocument())
+    expect(localStorage.getItem('restock-radar.region')).toBe('eu')
+  })
+
+  it('does not warn when the plan agrees with the picker, or is empty', async () => {
+    serve()
+    setPlan([])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    await user.click(await screen.findByRole('button', { name: 'Add product' }))
+    expect(screen.queryByText(/Your region is set to/)).not.toBeInTheDocument()
+  })
+
+  it('offers to replace a line from another store with the main store\'s equivalent, in a plan that mixes them', async () => {
+    serve()
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', addedCents: 15000 }), line({ ref: 'eu/ap', sku: 'AP-1-EU', addedCents: null })])
+    const user = userEvent.setup()
+    renderRoute('/plan')
+    // Only the line that isn't the plan's main region's has it.
+    const link = await screen.findByRole('button', { name: 'Replace with United States equivalent' })
+    expect(screen.getAllByRole('button', { name: /^Replace with/ })).toHaveLength(1)
+    await user.click(link)
+    await waitFor(() => expect(stored('lines')).toHaveLength(2))
+    expect(screen.queryByRole('button', { name: /^Replace with/ })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Quantity of Access Point')).toHaveValue(2) // folded into the line it already had
+  })
+
+  it('offers no replacement where the main store has no equivalent', async () => {
+    stubFetch({
+      'GET /v1/products': { body: productsResponse({ regions: ['us', 'eu'], products: [...all().slice(0, 3), eu({ id: '9', slug: 'exclusive', title: 'Exclusive', variants: [variant({ id: 'x', num: 20, sku: 'EX-1', currency: 'EUR', price_cents: 1000 })] })] }) },
+      'GET /v1/derived': { body: [] },
+    })
+    setPlan([line({}), line({ ref: 'us/ap', sku: 'AP-1', addedCents: 15000 }), line({ ref: 'eu/exclusive', sku: 'EX-1', addedCents: null })])
+    renderRoute('/plan')
+    await screen.findByRole('link', { name: 'Exclusive' })
+    expect(screen.queryByRole('button', { name: /^Replace with/ })).not.toBeInTheDocument()
+  })
+})

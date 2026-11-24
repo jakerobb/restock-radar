@@ -98,7 +98,6 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   const before = planChecks(plan, {}, powered(plan))
   const speedOnly = before.some((c) => c.id === 'poe-power' && c.verdict === 'ok') && before.some((c) => c.id === 'poe-ports' && c.verdict === 'ok')
   const slowedBefore = speedOnly ? (before.find((c) => c.id === 'poe-layout')?.stats?.slowed ?? 0) : 0
-  const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
   // What the plan needs from a switch: PoE (power and ports), and a port for each device that isn't PoE-powered.
   const needsPoe = plan.some((l) => isPoePowered(l, powered(plan)))
   const needsPorts = before.some((c) => c.id === 'net-ports')
@@ -107,7 +106,7 @@ export function findFits(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   const sfpOnly = sfpBefore > 0 && before.every((c) => c.id === 'net-sfp' || !c.shortfall)
   if (!needsPoe && !needsPorts) return { fits: [], pairs: [], replaces }
   const cands = rows.filter(
-    (row) => row.product.type === 'Switches' && !!row.derived?.known.ports && (!needsPoe || sfpOnly || (hasPoeOut(row) && hasBudget(row))) && (regions.size === 0 || regions.has(row.product.region)),
+    (row) => row.product.type === 'Switches' && !!row.derived?.known.ports && (!needsPoe || sfpOnly || (hasPoeOut(row) && hasBudget(row))),
   )
 
   /** The plan with these switches added: a Fit when its PoE power and ports check out, otherwise null. */

@@ -11,6 +11,7 @@ import type { DerivedLine } from '../lib/planChecks'
 import { FinderFilterBar } from './FinderFilterBar'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { PlanRegionNotice } from './PlanRegionNotice'
 import { Card } from './ui/Card'
 
 const metric = (d: Derived | null, n: string) => d?.metrics.find((m) => m.name === n)?.value ?? null
@@ -78,6 +79,7 @@ export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: D
           Close
         </button>
       </div>
+      <PlanRegionNotice refs={plan.map((l) => l.view.line.ref)} />
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, so an NVR you have already chosen still counts. Only the number of cameras is considered, not storage.</p>
       <FinderFilterBar filters={filters} onChange={setFilters} />
       {found.options.length === 0 ? (

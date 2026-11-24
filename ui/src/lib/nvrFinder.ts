@@ -49,12 +49,10 @@ export function findNvrs(fullPlan: DerivedLine[], rows: CatalogRow[], products: 
   // An NVR that can't be bought now gives nothing to count on, so the plan is checked without it and stand-ins offered.
   const replaces = fullPlan.filter((l) => isNvr(l.derived) && l.view.state !== 'in')
   const plan = fullPlan.filter((l) => !replaces.includes(l))
-  const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
   const fits: Fit[] = []
   for (const row of rows) {
     if (!isNvr(row.derived) || replaces.some((l) => l.view.line.ref === `${row.product.region}/${row.product.slug}`)) continue
     const alsoGateway = row.product.category !== 'physical-security-nvr'
-    if (regions.size > 0 && !regions.has(row.product.region)) continue
     if (!acceptsRow(row, filters, products)) continue
     for (let qty = 1; qty <= (alsoGateway ? 1 : MAX_NVRS); qty++) { // one gateway, not four
       const line = lineFor(row.product, qty)

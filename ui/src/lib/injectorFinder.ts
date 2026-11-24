@@ -58,8 +58,7 @@ export function findInjectors(fullPlan: DerivedLine[], rows: CatalogRow[], produ
   planChecks(plan, {}, powered(plan), before)
   const devices = before.poeLost?.length ?? 0
   if (devices === 0) return { devices, options: [], all: [], slow: false, replaces }
-  const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
-  const cands = rows.filter((r) => isInjector(r.derived) && (regions.size === 0 || regions.has(r.product.region)))
+  const cands = rows.filter((r) => isInjector(r.derived))
 
   const tryAdd = (adds: { row: CatalogRow; qty: number }[]): Fit | null => {
     const added: DerivedLine[] = []
