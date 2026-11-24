@@ -1,5 +1,6 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { resetRegionChoice } from '../hooks/useRegion'
 import type { ProductSpecsResponse, SpecEntry } from '../api/types'
 import { derived, historyResponse, port, product, productsResponse } from '../test/fixtures'
 import { renderRoute, stubFetch } from '../test/render'
@@ -139,5 +140,69 @@ describe('a product with no tech specs', () => {
     expect(await screen.findByText(/No tech specs are expected for this product \(in any region\): just a cover/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Expect specs again' }))
     expect(calls.some((c) => c.key === 'DELETE /v1/specs/not-expected/widget')).toBe(true)
+  })
+})
+
+describe('changing the region on a product page', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+    resetRegionChoice()
+  })
+
+  const serve = () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+    stubFetch({
+      'GET /v1/products': {
+        body: productsResponse({
+          regions: ['us', 'eu', 'jp'],
+          products: [
+            product({ id: 'a', region: 'us', slug: 'widget', title: 'Widget' }),
+            product({ id: 'a', region: 'eu', slug: 'widget', title: 'Widget' }),
+            product({ id: 'b', region: 'us', slug: 'only-us', title: 'Only Us' }),
+            product({ id: 'c', region: 'eu', slug: 'gadget-eu', title: 'Gadget' }),
+            product({ id: 'd', region: 'us', slug: 'gadget-us', title: 'Gadget' }),
+            product({ id: 'e', region: 'jp', slug: 'gadget', title: 'Gadget' }),
+          ],
+        }),
+      },
+      'GET /v1/products/us/widget/specs': { body: specsResponse() },
+      'GET /v1/products/eu/widget/specs': { body: specsResponse({ region: 'eu' }) },
+      'GET /v1/products/us/only-us/specs': { body: specsResponse({ slug: 'only-us', title: 'Only Us' }) },
+      'GET /v1/history?days=90': { body: historyResponse() },
+    })
+  }
+
+  it('jumps to the same product in the new region', async () => {
+    serve()
+    const { router } = renderRoute('/p/us/widget')
+    await screen.findByRole('heading', { level: 1, name: 'Widget' })
+    await userEvent.click(screen.getByRole('combobox', { name: 'Store region' }))
+    await userEvent.click(screen.getByRole('option', { name: /Europe/ }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/p/eu/widget'))
+  })
+
+  it('lists the regions that do sell the product when the new one does not, each as good as choosing it from the dropdown', async () => {
+    serve()
+    const { router } = renderRoute('/p/us/only-us')
+    await screen.findByRole('heading', { level: 1, name: 'Only Us' })
+    await userEvent.click(screen.getByRole('combobox', { name: 'Store region' }))
+    await userEvent.click(screen.getByRole('option', { name: /Japan/ }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Only Us is not available in Japan. It is available in the following regions:')
+    const links = within(alert).getAllByRole('link')
+    expect(links.map((l) => l.textContent)).toEqual(['United States'])
+    await userEvent.click(links[0]!)
+    expect(await screen.findByRole('heading', { level: 1, name: 'Only Us' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/p/us/only-us')
+  })
+
+  it('does not jump just because the page was opened in a region other than the chosen one', async () => {
+    serve()
+    const { router } = renderRoute('/p/eu/widget')
+    await screen.findByRole('heading', { level: 1, name: 'Widget' })
+    expect(router.state.location.pathname).toBe('/p/eu/widget')
   })
 })
