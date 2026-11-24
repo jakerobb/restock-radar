@@ -11,6 +11,7 @@ import type { Powering } from '../lib/powering'
 import { formatSpeed } from '../lib/requirements'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { PlanRegionNotice } from './PlanRegionNotice'
 import { Card } from './ui/Card'
 
 /** "PoE+ · 30 W · 1 GbE": what an injector gives. */
@@ -76,6 +77,7 @@ export function InjectorFinder({ plan, products, derived, powering, onAdd, onClo
           Close
         </button>
       </div>
+      <PlanRegionNotice refs={plan.map((l) => l.view.line.ref)} />
       <p className="mt-1 text-sm text-muted">
         {found.devices === 1 ? 'One device has' : `${found.devices} devices have`} no port with the PoE class and power it needs on a switch. An injector goes between a switch port and the device, so each takes a port of the switch and a wall outlet. Only injectors of a high enough class are listed; one slower than a device's own port says so.
       </p>

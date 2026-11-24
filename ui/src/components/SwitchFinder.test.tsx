@@ -1,11 +1,14 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { productsResponse } from '../test/fixtures'
+import { renderWithClient, stubFetch } from '../test/render'
 import { SwitchFinder } from './SwitchFinder'
 
 describe('SwitchFinder', () => {
   it('offers hot-swappable power supplies below the power methods, and only while AC is accepted', async () => {
     const user = userEvent.setup()
-    render(<SwitchFinder plan={[]} products={[]} derived={[]} onAdd={() => {}} onClose={() => {}} />)
+    stubFetch({ 'GET /v1/products': { body: productsResponse() } })
+    renderWithClient(<SwitchFinder plan={[]} products={[]} derived={[]} onAdd={() => {}} onClose={() => {}} />)
     const crps = () => screen.queryByRole('checkbox', { name: /Hot-swappable power supplies/ })
     expect(screen.getByRole('checkbox', { name: 'AC' })).toBeChecked() // AC and PoE are the defaults
     expect(crps()).toBeInTheDocument()

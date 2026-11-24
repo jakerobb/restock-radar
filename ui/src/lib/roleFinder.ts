@@ -61,11 +61,10 @@ export function findRoles(fullPlan: DerivedLine[], rows: CatalogRow[], products:
   const missing = missingOf(plan)
   const hostable = missing.filter((r): r is HostedRole => (HOSTED_ROLES as readonly Role[]).includes(r))
   if (missing.length === 0) return { missing, hostable, options: [], all: [] }
-  const regions = new Set(plan.flatMap((l) => (l.view.product ? [l.view.product.region] : [])))
   const gone = new Set(replaces.map((l) => l.view.line.ref))
 
   const cands = rows
-    .filter((r) => !gone.has(refOf(r)) && (regions.size === 0 || regions.has(r.product.region)) && missing.some((role) => fills(r.product, r.derived, role)) && acceptsRow(r, filters, products))
+    .filter((r) => !gone.has(refOf(r)) && missing.some((role) => fills(r.product, r.derived, role)) && acceptsRow(r, filters, products))
     .flatMap((row) => {
       const line = lineFor(row.product, 1)
       if (!line) return []

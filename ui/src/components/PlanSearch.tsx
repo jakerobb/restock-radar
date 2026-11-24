@@ -6,6 +6,7 @@ import { formatPrice } from '../lib/format'
 import { defaultVariant, lineFor, type PlanLine } from '../lib/plan'
 import { cn } from '../lib/cn'
 import { Dialog } from './Dialog'
+import { PlanRegionNotice } from './PlanRegionNotice'
 import { Badge } from './ui/Badge'
 import { TextInput } from './ui/TextInput'
 
@@ -25,7 +26,7 @@ export function searchProducts(products: Product[], query: string): Product[] {
 }
 
 /** A quick search over the catalogue; picking a result (click, or arrows and Enter) adds it to the plan. Esc closes it. */
-export function PlanSearch({ products, inPlan, onAdd, onClose }: { products: Product[]; inPlan: (ref: string) => number; onAdd: (line: PlanLine) => void; onClose: () => void }) {
+export function PlanSearch({ products, inPlan, refs, onAdd, onClose }: { products: Product[]; inPlan: (ref: string) => number; /** What the plan holds, "region/slug" each. */ refs: string[]; onAdd: (line: PlanLine) => void; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [added, setAdded] = useState<string | null>(null)
@@ -62,6 +63,7 @@ export function PlanSearch({ products, inPlan, onAdd, onClose }: { products: Pro
 
   return (
     <Dialog title="Add a product" onClose={onClose}>
+      <PlanRegionNotice refs={refs} />
       <TextInput
         data-autofocus
         className="w-full"

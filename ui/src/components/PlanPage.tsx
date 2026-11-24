@@ -6,7 +6,8 @@ import { useMediaQuery } from '../hooks/useMediaQuery'
 import { usePlan } from '../hooks/usePlan'
 import { useRegion } from '../hooks/useRegion'
 import { inRegion, regionName } from '../lib/region'
-import { planRegionState } from '../lib/regionMismatch'
+import { planRegionState, refRegion } from '../lib/regionMismatch'
+import { convertPlan } from '../lib/convertPlan'
 import { productRef } from '../lib/compare'
 import { DRIVE_SIZES_TB, driveBays, driveOf } from '../lib/nvrStorage'
 import { formatPrice, totalCents } from '../lib/format'
@@ -117,8 +118,8 @@ interface DriveChoice {
   options: { product: Product; tb: number }[]
 }
 
-function LineRow({ view, editable, linked, power, drives }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null; drives: DriveChoice | null }) {
-  const { lines, remove, changeQty, changeOwned, switchVariant, addOn, swapProduct, power: choosePower } = usePlan()
+function LineRow({ view, editable, replacement, linked, power, drives }: { view: LineView; editable: boolean; /** The line as the plan's own region sells it, when this one is from another and there is such a thing. */ replacement: { line: PlanLine; region: string } | null; linked: { product: Product; label?: string }[]; power: PowerChoice | null; drives: DriveChoice | null }) {
+  const { lines, remove, changeQty, changeOwned, switchVariant, addOn, swapProduct, moveLine, power: choosePower } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
@@ -155,6 +156,11 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
             </Select>
           ) : (
             <div className="text-xs text-muted">{variant?.title || line.sku}</div>
+          )}
+          {editable && replacement && (
+            <button type="button" className="mt-1 block cursor-pointer text-left text-xs text-accent underline underline-offset-2" onClick={() => moveLine(key, replacement.line)}>
+              Replace with {regionName(replacement.region)} equivalent
+            </button>
           )}
           {product && editable && power && (
             <Select
@@ -516,6 +522,12 @@ export default function PlanPage() {
   const views = useMemo(() => lines.map((l) => viewLine(l, products)), [lines, products])
   const totals = useMemo(() => planTotals(views), [views])
   const regionState = useMemo(() => planRegionState(lines.map((l) => l.ref), region), [lines, region])
+  // In a plan that mixes stores, a line from one other than the plan's main one can be swapped for what that sells, where it sells it.
+  const replacementOf = (line: PlanLine): { line: PlanLine; region: string } | null => {
+    if (regionState.kind !== 'mixed' || refRegion(line.ref) === regionState.region || !productData) return null
+    const to = convertPlan([line], {}, productData.products, regionState.region).lines[0]
+    return to ? { line: to, region: regionState.region } : null
+  }
   const derivedLines = useMemo(() => {
     const byRef = new Map((derived ?? []).map((d) => [`${d.region}/${d.slug}`, d]))
     return views.map((view) => ({ view, derived: byRef.get(view.line.ref) ?? null, gap: specsGapOf(view.product, gaps) }))
@@ -616,7 +628,7 @@ export default function PlanPage() {
         </RegionBanner>
       )}
       {searching && productData && (
-        <PlanSearch products={offered} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
+        <PlanSearch products={offered} refs={lines.map((l) => l.ref)} inPlan={(ref) => mine.lines.filter((l) => l.ref === ref).reduce((n, l) => n + l.qty, 0)} onAdd={mine.add} onClose={() => setSearching(false)} />
       )}
 
       {shared && decoded === null && (
@@ -687,7 +699,7 @@ export default function PlanPage() {
               </thead>
               <tbody>
                 {derivedLines.map(({ view: v, derived: d }) => (
-                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} drives={driveChoiceOf(d, v.product, products)} power={powerChoiceOf({ view: v, derived: d }, powering, products, derived ?? [])} linked={(v.product?.linked ?? []).flatMap((l) => {
+                  <LineRow key={lineKey(v.line)} view={v} editable={!shared} replacement={replacementOf(v.line)} drives={driveChoiceOf(d, v.product, products)} power={powerChoiceOf({ view: v, derived: d }, powering, products, derived ?? [])} linked={(v.product?.linked ?? []).flatMap((l) => {
                     const p = products.get(`${v.product!.region}/${l.slug}`)
                     return p ? [{ product: p, label: l.label }] : []
                   })} />
