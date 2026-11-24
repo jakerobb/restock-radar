@@ -5,7 +5,6 @@ package unistore
 
 import (
 	"bufio"
-	"cmp"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
@@ -469,7 +468,12 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 		if v.ID == "" || v.Status == "" {
 			return nil, fmt.Errorf("%w: variant of %q missing id or status", ErrSchema, raw.Slug)
 		}
-		pv := Variant{ID: v.ID, SKU: v.SKU, Title: cmp.Or(optionLabel(raw, v.OptionValueIDs), v.Title), Status: v.Status}
+		label, resolved := optionLabel(raw, v.OptionValueIDs)
+		title := label
+		if !resolved {
+			title = v.Title
+		}
+		pv := Variant{ID: v.ID, SKU: v.SKU, Title: title, Status: v.Status}
 		pv.Price = money(v.Price)
 		pv.RegularPrice = money(v.RegularPrice)
 		pv.PriceWithSurcharges = money(v.PriceWithSurcharges)
@@ -484,18 +488,25 @@ func convertProduct(raw *rawProduct) (*Product, error) {
 // optionLabel names a variant by the option values it picks, in the store's
 // option order ("White / 0.2 m / 10-Pack"). Both endpoints carry the options, so
 // unlike the variant's own title, which only the product endpoint has, this reads
-// the same whichever one we asked. It is empty when the ids resolve to nothing.
-func optionLabel(raw *rawProduct, ids []string) string {
+// the same whichever one we asked. An option with a single value is left out: it
+// tells variants nothing apart ("White" on a cabinet sold only in white), and
+// the product's own title says what does. resolved is false when the ids match
+// no option value, so the caller falls back to the store's title; it is true,
+// with an empty label, when every value picked was a lone one.
+func optionLabel(raw *rawProduct, ids []string) (label string, resolved bool) {
 	var parts []string
 	for _, o := range raw.Options {
 		for _, val := range o.Values {
 			if val.Title != "" && slices.Contains(ids, val.ID) {
-				parts = append(parts, val.Title)
+				resolved = true
+				if len(o.Values) > 1 {
+					parts = append(parts, val.Title)
+				}
 				break
 			}
 		}
 	}
-	return strings.Join(parts, " / ")
+	return strings.Join(parts, " / "), resolved
 }
 
 func money(m *rawMoney) *Money {
