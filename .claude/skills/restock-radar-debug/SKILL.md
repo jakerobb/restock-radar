@@ -1,6 +1,6 @@
 ---
 name: restock-radar-debug
-description: Investigate a problem with the deployed Restock Radar (not fetching, missing or wrong notifications, stale stock or price, a product not tracked, odd data). Use before touching the cluster, to pick the right way in.
+description: Investigate or query the deployed Restock Radar, whether something is wrong (not fetching, missing or wrong notifications, stale stock or price, a product not tracked, odd data) or you just want to know something from its data (which product was seen first, price or stock history, what's tracked, how many). Use before touching the cluster or its database, to pick the right way in.
 ---
 
 # Debugging the deployed Restock Radar
