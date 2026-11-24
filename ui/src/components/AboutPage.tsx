@@ -16,8 +16,8 @@ export default function AboutPage() {
                     <h2 className="font-semibold">What is Restock Radar?</h2>
                     <p className="mt-2">
                         Restock Radar is a passion project by <a href="https://jakerobb.dev">Jake Robb</a>. It does cost
-                        me a bit of money to operate, and I would appreciate contributions from anyone who wants to help. I do not
-                        currently have a way to accept them, but I will explore options at some point in the future.
+                        me a bit of money to operate, and I would appreciate anyone who wants to contribute. I do not
+                        currently have a way to accept money, but I will explore options at some point in the future.
                     </p>
                     <p className="mt-2">
                         Initially, it was intended to be a stock tracker for the Ubiquiti UniFi online store, which was
@@ -49,17 +49,17 @@ export default function AboutPage() {
                     <p className="mt-2">
                         Frankly, I haven&apos;t asked. I hope they don&apos;t mind! I&apos;ve done my best to build this
                         in a way that burdens their web servers as little as possible. My hope is that this improves the
-                        experience of anyone who&apos;s trying to put together a system, and that Ubiquiti sees it as a net
-                        benefit to their customers. My primary goal is to help.
+                        experience of anyone who&apos;s trying to put together a system, and that Ubiquiti sees it as a
+                        net benefit to their customers. My primary goal is to help.
                     </p>
                     <p className="mt-2">
-                        To Ubiquiti: if anyone is reading this and takes issue with what I&apos;m doing, please feel free to
-                        reach out. I&apos;m <a href="https://www.reddit.com/user/itsjakerobb/">u/itsjakerobb on
+                        To Ubiquiti: if anyone is reading this and takes issue with what I&apos;m doing, please feel
+                        free to reach out. I&apos;m <a href="https://www.reddit.com/user/itsjakerobb/">u/itsjakerobb on
                         Reddit</a>; DMs are open. I&apos;m also{' '}
                         <a href="https://community.ui.com/user/jakerobb2/4a08cd51-978d-4228-aa48-2d73343f05fa">
                             jakerobb2 on the UI Community Forums
                         </a>. Or, if you love what I&apos;m doing and want to talk about integrating it into your own
-                        offerings, reach out for that, too. Whatever the reason, I&apos;m happy to discuss.
+                        offerings. Whatever &mdash; I&apos;m happy to discuss.
                     </p>
                 </Card>
 
@@ -70,8 +70,8 @@ export default function AboutPage() {
                         years. I&apos;ve done it the hard way, and I&apos;ve done it the easy way. In 2026,
                         it&apos;s <em>much</em> faster for me to let an LLM write code and tests while I act as reviewer
                         and product manager. I know what I want and how it should be done; I describe that to the model,
-                        review the output, and provide feedback if I have any. Repeat until it meets my requirements and
-                        expectations.
+                        review the output, and provide feedback if I have any. Repeat until it satisfies my desires and
+                        meets my expectations.
                     </p>
                     <p className="mt-2">
                         It&apos;s a very different approach to building software than what I&apos;m used to, but
