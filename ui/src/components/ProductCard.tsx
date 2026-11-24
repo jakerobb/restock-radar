@@ -48,8 +48,9 @@ export function ProductCard({ product, showRegion, history, onPage = false }: Pr
             <ExternalLinkIcon />
           </a>
           {product.techspecs_url && (
-            <a className="text-accent underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
+            <a className="inline-flex items-center gap-1 text-accent underline-offset-2 hover:underline" href={product.techspecs_url} target="_blank" rel="noopener noreferrer">
               Tech specs
+              <ExternalLinkIcon />
             </a>
           )}
         </div>
