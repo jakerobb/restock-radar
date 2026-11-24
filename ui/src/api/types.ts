@@ -20,6 +20,8 @@ export interface Variant {
   restock_eta?: string
   last_checked: string
   last_changed: string
+  /** What happened at last_changed ("Back in stock", "Price increased"); absent when unknown. */
+  last_change?: string
   /** When the variant was first seen, i.e. when it started being tracked. */
   first_seen: string
   /** Client-side only: the tags of the member product this variant came from, set when products are grouped by collection. */
