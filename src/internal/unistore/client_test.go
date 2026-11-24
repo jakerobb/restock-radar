@@ -362,6 +362,40 @@ func TestVariantTitleFromOptions(t *testing.T) {
 	}
 }
 
+// A single-value option (the 12U cabinets are only sold in white) says nothing about a variant, and
+// the product endpoint's own title for it ("White") must not creep back in, or the two endpoints disagree.
+func TestVariantTitleIgnoresSingleValueOptions(t *testing.T) {
+	var raw rawProduct
+	js := `{"id":"p","slug":"uacc-rack-12u-wall-sw-g","options":[
+		{"title":"Color","values":[{"id":"w","title":"White"}]}],
+		"variants":[{"id":"v1","sku":"UACC-Rack-12U-Wall-SW-G","title":"White","status":"Available","optionValueIds":["w"]}]}`
+	if err := json.Unmarshal([]byte(js), &raw); err != nil {
+		t.Fatal(err)
+	}
+	p, err := convertProduct(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Variants[0].Title; got != "" {
+		t.Errorf("title = %q, want empty (the lone Color option is no distinction)", got)
+	}
+	// With a second option that does vary, the lone one is still left out.
+	raw = rawProduct{}
+	js = `{"id":"p","slug":"s","options":[
+		{"title":"Color","values":[{"id":"w","title":"White"}]},
+		{"title":"Length","values":[{"id":"1","title":"1 m"},{"id":"2","title":"2 m"}]}],
+		"variants":[{"id":"v1","sku":"S-1","status":"Available","optionValueIds":["w","2"]}]}`
+	if err := json.Unmarshal([]byte(js), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if p, err = convertProduct(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Variants[0].Title; got != "2 m" {
+		t.Errorf("title = %q, want %q", got, "2 m")
+	}
+}
+
 func TestConvertProductLinkedProducts(t *testing.T) {
 	var raw rawProduct
 	err := json.Unmarshal([]byte(`{"id":"p1","slug":"ucg-fiber","name":"GW","title":"Gateway",

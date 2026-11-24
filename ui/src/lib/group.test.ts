@@ -71,4 +71,31 @@ describe('groupProducts', () => {
     const b = product({ id: 'b', title: 'Power Distribution Hi-Density', collection: 'c' })
     expect(groupProducts([a, b])).toEqual([a, b])
   })
+  describe('when variants would share a name', () => {
+    const cabinet = (slug: string, title: string, sku: string) =>
+      product({ id: slug, slug, title, short_title: '12U Rack Cabinet', collection: 'racks', group: '12U Rack Cabinets', variants: [variant({ id: `v-${slug}`, sku, title: '' })] })
+    const racks = [
+      cabinet('450-g', '12U Rack Cabinet, 450 mm, Glass Door', 'R-450-G'),
+      cabinet('450-p', '12U Rack Cabinet, 450 mm, Perforated Door', 'R-450-P'),
+      cabinet('sw-g', '12U Rack Cabinet, Swing, Glass Door', 'R-SW-G'),
+      cabinet('sw-p', '12U Rack Cabinet, Swing, Perforated Door', 'R-SW-P'),
+    ]
+    it('tells them apart by the full titles, keeping the group’s short name', () => {
+      const g = groupProducts(racks)[0]!
+      expect(g.title).toBe('12U Rack Cabinet')
+      expect(g.variants.map((v) => v.title)).toEqual(['450 mm, Glass Door', '450 mm, Perforated Door', 'Swing, Glass Door', 'Swing, Perforated Door'])
+    })
+    it('leaves groups whose short titles already differ alone, whatever their full titles say', () => {
+      const cover = (id: string, short: string, title: string) =>
+        product({ id, slug: id, title, short_title: short, collection: 'covers', group: 'Covers', variants: [variant({ id: `v-${id}`, title: 'Black' })] })
+      const g = groupProducts([cover('a', 'U6+ Cover', 'Lite Cover'), cover('b', 'U7 Cover', 'U7 Paintable Cover')])[0]!
+      expect(g.variants.map((v) => v.title)).toEqual(['U6+ Cover \u2013 Black', 'U7 Cover \u2013 Black'])
+    })
+    it('falls back to the SKU where the titles give nothing either', () => {
+      const flush = (id: string, sku: string) =>
+        product({ id, slug: id, title: 'Flush Mount', short_title: 'Flush Mount', collection: 'f', group: 'Flush Mounts', variants: [variant({ id: `v-${id}`, sku, title: 'Black' })] })
+      const g = groupProducts([flush('a', 'FM-B'), flush('b', 'FMS-B')])[0]!
+      expect(g.variants.map((v) => v.title)).toEqual(['Black (FM-B)', 'Black (FMS-B)'])
+    })
+  })
 })

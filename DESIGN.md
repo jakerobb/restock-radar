@@ -64,8 +64,14 @@ the design assumes failure is normal and loud (see Failure handling).
 - **Variant names.** A variant's title is built from the product's `options`
   and the variant's `optionValueIds` ("White / 0.2 m / 10-Pack"), because the
   store's own variant `title` exists only on the product endpoint and the
-  category endpoint would blank it. Where the ids resolve to nothing, the
-  store's title is used.
+  category endpoint would blank it. An option with a single value ("Color:
+  White" on a cabinet sold only in white) is left out, as it tells variants
+  nothing apart. Where the ids resolve to nothing, the store's title is used.
+  When products merge into one card, each variant is named for its product's
+  short title less the group's shared prefix; where that leaves two variants
+  with the same name (the 12U cabinets all share "12U Rack Cabinet"), the full
+  titles ("450 mm, Glass Door") name them instead, and a SKU in parentheses
+  covers what is still the same.
 - **Product details.** Only the product endpoint carries `category.breadcrumbs`,
   whose titles ("UniFi Patch Cables") are the store's own grouping of products
   within a collection; we store the one containing each product as its group,
