@@ -48,6 +48,7 @@ function CartSection({ cart, name }: { cart: StoreCart; name: string }) {
           {cart.items.map((it) => (
             <li key={it.id}>
               {it.qty} × {it.title} <span className="text-muted">({it.sku})</span>
+              {it.owned ? <span className="text-muted"> — you already have {it.owned}</span> : null}
             </li>
           ))}
         </ul>

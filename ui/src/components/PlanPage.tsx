@@ -116,7 +116,7 @@ interface DriveChoice {
 }
 
 function LineRow({ view, editable, linked, power, drives }: { view: LineView; editable: boolean; linked: { product: Product; label?: string }[]; power: PowerChoice | null; drives: DriveChoice | null }) {
-  const { lines, remove, changeQty, switchVariant, addOn, swapProduct, power: choosePower } = usePlan()
+  const { lines, remove, changeQty, changeOwned, switchVariant, addOn, swapProduct, power: choosePower } = usePlan()
   const { line, product, variant } = view
   const key = lineKey(line)
   const state = STATE[view.state]
@@ -249,6 +249,22 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
             })}
           </Select>
         )}
+        {editable ? (
+          <Select
+            className="mt-1 block max-w-64 py-1 text-sm"
+            aria-label={`How many of ${product?.title ?? line.ref} you already own`}
+            value={line.owned ?? 0}
+            onChange={(e) => changeOwned(key, Number(e.target.value))}
+          >
+            {Array.from({ length: line.qty + 1 }, (_, n) => (
+              <option key={n} value={n}>
+                {n === 0 ? 'None owned yet' : n === line.qty ? (line.qty === 1 ? 'Already owned' : `All ${n} already owned`) : `${n} of ${line.qty} already owned`}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          line.owned ? <div className="text-xs text-muted">{line.owned >= line.qty ? 'Already owned' : `${line.owned} of ${line.qty} already owned`}</div> : null
+        )}
       </td>
       <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
         {view.unitCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.unitCents, view.currency)}
@@ -263,7 +279,7 @@ function LineRow({ view, editable, linked, power, drives }: { view: LineView; ed
       </td>
       <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{view.totalCents === null ? <span className="text-muted">n/a</span> : formatPrice(view.totalCents, view.currency)}</td>
       <td className="px-2 py-2 whitespace-nowrap">
-        <Badge tone={state.tone}>{state.label}</Badge>
+        {view.buy === 0 ? <Badge tone="neutral">Owned</Badge> : <Badge tone={state.tone}>{state.label}</Badge>}
       </td>
       {editable && (
         <td className="px-2 py-2 text-right">
@@ -721,7 +737,7 @@ export default function PlanPage() {
                           <ul className="mt-1 list-disc space-y-1 pl-5">
                             {c.stock.items.map((v) => (
                               <li key={lineKey(v.line)}>
-                                {v.line.qty > 1 && `${v.line.qty} × `}
+                                {v.buy > 1 && `${v.buy} × `}
                                 {v.product?.title ?? v.line.ref}
                                 <Badge tone={STATE[v.state].tone} className="ml-1.5">
                                   {STATE[v.state].label}

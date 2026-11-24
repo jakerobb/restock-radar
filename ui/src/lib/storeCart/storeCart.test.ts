@@ -51,6 +51,17 @@ describe('storeCarts', () => {
   })
 })
 
+describe('what is already owned', () => {
+  const p = product({ slug: 'ap', title: 'AP', url: 'https://store.ui.com/us/en/products/ap', variants: [variant({ id: U(1), sku: 'AP-A', title: 'AP' }), variant({ id: U(2), sku: 'AP-B', title: 'AP B', status: 'SoldOut' })] })
+  const map = new Map([['us/ap', p]])
+
+  it('buys only what isn’t owned, and leaves out what is all owned, even when sold out', () => {
+    const [cart] = storeCarts([viewLine({ ...lineFor(p, 3)!, sku: 'AP-A', owned: 1 }, map), viewLine({ ...lineFor(p, 2)!, sku: 'AP-B', owned: 2 }, map)])
+    expect(cart?.items).toEqual([{ id: U(1), sku: 'AP-A', title: 'AP', qty: 2, owned: 1 }])
+    expect(cart?.skipped).toEqual([{ title: 'AP (AP B)', why: 'already owned' }])
+  })
+})
+
 describe('the plan handed over', () => {
   it('is compact, and the store link carries it in the fragment, which is never sent to a server', () => {
     const items = [{ id: U(1), sku: 'U7-Pro-US', title: 'U7 Pro', qty: 2 }]

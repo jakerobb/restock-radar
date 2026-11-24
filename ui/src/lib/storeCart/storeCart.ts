@@ -17,7 +17,10 @@ export interface CartItem {
   sku: string
   /** What it is, for this page's list; the bookmarklet shows the SKU. */
   title: string
+  /** How many to buy: the plan's quantity less what is already owned. */
   qty: number
+  /** How many of the plan's quantity are already owned, so not here. */
+  owned?: number
 }
 
 /** A store's share of a plan: the cart is the visitor's at that store alone, and its ids belong to it. */
@@ -55,8 +58,10 @@ export function storeCarts(views: LineView[]): StoreCart[] {
     }
     if (!cart.origin && v.product?.url) Object.assign(cart, storeWhere(v.product.url))
     const title = v.variant ? `${v.product?.title ?? v.line.sku}${v.variant.title && v.variant.title !== v.product?.title ? ` (${v.variant.title})` : ''}` : (v.product?.title ?? v.line.sku)
-    if (v.state === 'in' && v.variant && UUID.test(v.variant.id)) {
-      cart.items.push({ id: v.variant.id, sku: v.variant.sku, title, qty: v.line.qty })
+    if (v.buy === 0) {
+      cart.skipped.push({ title, why: 'already owned' })
+    } else if (v.state === 'in' && v.variant && UUID.test(v.variant.id)) {
+      cart.items.push({ id: v.variant.id, sku: v.variant.sku, title, qty: v.buy, ...(v.buy < v.line.qty ? { owned: v.line.qty - v.buy } : {}) })
     } else {
       cart.skipped.push({ title, why: WHY[v.state] ?? 'not available' })
     }

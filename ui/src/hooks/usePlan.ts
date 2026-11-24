@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { addLine, changeVariant, ensureQty, lineFor, removeLine, replaceLine, setAddOn, setQty, type PlanLine } from '../lib/plan'
+import { addLine, changeVariant, ensureQty, lineFor, removeLine, replaceLine, setAddOn, setOwned, setQty, type PlanLine } from '../lib/plan'
 import { createPlan, deletePlan, getActiveId, getHosting, getPlan, getPlanName, getPlans, getPowering, renamePlan, selectPlan, setHosting, setPlan, setPowering, subscribePlan } from '../lib/planStore'
 import type { Powering } from '../lib/powering'
 import type { Hosting, HostedRole, HostedWhere } from '../lib/roles'
@@ -16,6 +16,7 @@ export function usePlan() {
   const add = useCallback((line: PlanLine) => setPlan(addLine(getPlan(), line)), [])
   const remove = useCallback((key: string) => setPlan(removeLine(getPlan(), key)), [])
   const changeQty = useCallback((key: string, qty: number) => setPlan(setQty(getPlan(), key, qty)), [])
+  const changeOwned = useCallback((key: string, owned: number) => setPlan(setOwned(getPlan(), key, owned)), [])
   const switchVariant = useCallback((key: string, v: Variant) => setPlan(changeVariant(getPlan(), key, v)), [])
   /** Picks which of a product's linked products sits in the plan with it (none, with null). */
   const addOn = useCallback((options: Product[], chosen: Product | null, qty: number) => setPlan(setAddOn(getPlan(), options, chosen, qty)), [])
@@ -42,5 +43,5 @@ export function usePlan() {
     else delete next[role]
     setHosting(next)
   }, [])
-  return { name, plans, activeId, rename: renamePlan, select: selectPlan, create: createPlan, destroy: deletePlan, lines, hosting, powering, power, swapProduct, add, remove, changeQty, switchVariant, addOn, replace, host }
+  return { name, plans, activeId, rename: renamePlan, select: selectPlan, create: createPlan, destroy: deletePlan, lines, hosting, powering, power, swapProduct, add, remove, changeQty, changeOwned, switchVariant, addOn, replace, host }
 }

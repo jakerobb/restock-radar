@@ -872,6 +872,7 @@ export function planChecks(lines: DerivedLine[], hosting: Hosting = {}, powering
  */
 function stockCheck(lines: DerivedLine[], unavailable: PlanCheck[]): PlanCheck[] {
   if (lines.length === 0) return []
+  // A line that is all owned counts as in stock (see viewLine), so only what is still to be bought is listed.
   const out = lines.map((l) => l.view).filter((v) => v.state !== 'in')
   if (out.length === 0) return [{ id: 'stock', label: 'Stock', verdict: 'info', text: 'Everything in the plan is in stock.' }]
   const poe = unavailable.some((c) => c.shortfall)

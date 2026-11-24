@@ -1,4 +1,4 @@
-import { setAddOn, variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, MAX_NAME, cleanName, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setQty, viewLine, type PlanLine } from './plan'
+import { setAddOn, variantsByNum, addLine, decodePlan, encodePlan, MAX_SLUG, MAX_NAME, cleanName, changeVariant, defaultVariant, lineFor, lineKey, MAX_LINES, MAX_QTY, parseLine, parsePlan, planTotals, removeLine, serializeLine, setOwned, setQty, viewLine, type PlanLine } from './plan'
 import { product, variant } from '../test/fixtures'
 
 const line = (over: Partial<PlanLine> = {}): PlanLine => ({ ref: 'us/widget', sku: 'SKU-1', qty: 1, addedCents: 10900, ...over })
@@ -226,5 +226,46 @@ describe('pricing a plan against the catalogue', () => {
     const t = planTotals([line({ qty: 2 }), line({ sku: 'SKU-2' }), line({ sku: 'SKU-3' }), line({ ref: 'eu/widget' })].map((l) => viewLine(l, eu)))
     expect(t.sums).toEqual([{ currency: 'USD', cents: 25000 + 8000 }, { currency: 'EUR', cents: 1000 }])
     expect(t).toMatchObject({ unpriced: 1, items: 5 })
+  })
+})
+
+describe('lines that are already owned', () => {
+  const a = product({ slug: 'a', variants: [variant({ sku: 'A', num: 5, price_cents: 1000, price_with_surcharges_cents: 1000 }), variant({ sku: 'A-OUT', num: 6, status: 'SoldOut', price_cents: 1000, price_with_surcharges_cents: 1000 })] })
+  const products = new Map([['us/a', a]])
+
+  it('prices and stock-checks only what is left to buy', () => {
+    const v = viewLine(line({ ref: 'us/a', sku: 'A', qty: 3, owned: 1 }), products)
+    expect(v).toMatchObject({ buy: 2, totalCents: 2000, state: 'in' })
+    expect(viewLine(line({ ref: 'us/a', sku: 'A-OUT', qty: 3, owned: 1 }), products)).toMatchObject({ buy: 2, state: 'out' })
+    // All owned: nothing to buy, so sold out (or gone) doesn't matter.
+    expect(viewLine(line({ ref: 'us/a', sku: 'A-OUT', qty: 2, owned: 2 }), products)).toMatchObject({ buy: 0, totalCents: 0, state: 'in', wasCents: null })
+    expect(viewLine(line({ ref: 'us/a', sku: 'GONE', qty: 1, owned: 1 }), products).state).toBe('in')
+  })
+
+  it('is kept in saved text, tolerating text from before it, and never exceeds the quantity', () => {
+    const l = line({ ref: 'us/a', sku: 'A', qty: 3, owned: 2 })
+    expect(serializeLine(l)).toBe('us/a:A:3:10900:2')
+    expect(parseLine(serializeLine(l))).toEqual(l)
+    expect(parseLine('us/a:A:3:10900')).toEqual(line({ ref: 'us/a', sku: 'A', qty: 3 }))
+    expect(parseLine('us/a:A:3:10900:9')?.owned).toBe(3)
+    expect(parseLine('us/a:A:3:10900:x')).toBeNull()
+  })
+
+  it('round-trips in a share link, in any order, clamped to the quantity', () => {
+    const b = product({ slug: 'b', variants: [variant({ sku: 'B', num: 7 })] })
+    const lines = [line({ ref: 'us/a', sku: 'A', qty: 3, owned: 1 }), line({ ref: 'us/b', sku: 'B', qty: 2 })]
+    const decoded = decodePlan(encodePlan(lines, [a, b], {}, { [lineKey(lines[1]!)]: 9 }), [a, b])!
+    expect(decoded.lines.map((l) => [l.qty, l.owned])).toEqual([[3, 1], [2, undefined]])
+    expect(decoded.powering).toEqual({ [lineKey(lines[1]!)]: 9 })
+    expect(decodePlan(encodePlan([{ ...lines[0]!, owned: 3 }], [a]), [a])!.lines[0]?.owned).toBe(3)
+  })
+
+  it('stays within the quantity when either changes, and adds up when lines merge', () => {
+    const plan = [line({ ref: 'us/a', sku: 'A', qty: 3, owned: 2 })]
+    const key = lineKey(plan[0]!)
+    expect(setQty(plan, key, 1)[0]?.owned).toBe(1)
+    expect(setOwned(plan, key, 9)[0]?.owned).toBe(3)
+    expect(setOwned(plan, key, 0)[0]).not.toHaveProperty('owned')
+    expect(addLine(plan, line({ ref: 'us/a', sku: 'A', qty: 2, owned: 1 }))[0]).toMatchObject({ qty: 5, owned: 3 })
   })
 })
