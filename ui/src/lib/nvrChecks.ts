@@ -47,6 +47,10 @@ export interface NvrStats {
   unplaced: number
   /** Capacity left across the NVRs, in whole NVRs' worth (0.45 is 45% of one). */
   spare: number
+  /** The class `room` is counted in: the highest resolution among the plan's cameras (4K when none is known). */
+  benchmark: CameraClass
+  /** How many more cameras of the `benchmark` class the NVRs have room for. */
+  room: number
 }
 
 const pct = (f: number) => `${Math.round(f * 100)}%`
@@ -120,7 +124,9 @@ export function nvrCheck(lines: DerivedLine[]): PlanCheck[] {
     }
   }
   const spare = units.reduce((n, u) => n + Math.max(0, 1 - u.used), 0)
-  const stats: NvrStats = { unplaced, spare }
+  const benchmark: CameraClass = CAMERA_CLASSES.find((c) => counts[c] > 0) ?? '4k' // CAMERA_CLASSES runs highest first
+  const room = units.reduce((n, u) => n + (u.caps[benchmark] === undefined ? 0 : Math.floor(Math.max(0, 1 - u.used) * u.caps[benchmark]! + EPS)), 0)
+  const stats: NvrStats = { unplaced, spare, benchmark, room }
   const many = units.length > 1
   const spilled = units.filter((u) => u.used > 0).length > 1
   const spillNote = " Cameras are spread over several NVRs, which works, but they share no facial recognition data, alarm settings or the like."

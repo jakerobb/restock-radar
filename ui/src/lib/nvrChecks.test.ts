@@ -74,7 +74,15 @@ describe('the NVR check', () => {
     const c = find(s, ['unvr', 1], ['c4k', 4], ['c2k', 10])
     expect(c).toMatchObject({ verdict: 'ok', text: '14 cameras use 56% of the NVR’s capacity.' }) // 4/18 + 10/30
     expect(c?.nvr?.spare).toBeCloseTo(1 - 4 / 18 - 10 / 30)
+    expect(c?.nvr).toMatchObject({ benchmark: '4k', room: 8 }) // 44% of 18 4K cameras
     expect(c?.detail?.[0]?.rows[0]).toBe('4 × 4K, 10 × 2K: 56% of its camera capacity used, 44% left')
+  })
+
+  it('counts the room left in the highest class among the cameras in the plan: 2K alone, a mix up to 4K, and 4K when no resolution is known', () => {
+    const s = setup([UNVR, cam('c4k', 8.3), cam('c2k', 4), cam('cunk', null)])
+    expect(find(s, ['unvr', 1], ['c2k', 10])?.nvr).toMatchObject({ benchmark: '2k', room: 20 }) // 2/3 of 30
+    expect(find(s, ['unvr', 1], ['c2k', 10], ['c4k', 1])?.nvr).toMatchObject({ benchmark: '4k', room: 11 }) // 1 - 10/30 - 1/18 = 0.611 of 18
+    expect(find(s, ['unvr', 1], ['cunk', 3])?.nvr).toMatchObject({ benchmark: '4k', room: 18 })
   })
 
   it('flags cameras the NVR has no room for', () => {
@@ -169,29 +177,28 @@ describe('findNvrs', () => {
   const small = nvr('small', 20000, [15, 8, 6])
   const big = nvr('big', 100000, [100, 70, 50])
   const gone = nvr('gone', 10000, [60, 30, 18], {}, 'SoldOut')
-  const names = (s: ReturnType<typeof setup>, ...items: [string, number][]) => findNvrs(s.plan(...items), s.rows, s.map).options.map((o) => `${o.label}: ${o.qty} × ${o.row.product.slug}`)
+  const names = (s: ReturnType<typeof setup>, ...items: [string, number][]) => findNvrs(s.plan(...items), s.rows, s.map).options.map((o) => `${o.label}: ${o.row.product.slug}`)
 
-  it('offers the cheapest that has room, the one with the most room, and a cheaper one that is out of stock', () => {
+  it('offers the cheapest that has room, and a cheaper one that is out of stock', () => {
     const s = setup([small, UNVR, big, gone, cam('c4k', 8.3)])
-    // 7 4K cameras: too many for one small (6), so two of those, which cost less than twice the UNVR and have the most room. The big one is over that.
-    expect(names(s, ['c4k', 7])).toEqual(['Cheapest that fits: 1 × unvr', 'Most room to spare: 2 × small', 'Cheaper, but not in stock: 1 × gone'])
+    // 7 4K cameras: too many for the small (6). The UNVR is the cheapest in stock that holds them; the big one is dearer.
+    expect(names(s, ['c4k', 7])).toEqual(['Cheapest that fits: unvr', 'Cheaper, but not in stock: gone'])
   })
 
-  it('suggests several of one when that is the way', () => {
+  it('never suggests several of one NVR', () => {
     const s = setup([small, cam('c4k', 8.3)])
-    expect(names(s, ['c4k', 11])).toEqual(['Cheapest that fits: 2 × small'])
+    expect(findNvrs(s.plan(['c4k', 11]), s.rows, s.map)).toEqual({ options: [], all: [] }) // two smalls would hold them, but one is all we try
   })
 
   it('counts an NVR already in the plan, so only the shortfall is made up', () => {
     const s = setup([small, UNVR, cam('c4k', 8.3)])
     const { options } = findNvrs(s.plan(['small', 1], ['c4k', 8]), s.rows, s.map) // the small holds 6; another small covers the rest
-    expect(options[0]).toMatchObject({ qty: 1 })
     expect(options[0]?.row.product.slug).toBe('small')
   })
 
   it('lists them all and offers nothing when no NVR does', () => {
     const s = setup([small, UNVR, cam('c4k', 8.3)])
-    expect(findNvrs(s.plan(['c4k', 7]), s.rows, s.map).all.map((o) => `${o.qty} × ${o.row.product.slug}`)).toEqual(['1 × unvr', '2 × small'])
+    expect(findNvrs(s.plan(['c4k', 7]), s.rows, s.map).all.map((o) => o.row.product.slug)).toEqual(['unvr'])
     expect(findNvrs(s.plan(['c4k', 99]), s.rows, s.map)).toEqual({ options: [], all: [] })
   })
 
@@ -207,7 +214,7 @@ describe('findNvrs', () => {
     const udr = { ...nvr('udr', 20000, [5, 2, 1]), category: 'cloud-gateways-wifi-integrated' }
     const s = setup([udr, cam('c4k', 8.3)])
     const { options } = findNvrs(s.plan(['c4k', 1]), s.rows, s.map)
-    expect(options).toMatchObject([{ qty: 1, alsoGateway: true }])
+    expect(options).toMatchObject([{ alsoGateway: true }])
     expect(findNvrs(s.plan(['c4k', 2]), s.rows, s.map).options).toEqual([]) // two of a gateway aren't suggested
   })
 
