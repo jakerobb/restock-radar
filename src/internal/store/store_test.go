@@ -832,3 +832,33 @@ func TestHistoryWindowStartingInAGapOpensBlank(t *testing.T) {
 	}
 	t.Fatal("no history for v1")
 }
+
+// A product the store lists in categories of two types keeps the higher-priority
+// one, whichever page was read last.
+func TestCategoryPriorityAcrossPolls(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	for _, order := range [][]string{
+		{"physical-security-nvr", "door-access-nvrs"},
+		{"door-access-nvrs", "physical-security-nvr"},
+	} {
+		s := openTest(t)
+		for i, cat := range order {
+			p := product("Available", 32900)
+			p.Category = cat
+			var err error
+			if i == 0 {
+				_, err = s.Discover(ctx, "us", p, false, now)
+			} else {
+				_, err = s.Apply(ctx, "us", p, now.Add(time.Duration(i)*time.Minute))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		items, err := s.Items(ctx)
+		if err != nil || len(items) != 1 || items[0].Category != "physical-security-nvr" {
+			t.Errorf("read in order %v: category = %+v, err=%v; want physical-security-nvr", order, items, err)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/jakerobb/restock-radar/internal/category"
 	"github.com/jakerobb/restock-radar/internal/unistore"
 )
 
@@ -623,9 +624,16 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 		t := ts(now)
 		detailedAt = &t
 	}
-	var storedTypes string
-	if err := tx.QueryRowContext(ctx, `SELECT surcharge_types FROM products WHERE region = ? AND id = ?`, region, p.ID).Scan(&storedTypes); err != nil && err != sql.ErrNoRows {
+	var storedTypes, storedCategory string
+	if err := tx.QueryRowContext(ctx, `SELECT surcharge_types, category FROM products WHERE region = ? AND id = ?`, region, p.ID).Scan(&storedTypes, &storedCategory); err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("reading product: %w", err)
+	}
+	// The store may list a product in categories of several types (every NVR is
+	// under both Cameras & Security and Door Access), and each poll sees only one
+	// page's view of it. Keep the stored category unless this one outranks it.
+	cat := p.Category
+	if !category.Beats(p.Category, storedCategory) {
+		cat = storedCategory
 	}
 	// Unknown (nil) on either side means there's nothing to compare.
 	oldTypes, newTypes := parseTypes(storedTypes), p.SurchargeTypes
@@ -640,7 +648,7 @@ func applyTx(ctx context.Context, tx *sql.Tx, region string, p *unistore.Product
 			tags = CASE WHEN excluded.tags = '' THEN products.tags ELSE excluded.tags END,
 			collection = CASE WHEN excluded.collection = '' THEN products.collection ELSE excluded.collection END,
 			surcharge_types = CASE WHEN excluded.surcharge_types = '' THEN products.surcharge_types ELSE excluded.surcharge_types END`,
-		region, p.ID, p.Slug, p.Name, p.Title, p.Category, tags, p.Collection, surcharges, p.ShortTitle, p.Group, detailedAt)
+		region, p.ID, p.Slug, p.Name, p.Title, cat, tags, p.Collection, surcharges, p.ShortTitle, p.Group, detailedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting product: %w", err)
 	}

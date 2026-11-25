@@ -11,6 +11,8 @@ func TestProductType(t *testing.T) {
 		"door-access-readers":           "Door Access",
 		"internet-solutions":            "Internet",
 		"network-storage":               "Storage",
+		"managed-voip":                  "VoIP",
+		"premium-iot":                   "Premium IoT",
 		"integrations-power-tech":       "Integrations",
 		"accessories-storage":           "Accessories",
 		"":                              "",
