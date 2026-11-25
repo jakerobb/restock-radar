@@ -710,8 +710,19 @@ describe('A plan from another region than the picked one', () => {
     renderRoute('/plan')
 
     expect(await screen.findByText('This plan is made of Europe store products, but your region is set to United States.')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Convert to United States' }))
+    const buttons = within(screen.getByRole('status')).getAllByRole('button').map((b) => b.textContent)
+    expect(buttons).toEqual(['Switch region to Europe', 'Convert plan to United States']) // the switch first, and not the call to action
+    await userEvent.click(screen.getByRole('button', { name: 'Convert plan to United States' }))
     expect(within(screen.getByRole('dialog', { name: 'Convert this plan' })).getByRole('combobox')).toHaveValue('us')
+  })
+
+  it('switches the region to the plan\'s from the banner', async () => {
+    serve()
+    setPlan([line({ ref: 'eu/switch', sku: 'SW-8-EU', qty: 1, addedCents: null })])
+    renderRoute('/plan')
+    await userEvent.click(await screen.findByRole('button', { name: 'Switch region to Europe' }))
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    expect(localStorage.getItem('restock-radar.region')).toBe('eu')
   })
 
   it('says nothing when the plan is in the picked region', async () => {
