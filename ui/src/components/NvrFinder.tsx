@@ -5,7 +5,8 @@ import { buildCatalog } from '../lib/catalog'
 import { productRef } from '../lib/compare'
 import { formatPrice } from '../lib/format'
 import { isFiltering, mountLines, NO_FILTERS } from '../lib/finderFilters'
-import { findNvrs, MAX_NVRS, type ListedNvr } from '../lib/nvrFinder'
+import { CLASS_LABEL } from '../lib/nvrChecks'
+import { findNvrs, type ListedNvr } from '../lib/nvrFinder'
 import { lineFor, type PlanLine } from '../lib/plan'
 import type { DerivedLine } from '../lib/planChecks'
 import { FinderFilterBar } from './FinderFilterBar'
@@ -20,7 +21,7 @@ function facts(o: ListedNvr): string {
   const poe = metric(o.row.derived, 'poe_budget_w')
   const poePorts = (o.row.derived?.ports ?? []).filter((p) => p.poe_class !== '' && p.poe_direction === 'out').reduce((n, p) => n + p.count, 0)
   return [
-    `${Math.round(o.spare * 100)}% of an NVR's camera capacity to spare`,
+    `room for ${o.room} more ${CLASS_LABEL[o.benchmark]} camera${o.room === 1 ? '' : 's'}`,
     poe !== null && `has its own PoE switch: ${poe} W${poePorts > 0 ? ` over ${poePorts} ports` : ''}`,
   ]
     .filter(Boolean)
@@ -33,7 +34,6 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
       <div className="min-w-0 flex-1 basis-56 text-sm">
         {label && <div className="text-xs font-medium tracking-wide text-muted uppercase">{label}</div>}
         <div className="mt-0.5">
-          {o.qty > 1 && `${o.qty} × `}
           <Link to="/p/$region/$slug" params={{ region: o.row.product.region, slug: o.row.product.slug }} className="text-accent underline-offset-2 hover:underline">
             {o.row.product.title}
           </Link>
@@ -50,9 +50,9 @@ function NvrRow({ o, label, onAdd }: { o: ListedNvr; label?: string; onAdd: (lin
       <Button
         variant="secondary"
         className="shrink-0 py-1 text-sm"
-        aria-label={`Add ${o.qty > 1 ? `${o.qty} × ` : ''}${o.row.product.title} to the plan`}
+        aria-label={`Add ${o.row.product.title} to the plan`}
         onClick={() => {
-          const line = lineFor(o.row.product, o.qty)
+          const line = lineFor(o.row.product, 1)
           if (line) onAdd([line, ...mountLines(o.mounts)], o.replaces.map((l) => l.view.line))
         }}
       >
@@ -83,7 +83,7 @@ export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: D
       <p className="mt-1 text-sm text-muted">Each is added to what's already in the plan, so an NVR you have already chosen still counts. Only the number of cameras is considered, not storage.</p>
       <FinderFilterBar filters={filters} onChange={setFilters} />
       {found.options.length === 0 ? (
-        <p className="mt-3 text-sm">No NVR we track{isFiltering(filters) ? ' that fits the filters' : ''}, even {MAX_NVRS} of one, has room for these cameras.</p>
+        <p className="mt-3 text-sm">No NVR we track{isFiltering(filters) ? ' that fits the filters' : ''}, has room for these cameras.</p>
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {found.options.map((o) => (
@@ -96,7 +96,7 @@ export function NvrFinder({ plan, products, derived, onAdd, onClose }: { plan: D
           <summary className="cursor-pointer text-muted">{found.all.length} NVRs would work in all</summary>
           <ul className="mt-1 divide-y divide-line">
             {found.all.map((o) => (
-              <NvrRow key={`${o.row.product.region}/${o.row.product.slug}/${o.qty}`} o={o} onAdd={onAdd} />
+              <NvrRow key={`${o.row.product.region}/${o.row.product.slug}`} o={o} onAdd={onAdd} />
             ))}
           </ul>
         </details>
