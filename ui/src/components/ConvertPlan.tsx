@@ -53,7 +53,7 @@ export function ConvertPlan({ name, lines, hosting, powering, products, regions,
           setOpen(true)
         }}
       >
-        {cta ? `Convert to ${regionName(suggested)}` : 'Convert to another region'}
+        {cta ? `Convert plan to ${regionName(suggested)}` : 'Convert to another region'}
       </Button>
       {open && conversion && (
         <Dialog title="Convert this plan" size="wide" onClose={() => setOpen(false)}>

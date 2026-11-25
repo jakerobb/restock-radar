@@ -508,7 +508,7 @@ export default function PlanPage() {
   const { data: productData, isPending, isError } = useProducts()
   const { data: derived } = useDerived()
   const { data: gaps } = useSpecsGaps()
-  const { region } = useRegion()
+  const { region, setRegion } = useRegion()
   // What can be added is what the chosen store sells; the plan itself may hold lines from any.
   const offered = useMemo(() => inRegion(productData?.products ?? [], region), [productData?.products, region])
   const [confirmClear, setConfirmClear] = useState(false)
@@ -610,16 +610,23 @@ export default function PlanPage() {
       {productData && regionState.kind !== 'none' && regionState.kind !== 'match' && (
         <RegionBanner
           actions={
-            <ConvertPlan
-              cta
-              name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name}
-              lines={lines}
-              hosting={hosting}
-              powering={powering}
-              products={productData.products}
-              regions={productData.regions}
-              suggested={region}
-            />
+            <>
+              {regionState.region !== region && (
+                <Button variant="secondary" className="py-1 text-sm" onClick={() => setRegion(regionState.region)}>
+                  Switch region to {regionName(regionState.region)}
+                </Button>
+              )}
+              <ConvertPlan
+                cta
+                name={shared ? (decoded?.name ?? DEFAULT_PLAN_NAME) : mine.name}
+                lines={lines}
+                hosting={hosting}
+                powering={powering}
+                products={productData.products}
+                regions={productData.regions}
+                suggested={region}
+              />
+            </>
           }
         >
           {regionState.kind === 'elsewhere'
