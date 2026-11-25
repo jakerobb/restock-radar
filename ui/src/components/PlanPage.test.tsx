@@ -762,6 +762,7 @@ describe('Adding to a plan from another region than the picked one', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Switch to Europe' }))
     await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Add a product' })).queryByText(/Your region is set to/)).not.toBeInTheDocument())
     expect(localStorage.getItem('restock-radar.region')).toBe('eu')
+    expect(screen.getByRole('combobox', { name: 'Search products to add' })).toHaveFocus()
   })
 
   it('does not warn when the plan agrees with the picker, or is empty', async () => {

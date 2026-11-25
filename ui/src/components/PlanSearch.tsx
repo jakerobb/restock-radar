@@ -31,6 +31,7 @@ export function PlanSearch({ products, inPlan, refs, onAdd, onClose }: { product
   const [active, setActive] = useState(0)
   const [added, setAdded] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const matches = useMemo(() => searchProducts(products, query), [products, query])
   const shown = matches.slice(0, MAX_RESULTS)
   const current = Math.min(active, shown.length - 1)
@@ -63,8 +64,9 @@ export function PlanSearch({ products, inPlan, refs, onAdd, onClose }: { product
 
   return (
     <Dialog title="Add a product" onClose={onClose}>
-      <PlanRegionNotice refs={refs} />
+      <PlanRegionNotice refs={refs} onSwitched={() => inputRef.current?.focus()} />
       <TextInput
+        ref={inputRef}
         data-autofocus
         className="w-full"
         role="combobox"
